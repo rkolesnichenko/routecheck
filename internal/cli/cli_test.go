@@ -623,10 +623,10 @@ func TestGroups(t *testing.T) {
 	}
 }
 
-// TestDraftChecked: a -policy draft that does not decode cleanly, holds an
-// object routecheck cannot use, or supplies no aut-num or inet-rtr fails the
-// run (exit 3) naming the file and the object; its diagnostics are written
-// to stderr.
+// TestDraftChecked: a -policy draft whose aut-num or inet-rtr does not
+// decode cleanly, or that supplies no aut-num and no inet-rtr, fails the run
+// (exit 3) naming the file and the object; its diagnostics are written to
+// stderr (ruling R17).
 func TestDraftChecked(t *testing.T) {
 	for _, tc := range []struct {
 		name, text string
@@ -637,7 +637,7 @@ func TestDraftChecked(t *testing.T) {
 		{"bad key", "aut-num: AS6449x\nimport: from AS64500 accept AS64500\nsource: TEST\n",
 			[]string{"invalid ASN", "aut-num AS6449x"}},
 		{"unknown class", "aut-nm: AS64496\nimport: from AS64500 accept AS64500\nsource: TEST\n",
-			[]string{"aut-nm AS64496", "not an object routecheck uses"}},
+			[]string{"aut-nm AS64496 skipped", "no aut-num and no inet-rtr"}},
 		{"no aut-num", "route: 192.0.2.0/24\norigin: AS64500\nsource: TEST\n",
 			[]string{"no aut-num and no inet-rtr"}},
 	} {
@@ -655,6 +655,42 @@ func TestDraftChecked(t *testing.T) {
 				wantContains(t, reg[0]+" stderr", stderr, append([]string{draft}, tc.wants...)...)
 			}
 		})
+	}
+}
+
+// TestDraftSkips: objects of a class routecheck does not use, and sets
+// (which always come from the registry), are skipped with a warning; the
+// draft's aut-num still answers first. A draft object with no source: is
+// named without one.
+func TestDraftSkips(t *testing.T) {
+	draft := write(t, "draft.txt", []byte(`mntner: MNT-DRAFT
+auth: BCRYPT-PW $2a$12$xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+source: TEST
+
+route-set: RS-BROKEN
+members: 192.0.2.0/33
+source: TEST
+
+as-set: AS-DRAFT
+members: AS64500
+source: TEST
+
+aut-num: AS64496
+import: from AS64500 accept AS64500
+`))
+	code, out, stderr := run(t, "-local", "AS64496", "-peer", "AS64500", "-session", capture, "-dump", registry,
+		"-policy", draft, "-af", "ipv4", "-direction", "import")
+	if code != exitRejected {
+		t.Fatalf("exit %d; stderr %s", code, stderr)
+	}
+	wantContains(t, "stderr", stderr,
+		draft+": mntner MNT-DRAFT skipped: routecheck does not use this class",
+		draft+": route-set RS-BROKEN skipped: sets come from the registry",
+		draft+": as-set AS-DRAFT skipped: sets come from the registry")
+	wantContains(t, "stdout", out, "policy: -policy "+draft+": aut-num AS64496 answers first\n",
+		"from AS64500 accept AS64500", "1 accepted, 4 rejected")
+	if strings.Contains(out, "()") {
+		t.Errorf("empty parentheses:\n%s", out)
 	}
 }
 

@@ -158,13 +158,16 @@ routecheck/
   CLI wraps the registry's `PolicySource` so that `AutNum` and `InetRtr`
   answer from the file first (ruling R15; a draft written with another
   `source:` than the registry's would otherwise lose to the registry's
-  object). Sets come from the registry: with dumps the file's objects are
-  also `Put` into the Corpus after the dumps, replacing an object of the
-  same class, key and source, so its sets join the dumps'; with `-irrd`
-  sets always come from the server. The file is checked (ruling R16): its
-  parse and decode diagnostics are written to stderr, and an object with an
-  error, one the Corpus keeps nothing of, or a file with no aut-num and no
-  inet-rtr fails the run, naming the file and the object.
+  object). With dumps its aut-nums, inet-rtrs and routes are also `Put`
+  into the Corpus after the dumps, replacing an object of the same class,
+  key and source. Sets always come from the registry: a set object in the
+  file (as-set, route-set, filter-set, peering-set, rtr-set) is skipped with
+  a warning, broken or not, as is an object of a class routecheck does not
+  use (mntner, person, role, …) and, with `-irrd`, a route (rulings R16,
+  R17). The file is checked: its parse and decode diagnostics are written
+  to stderr, and an aut-num or inet-rtr with an error or one the Corpus
+  keeps nothing of, or a file with no aut-num and no inet-rtr, fails the
+  run, naming the file and the object.
 - **Routes.** Session mode: one or more MRT files of BGP4MP messages
   (§6.2). Collector mode: one or more MRT RIB dumps (§6.3). Compressed
   files through `mrt.Decompress`.

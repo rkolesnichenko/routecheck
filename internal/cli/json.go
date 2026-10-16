@@ -17,11 +17,17 @@ import (
 // readable:
 //
 //   - a policy is its clauses as {Index, Term, Filter}: the attribute's
-//     position (peval's Clause.Index, 0-based), the term as written ("from
-//     AS1 accept AS-X") and its normalized filter (resolve.NormalFilter's
-//     String: prefix ranges, regexps, community tests); and its undecided
-//     terms as {Index, Term, Why}. The expanded sets inside a filter (they
-//     can be millions of prefixes) and the clause's actions are left out;
+//     position (peval's Clause.Index, 0-based: the import:/mp-import: or
+//     export:/mp-export: attribute the clause comes from), the term as
+//     written ("from AS1 accept AS-X") and its normalized filter
+//     (resolve.NormalFilter's String: prefix ranges, regexps, community
+//     tests); and its undecided terms as {Index, Term, Why}. The expanded
+//     sets inside a filter (they can be millions of prefixes) and peval's
+//     Clause.Actions and Clause.Remote are left out. A clause's Index is not
+//     its position: Verdict.Clause, Verdict.EarlierUndecided, Fails[].Clause
+//     and Reasons[].Clause are positions in the Clauses array (0-based), and
+//     one attribute with REFINE or EXCEPT gives several clauses of one
+//     Index;
 //   - an outcome is "accepted", "rejected" or "undecided"; an RPKI state
 //     "valid", "invalid" or "not_found" (rpki.State's String);
 //   - communities are "hi:lo"; missing sets are their names.

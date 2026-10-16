@@ -110,20 +110,21 @@ func irrdAddr(s string) string {
 // resolve.Corpus that keeps policy objects, in the order given; the source
 // precedence is the order in which each source: first appears in them, so an
 // object of the first dump's registry wins over another registry's. -policy
-// is read last into the same Corpus, so its objects replace any of the same
-// class, primary key and source (its new sources rank last).
+// is read last into the same Corpus (its aut-nums, inet-rtrs and routes), so
+// its objects replace any of the same class, primary key and source (its new
+// sources rank last).
 //
 // With -irrd the server is an irrd.Source with -sources as its precedence.
 //
 // Either way, -policy's aut-nums and inet-rtrs answer before the registry's,
 // under any source (spec §5): a draft written with another source: than the
-// registry's is still the one checked. Its sets reach the policy only with
-// -dump; with -irrd sets always come from the server.
+// registry's is still the one checked. Sets always come from the registry
+// (readDraft skips a draft's sets).
 func loadPolicy(cfg *config, stderr io.Writer) (resolve.PolicySource, func(), error) {
 	var d *draft
 	if cfg.policyFile != "" {
 		var err error
-		if d, err = readDraft(cfg.policyFile, stderr); err != nil {
+		if d, err = readDraft(cfg.policyFile, len(cfg.dumps) > 0, stderr); err != nil {
 			return nil, nil, err
 		}
 		cfg.draftSupplies = d.supplies
@@ -168,19 +169,27 @@ func loadPolicy(cfg *config, stderr io.Writer) (resolve.PolicySource, func(), er
 
 // draft is a -policy file, read and checked.
 type draft struct {
-	objs     []rpsl.Object
-	corpus   *resolve.Corpus // the file's objects alone
-	sources  []string        // the file's sources, in first-seen order
-	supplies []string        // "aut-num AS64496 (TEST)", "inet-rtr rtr1.example.net (TEST)"
+	objs     []rpsl.Object   // what joins the dumps: aut-nums, inet-rtrs and (with -dump) routes
+	corpus   *resolve.Corpus // the file's aut-nums and inet-rtrs alone
+	sources  []string        // their sources, in first-seen order
+	supplies []string        // "aut-num AS64496 (TEST)", "inet-rtr rtr1.example.net"
 }
 
-// readDraft reads a -policy file. Every parse and decode diagnostic is
-// written to stderr. The file fails the run, naming it and the object, when
-// an object raises an Error (it would be checked misread: a typo in a
-// policy turns "accept" into a router name), when routecheck keeps nothing
-// of an object (an unknown class, a key that does not parse), or when the
-// file supplies no aut-num and no inet-rtr (it would change nothing).
-func readDraft(name string, stderr io.Writer) (*draft, error) {
+// setClasses are the set classes: in a draft they are skipped, since sets
+// always come from the registry (rulings R15, R17).
+var setClasses = map[string]bool{"as-set": true, "route-set": true, "filter-set": true, "peering-set": true, "rtr-set": true}
+
+// readDraft reads a -policy file (ruling R17). Every parse and decode
+// diagnostic is written to stderr. What the draft supplies is its aut-nums
+// and inet-rtrs; the run fails, naming the file and the object, when one of
+// them raises an Error (it would be checked misread: a typo in a policy
+// turns "accept" into a router name) or is not kept (a key that does not
+// parse), and when the file supplies none (it would change nothing). Every
+// other object is skipped with a warning, broken or not: a set (sets come
+// from the registry), a class routecheck does not use (mntner, person, …),
+// and a route or route6 with -irrd (routes come from the server) or with an
+// error. With -dump a clean route or route6 joins the dumps.
+func readDraft(name string, withDumps bool, stderr io.Writer) (*draft, error) {
 	d := &draft{corpus: &resolve.Corpus{KeepPolicy: true}}
 	var bad error
 	err := readRPSL(name, func(o rpsl.Object, class, key, source string, diags []rpsl.Diagnostic) {
@@ -189,27 +198,53 @@ func readDraft(name string, stderr io.Writer) (*draft, error) {
 			fmt.Fprintf(stderr, "routecheck: %s:%s\n", name, dg)
 			failed = failed || dg.Severity >= rpsl.Error
 		}
-		what := strings.ToLower(class) + " " + key
+		class = strings.ToLower(class)
+		what := class + " " + key
+		skip := func(why string) { fmt.Fprintf(stderr, "routecheck: %s: %s skipped: %s\n", name, what, why) }
 		switch {
 		case bad != nil:
 			return
-		case failed:
-			bad = fmt.Errorf("%s: %s does not decode cleanly (see the diagnostics above)", name, what)
+		case class == "aut-num" || class == "inet-rtr":
+			if failed {
+				bad = fmt.Errorf("%s: %s does not decode cleanly (see the diagnostics above)", name, what)
+				return
+			}
+			if !d.corpus.Put(o) {
+				bad = fmt.Errorf("%s: %s is not kept: its key does not parse", name, what)
+				return
+			}
+		case setClasses[class]:
+			skip("sets come from the registry")
 			return
-		case !d.corpus.Put(o):
-			bad = fmt.Errorf("%s: %s is not an object routecheck uses", name, what)
+		case class == "route" || class == "route6":
+			switch {
+			case !withDumps:
+				skip("with -irrd, routes come from the server")
+			case failed:
+				skip("it does not decode cleanly")
+			default:
+				d.objs = append(d.objs, o)
+			}
+			return
+		default:
+			skip("routecheck does not use this class")
 			return
 		}
 		d.objs = append(d.objs, o)
 		if source != "" && !slices.Contains(d.sources, source) {
 			d.sources = append(d.sources, source)
 		}
+		label := what
 		switch x := o.(type) {
 		case *object.AutNum:
-			d.supplies = append(d.supplies, fmt.Sprintf("aut-num %s (%s)", x.AS, source))
+			label = "aut-num " + x.AS.String()
 		case *object.InetRtr:
-			d.supplies = append(d.supplies, fmt.Sprintf("inet-rtr %s (%s)", x.Name, source))
+			label = "inet-rtr " + x.Name
 		}
+		if source != "" {
+			label += " (" + source + ")"
+		}
+		d.supplies = append(d.supplies, label)
 	})
 	switch {
 	case err != nil:

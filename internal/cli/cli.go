@@ -54,11 +54,12 @@ The policy comes from IRR dump files (-dump; when two registries hold an
 object, the one whose source: appears first in the dumps, in the order
 given, wins) or a live IRRd (-irrd, with -sources its precedence). -policy
 adds a local RPSL file, a draft not yet published: its aut-nums and
-inet-rtrs answer before the registry's, under any source; with -dump its
-other objects join the dumps' (replacing one of the same class, key and
-source), with -irrd sets always come from the server. Its diagnostics are
-written to stderr; an object with an error, an object routecheck keeps
-nothing of, or a file with no aut-num and no inet-rtr fails the run.
+inet-rtrs answer before the registry's, under any source. Sets always come
+from the registry: a draft's sets are skipped with a warning, as are objects
+of classes routecheck does not use (mntner, person, ...); with -dump the
+draft's routes join the dumps', with -irrd they are skipped. Its diagnostics
+are written to stderr; an aut-num or inet-rtr with an error, and a file with
+no aut-num and no inet-rtr, fail the run.
 
 In session mode -local defaults to the capture's local AS. When most routes
 seen do not start with X - the announcements skipped for it outnumber the
