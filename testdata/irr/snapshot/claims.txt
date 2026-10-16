@@ -1,0 +1,49 @@
+aut-num:   AS64504
+as-name:   CLAIM-OK
+member-of: AS-CLAIMED
+mnt-by:    MNT-OK
+source:    TEST
+
+aut-num:   AS64505
+as-name:   CLAIM-WRONG-MNTNER
+member-of: AS-CLAIMED
+mnt-by:    MNT-OTHER
+source:    TEST
+
+aut-num:   AS64506
+as-name:   CLAIM-OTHER-SOURCE
+member-of: AS-CLAIMED
+mnt-by:    MNT-OK
+source:    RADB
+
+aut-num:   AS64507
+as-name:   CLAIM-ANY
+member-of: AS-ANYREF
+mnt-by:    MNT-WHATEVER
+source:    TEST
+
+route:     198.51.100.128/25
+origin:    AS64503
+member-of: RS-CLAIMED
+mnt-by:    MNT-OK
+source:    TEST
+
+route6:    2001:db8:4::/48
+origin:    AS64503
+member-of: RS-CLAIMED
+mnt-by:    MNT-OK
+source:    TEST
+
+route:     203.0.113.128/25
+origin:    AS64503
+member-of: RS-CLAIMED
+mnt-by:    MNT-OTHER
+remarks:   wrong maintainer: not a member
+source:    TEST
+
+route:     198.51.100.64/26
+origin:    AS64503
+member-of: RS-CLAIMED
+mnt-by:    MNT-OK
+remarks:   another source: not a member
+source:    RADB

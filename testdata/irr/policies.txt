@@ -1,0 +1,29 @@
+aut-num:   AS64496
+as-name:   BGPQ4-DIFFERENTIAL
+remarks:   One term per as-set and route-set of snapshot/, in each family:
+remarks:   import: for IPv4, mp-import: afi ipv6.unicast for IPv6.
+import:    from AS64500 accept AS-EXAMPLE
+import:    from AS64500 accept AS-DOWNSTREAM
+import:    from AS64500 accept AS-EXAMPLE-LIST
+import:    from AS64500 accept AS-CLAIMED
+import:    from AS64500 accept AS-ANYREF
+import:    from AS64500 accept AS-PRECEDENCE
+import:    from AS64500 accept AS-WITH-MISSING
+import:    from AS64500 accept RS-EXAMPLE
+import:    from AS64500 accept RS-RANGES
+import:    from AS64500 accept RS-V6
+import:    from AS64500 accept RS-NESTED
+import:    from AS64500 accept RS-CLAIMED
+mp-import: afi ipv6.unicast from AS64500 accept AS-EXAMPLE
+mp-import: afi ipv6.unicast from AS64500 accept AS-DOWNSTREAM
+mp-import: afi ipv6.unicast from AS64500 accept AS-EXAMPLE-LIST
+mp-import: afi ipv6.unicast from AS64500 accept AS-CLAIMED
+mp-import: afi ipv6.unicast from AS64500 accept AS-ANYREF
+mp-import: afi ipv6.unicast from AS64500 accept AS-PRECEDENCE
+mp-import: afi ipv6.unicast from AS64500 accept AS-WITH-MISSING
+mp-import: afi ipv6.unicast from AS64500 accept RS-EXAMPLE
+mp-import: afi ipv6.unicast from AS64500 accept RS-RANGES
+mp-import: afi ipv6.unicast from AS64500 accept RS-V6
+mp-import: afi ipv6.unicast from AS64500 accept RS-NESTED
+mp-import: afi ipv6.unicast from AS64500 accept RS-CLAIMED
+source:    TEST
