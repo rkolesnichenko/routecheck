@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/netip"
 	"sync"
+	"sync/atomic"
 
 	"github.com/rkolesnichenko/routecheck/verdict"
 	"github.com/rkolesnichenko/rpsl/resolve"
@@ -36,6 +37,8 @@ func afiFits(afi types.AFI, p netip.Prefix) bool {
 type Checker struct {
 	VRPs *rpki.VRPs     // nil: RPKI answers nil
 	Src  resolve.Source // nil: RouteObject answers nil
+
+	waiting atomic.Int64 // calls that began waiting behind a read; tests synchronize on it
 
 	mu    sync.Mutex
 	cache map[originKey]*originRoutes
@@ -105,6 +108,7 @@ func (c *Checker) routes(ctx context.Context, k originKey) (*originRoutes, error
 		c.mu.Lock()
 		if e, ok := c.cache[k]; ok {
 			c.mu.Unlock()
+			c.waiting.Add(1)
 			select {
 			case <-e.done:
 			case <-ctx.Done():

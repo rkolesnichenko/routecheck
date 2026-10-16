@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"net/netip"
-	"runtime"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -242,11 +241,7 @@ func TestRouteObjectCancelledLeader(t *testing.T) {
 		b, err := c.RouteObject(context.Background(), r, types.AFIv4)
 		waiter <- res{b, err}
 	}()
-	// Let the second caller reach the wait: it must not start a read itself.
-	for i := 0; i < 100; i++ {
-		runtime.Gosched()
-		time.Sleep(time.Millisecond)
-	}
+	awaitWaiters(t, c, 1) // it is parked behind the leader's read
 	if n := g.calls.Load(); n != 1 {
 		t.Fatalf("reads before cancel = %d, want 1", n)
 	}
@@ -254,7 +249,11 @@ func TestRouteObjectCancelledLeader(t *testing.T) {
 	if err := <-leaderErr; !errors.Is(err, context.Canceled) {
 		t.Fatalf("leader: %v, want context.Canceled", err)
 	}
-	<-g.started // the waiter became the new leader
+	select {
+	case <-g.started: // the waiter became the new leader
+	case <-time.After(5 * time.Second):
+		t.Fatal("the waiter did not start its own read")
+	}
 	close(g.release)
 	got := <-waiter
 	if got.err != nil || got.b == nil || !*got.b {
@@ -308,5 +307,68 @@ func TestRouteObjectPanicNotCached(t *testing.T) {
 	got, err := c.RouteObject(context.Background(), r, types.AFIv4)
 	if err != nil || got == nil || !*got {
 		t.Fatalf("after panic: got %v, %v (an empty set was cached?)", got, err)
+	}
+}
+
+// awaitWaiters blocks until n calls have parked behind a read.
+func awaitWaiters(t *testing.T, c *Checker, n int64) {
+	t.Helper()
+	for i := 0; i < 5000; i++ {
+		if c.waiting.Load() >= n {
+			return
+		}
+		time.Sleep(time.Millisecond)
+	}
+	t.Fatalf("no waiter parked (waiting=%d, want %d)", c.waiting.Load(), n)
+}
+
+// gatedPanic blocks the first read until released, then panics; later reads
+// answer from the wrapped source.
+type gatedPanic struct {
+	resolve.Source
+	calls   atomic.Int64
+	started chan struct{}
+	release chan struct{}
+}
+
+func (g *gatedPanic) OriginatedRoutes(ctx context.Context, as types.ASN, afi types.AFI) ([]netip.Prefix, error) {
+	if g.calls.Add(1) == 1 {
+		g.started <- struct{}{}
+		<-g.release
+		panic("source bug")
+	}
+	return g.Source.OriginatedRoutes(ctx, as, afi)
+}
+
+func TestRouteObjectPanickingLeaderWithWaiter(t *testing.T) {
+	g := &gatedPanic{Source: memSource(t), started: make(chan struct{}, 1), release: make(chan struct{})}
+	c := &Checker{Src: g}
+	r := route("192.0.2.0/24", 1, 64500)
+	leaderDone := make(chan any, 1)
+	go func() {
+		defer func() { leaderDone <- recover() }()
+		c.RouteObject(context.Background(), r, types.AFIv4)
+	}()
+	<-g.started
+	type res struct {
+		b   *bool
+		err error
+	}
+	waiter := make(chan res, 1)
+	go func() {
+		b, err := c.RouteObject(context.Background(), r, types.AFIv4)
+		waiter <- res{b, err}
+	}()
+	awaitWaiters(t, c, 1)
+	close(g.release)
+	if v := <-leaderDone; v == nil {
+		t.Error("panic did not reach the leader's caller")
+	}
+	got := <-waiter
+	if got.err != nil || got.b == nil || !*got.b {
+		t.Fatalf("waiter: %v, %v", got.b, got.err)
+	}
+	if n := g.calls.Load(); n != 2 {
+		t.Errorf("reads = %d, want 2", n)
 	}
 }
