@@ -314,7 +314,7 @@ func (r *replay) ribEntry(addr netip.Addr, k key, attrs bgp.Attrs, t time.Time) 
 	s.ribBaseline(r.ribGen)
 	s.down = false // an entry for the peer: the session holds this route now
 	p, d := attrs.Decode()
-	if classify(nil, d, facts{reachable: true, otherAttrs: true}) != dispOK {
+	if ribMalformed(d) {
 		delete(s.routes, k)
 		r.info.Malformed++
 		return

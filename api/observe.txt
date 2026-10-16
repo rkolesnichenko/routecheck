@@ -1,7 +1,16 @@
 package observe
 var ErrRIBNotPrePolicy = errors.New(…)
+func Collector(records iter.Seq2[mrt.Record, error], x types.ASN) (iter.Seq2[Observation, error], func() CollectorInfo)
 func Route(prefix netip.Prefix, p *bgp.Path, commsKnown bool) verdict.Route
 func Session(records iter.Seq2[mrt.Record, error], sel SessionSel) (iter.Seq2[Observation, error], func() SessionInfo)
+type CollectorInfo struct
+	Entries int
+	Malformed int
+	Skipped int
+	Through int
+	NotSequence int
+	Direct int
+	NoNeighbour int
 type Evidence struct
 	Neighbours []types.ASN
 	Direct bool

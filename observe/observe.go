@@ -16,7 +16,7 @@ type Evidence struct {
 	Neighbours     []types.ASN // collector mode: the ASes X announced it to, sorted
 	Direct         bool        // collector mode: X is a collector's own peer
 	CollectorPeers int         // collector mode: collector peers it was seen through
-	Time           time.Time   // when it was announced (a RIB entry: when it was learned)
+	Time           time.Time   // session mode: when it was announced (a RIB entry: when it was learned); collector mode: the latest dump record it was seen in
 	PeerAddr       netip.Addr  // session mode: the session's peer address; zero in collector mode
 }
 
@@ -189,4 +189,13 @@ func classify(upd, attrs []bgp.Diagnostic, f facts) disposition {
 		return dispReset // §5.2
 	}
 	return d
+}
+
+// ribMalformed reports whether RFC 7606 keeps no route from a RIB entry whose
+// attributes decoded with diagnostics d (classify with the attribute
+// diagnostics only). An entry is one route with no session to reset, so a
+// treat-as-withdraw and a reset both drop it. Session mode withdraws its key;
+// collector mode skips it (ruling R11 c).
+func ribMalformed(d []bgp.Diagnostic) bool {
+	return classify(nil, d, facts{reachable: true, otherAttrs: true}) != dispOK
 }

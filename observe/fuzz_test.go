@@ -12,9 +12,11 @@ import (
 	"github.com/rkolesnichenko/rpsl/types"
 )
 
-// FuzzObserve replays arbitrary MRT bytes. Session must never panic, and what
-// it yields must hold its own promises: observations in order, each starting
-// with X, none when every session is down, and an error only alone.
+// FuzzObserve replays arbitrary MRT bytes through Session and Collector. Neither
+// may panic, and what each yields must hold its own promises: observations in
+// order, each starting with X, an error only alone; for Session none when
+// every session is down; for Collector no communities, no peer address, at
+// least one collector peer, sorted unique neighbours and counts that add up.
 func FuzzObserve(f *testing.F) {
 	ap := []bgp.NLRI{{Prefix: pfx("10.0.0.0/24"), PathID: 1, HasPathID: true}}
 	f.Add(slices.Concat(established(at(0)),
@@ -31,7 +33,14 @@ func FuzzObserve(f *testing.F) {
 			[]mrtgen.Entry{{PeerIndex: 0, Originated: at(0), Attrs: attrs4(asX)}})),
 		upd(at(1), nil, nlri("10.0.1.0/24"), attrs4(asX))))
 	f.Add(tableDump(at(0), pfx("10.0.0.0/24"), peerAddr, asX, attrs4(asX)))
+	f.Add(slices.Concat(
+		pitRec(at(0), cpeer(1, asP1), cpeer(2, asX)),
+		ribRec(at(0), "10.0.0.0/24", ent(0, mrtgen.Seq(asP1, asP2, asX, asY)), ent(1, mrtgen.Seq(asX, asX, asY))),
+		ribRec(at(0), "10.0.1.0/24", ent(0, mrtgen.Set(asP1), mrtgen.Seq(asX), mrtgen.Set(asZ)), ent(0, mrtgen.Seq(asP1), mrtgen.Set(asX))),
+		pitRec(at(1), cpeer(3, asP3)),
+		ribRec(at(1), "10.0.0.0/24", ent(0, mrtgen.Seq(asP3, asX, asY, asX)))))
 	f.Fuzz(func(t *testing.T, data []byte) {
+		fuzzCollector(t, data)
 		for _, pre := range []bool{false, true} {
 			sel := SessionSel{Peer: types.ASN(asX), PrePolicyRIB: pre}
 			seq, info := Session(mrt.Records(bytes.NewReader(data)), sel)
@@ -70,4 +79,56 @@ func FuzzObserve(f *testing.F) {
 			}
 		}
 	})
+}
+
+func fuzzCollector(t *testing.T, data []byte) {
+	seq, info := Collector(mrt.Records(bytes.NewReader(data)), types.ASN(asX))
+	var obs []Observation
+	errs := 0
+	for o, err := range seq {
+		if err != nil {
+			errs++
+			continue
+		}
+		obs = append(obs, o)
+	}
+	in := info()
+	if errs > 1 || (errs == 1 && len(obs) > 0) {
+		t.Fatalf("Collector: %d errors with %d observations", errs, len(obs))
+	}
+	if in.Entries < 0 || in.Skipped < 0 || in.Malformed < 0 || in.Malformed > in.Entries ||
+		in.Through > in.Entries-in.Malformed || in.NotSequence < 0 || in.NotSequence > in.Through ||
+		in.Direct < 0 || in.NoNeighbour < 0 || in.Direct+in.NoNeighbour > in.Through-in.NotSequence ||
+		len(obs) > in.Through-in.NotSequence {
+		t.Fatalf("Collector: info = %+v with %d observations", in, len(obs))
+	}
+	for i, o := range obs {
+		ev := o.Evidence
+		if len(o.Route.Path) == 0 || o.Route.Path[0] != types.ASN(asX) || !o.Route.Prefix.IsValid() ||
+			o.Route.CommsKnown || len(o.Route.Communities) > 0 || ev.PeerAddr.IsValid() || ev.CollectorPeers < 1 {
+			t.Fatalf("Collector: observation %d: %+v", i, o)
+		}
+		for j := 1; j < len(ev.Neighbours); j++ {
+			if ev.Neighbours[j-1] >= ev.Neighbours[j] {
+				t.Fatalf("Collector: observation %d: neighbours %v", i, ev.Neighbours)
+			}
+		}
+		if !ev.Direct && len(ev.Neighbours) == 0 && in.NoNeighbour == 0 {
+			t.Fatalf("Collector: observation %d has no neighbour, is not direct, and NoNeighbour is 0", i)
+		}
+		if i > 0 {
+			p, q := obs[i-1], o
+			a, b := p.Route.Prefix, q.Route.Prefix
+			c := a.Addr().Compare(b.Addr())
+			if c == 0 {
+				c = a.Bits() - b.Bits()
+			}
+			if c == 0 && p.Family == q.Family {
+				c = slices.Compare(p.Route.Path, q.Route.Path)
+			}
+			if c > 0 {
+				t.Fatalf("Collector: out of order: %v %v before %v %v", a, p.Route.Path, b, q.Route.Path)
+			}
+		}
+	}
 }
