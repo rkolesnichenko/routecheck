@@ -2,6 +2,7 @@ package verdict
 
 import (
 	"context"
+	"encoding/binary"
 	"fmt"
 	"math/rand/v2"
 	"net/netip"
@@ -276,9 +277,11 @@ func decideCases(t testing.TB) []decideCase {
 		{"community/an integer over 32 bits", pol(pclause(0, normal(t, v4, "community(4294967296)"))),
 			route("192.0.2.0/24", peer),
 			undecided(Reason{Kind: ReasonCommValue, Term: "community(4294967296)"})},
-		{"community/a word", pol(pclause(0, normal(t, v4, "community(no_export_subconfed)"))),
+		{"community/no_export_subconfed is local_as", pol(pclause(0, normal(t, v4, "community(No_Export_SubConfed)"))),
+			route("192.0.2.0/24", peer).comms(0xFFFFFF03), accepted(0)},
+		{"community/a word", pol(pclause(0, normal(t, v4, "community(no_peer)"))),
 			route("192.0.2.0/24", peer).comms(0xFFFFFF03),
-			undecided(Reason{Kind: ReasonCommValue, Term: "community(no_export_subconfed)"})},
+			undecided(Reason{Kind: ReasonCommValue, Term: "community(no_peer)"})},
 		{"community/value reason before not known", pol(pclause(0, normal(t, v4, "community(65536:1)"))),
 			route("192.0.2.0/24", peer).commsUnknown(),
 			undecided(Reason{Kind: ReasonCommValue, Term: "community(65536:1)"})},
@@ -326,9 +329,24 @@ func decideCases(t testing.TB) []decideCase {
 		{"peval/zero term", peval.Policy{Undecided: []peval.Undecided{{Index: 1, Why: peval.WhyProtocol + " OSPF"}}},
 			route("203.0.113.0/24", peer, 64501),
 			undecided(Reason{Kind: ReasonPeval, Why: "protocol OSPF", Clause: -1, Index: 1})},
-		{"peval/does not stop an accept", peval.Policy{Clauses: []peval.Clause{pclause(1, cust)},
+		// An undecided term at or before the accepting clause may take the
+		// route instead: Accepted names it in Reasons.
+		{"peval/a term before an accept is named", peval.Policy{Clauses: []peval.Clause{pclause(1, cust)},
 			Undecided: []peval.Undecided{{Index: 0, Term: peerRtr, Why: peval.WhyPeerRouter}}},
+			route("192.0.2.0/24", peer, 64501),
+			Verdict{Outcome: Accepted, Clause: 0, Reasons: []Reason{{Kind: ReasonPeval, Why: peval.WhyPeerRouter, Clause: -1, Index: 0, Term: peerRtr.String()}}}},
+		{"peval/a term at the accept's Index is named", peval.Policy{Clauses: []peval.Clause{pclause(0, normal(t, v4, "<AS64666>")), pclause(1, cust)},
+			Undecided: []peval.Undecided{{Index: 1, Term: peerRtr, Why: peval.WhyLocalRouter}, {Index: 1, Term: peerRtr, Why: peval.WhyLocalRouter}}},
+			route("192.0.2.0/24", peer, 64501),
+			Verdict{Outcome: Accepted, Clause: 1, Reasons: []Reason{{Kind: ReasonPeval, Why: peval.WhyLocalRouter, Clause: -1, Index: 1, Term: peerRtr.String()}}}},
+		{"peval/a term after an accept is not named", peval.Policy{Clauses: []peval.Clause{pclause(1, cust)},
+			Undecided: []peval.Undecided{{Index: 2, Term: peerRtr, Why: peval.WhyPeerRouter}}},
 			route("192.0.2.0/24", peer, 64501), accepted(0)},
+		{"peval/only the terms up to the accept are named", peval.Policy{Clauses: []peval.Clause{pclause(0, pathX), pclause(2, cust)},
+			Undecided: []peval.Undecided{{Index: 3, Why: peval.WhyProtocol + " OSPF"}, {Index: 1, Term: peerRtr, Why: peval.WhyPeerRouter}}},
+			route("192.0.2.0/24", peer, 64501).pathUnknown(),
+			Verdict{Outcome: Accepted, Clause: 1, EarlierUndecided: []int{0},
+				Reasons: []Reason{{Kind: ReasonPeval, Why: peval.WhyPeerRouter, Clause: -1, Index: 1, Term: peerRtr.String()}}}},
 		{"peval/after filter reasons", peval.Policy{Clauses: []peval.Clause{pclause(0, pathX)},
 			Undecided: []peval.Undecided{{Index: 1, Term: peerRtr, Why: peval.WhyLocalRouter}}},
 			route("203.0.113.0/24", peer, 64501).pathUnknown(),
@@ -433,6 +451,7 @@ func TestCompileBuildsIndexOnce(t *testing.T) {
 	if got := f.Conjuncts[0].Prefixes.Len(); got != n {
 		t.Fatalf("filter has %d ranges, want %d", got, n)
 	}
+	before := indexBuilds.Load()
 	c := Compile(pol(pclause(0, f)))
 	for i, p := range prefixes {
 		r := route(p.String(), peer)
@@ -446,8 +465,10 @@ func TestCompileBuildsIndexOnce(t *testing.T) {
 	if v := c.Decide(route("12.0.0.0/24", peer)); v.Outcome != Rejected {
 		t.Errorf("12.0.0.0/24: %+v, want Rejected", v)
 	}
-	if c.indexBuilds != 1 {
-		t.Errorf("indexBuilds = %d, want 1", c.indexBuilds)
+	// One conjunct: one index of its Prefixes and one of its NotPrefixes,
+	// counted by newPrefixIndex itself, so a build inside Decide counts too.
+	if built := indexBuilds.Load() - before; built != 2 {
+		t.Errorf("%d prefix indexes built, want 2 (one conjunct's Prefixes and NotPrefixes)", built)
 	}
 }
 
@@ -455,17 +476,33 @@ func TestCompileBuildsIndexOnce(t *testing.T) {
 // over random ranges and prefixes of both families.
 func TestPrefixIndexMatchesContains(t *testing.T) {
 	rng := rand.New(rand.NewPCG(1, 2))
-	// Addresses from a small space, so ranges nest and prefixes hit them.
+	// Each round draws three addresses per family with every bit random (all
+	// 32 or 128); an address is one of them, or one with a random bit
+	// flipped, so ranges nest and prefixes hit them at any depth.
+	var bases4 [3][4]byte
+	var bases6 [3][16]byte
 	addr := func(v6 bool) netip.Addr {
 		if v6 {
-			var a [16]byte
-			a[0], a[1], a[2] = 0x20, 0x01, byte(rng.IntN(4))<<6
-			a[3] = byte(rng.IntN(4)) << 6
+			a := bases6[rng.IntN(len(bases6))]
+			if rng.IntN(2) == 0 {
+				i := rng.IntN(128)
+				a[i/8] ^= 0x80 >> (i % 8)
+			}
 			return netip.AddrFrom16(a)
 		}
-		return netip.AddrFrom4([4]byte{10, byte(rng.IntN(4)) << 6, byte(rng.IntN(4)) << 6, byte(rng.IntN(2)) << 7})
+		a := bases4[rng.IntN(len(bases4))]
+		if rng.IntN(2) == 0 {
+			i := rng.IntN(32)
+			a[i/8] ^= 0x80 >> (i % 8)
+		}
+		return netip.AddrFrom4(a)
 	}
-	for round := range 300 {
+	for round := range 1000 {
+		for i := range bases4 {
+			binary.BigEndian.PutUint32(bases4[i][:], rng.Uint32())
+			binary.BigEndian.PutUint64(bases6[i][:8], rng.Uint64())
+			binary.BigEndian.PutUint64(bases6[i][8:], rng.Uint64())
+		}
 		var ranges []types.PrefixRange
 		for range rng.IntN(12) {
 			v6 := rng.IntN(2) == 0
@@ -533,7 +570,9 @@ func TestParseCommunity(t *testing.T) {
 		{"6 5000:1", 0, ReasonCommValue},
 		{"{3561,70}", 0, ReasonCommValue},
 		{"PeerAS:100", 0, ReasonCommValue},
-		{"no_export_subconfed", 0, ReasonCommValue},
+		{"no_export_subconfed", 0xFFFFFF03, ""},
+		{"NO_EXPORT_SUBCONFED", 0xFFFFFF03, ""},
+		{"no_peer", 0, ReasonCommValue},
 		{"", 0, ReasonCommValue},
 		{"0x10", 0, ReasonCommValue},
 		{"١٢", 0, ReasonCommValue},
@@ -545,12 +584,13 @@ func TestParseCommunity(t *testing.T) {
 	}
 }
 
-// TestPathMemoBounded checks the memo stays within its bound and its
-// answers stay right after it is cleared.
+// TestPathMemoBounded checks the memo's key bytes stay within its bound,
+// counted right, and its answers stay right after it is cleared, from one
+// goroutine and then from several.
 func TestPathMemoBounded(t *testing.T) {
-	old := memoLimit
-	memoLimit = 4
-	defer func() { memoLimit = old }()
+	old := memoKeyBytes
+	memoKeyBytes = 40 // three keys of 12 or 16 bytes at most
+	defer func() { memoKeyBytes = old }()
 	f := normal(t, types.AFIv4, "<^PeerAS AS-CUST$>")
 	c := Compile(pol(pclause(0, f)))
 	for round := range 3 {
@@ -570,10 +610,49 @@ func TestPathMemoBounded(t *testing.T) {
 			if v := c.Decide(r); v.Outcome != want {
 				t.Fatalf("round %d, path %v: %+v, want %v", round, r.Path, v, want)
 			}
-			if n := c.memoLen(); n > memoLimit {
-				t.Fatalf("memo holds %d answers, over its limit %d", n, memoLimit)
+			if counted, held := c.memoBytes(); counted != held || held > memoKeyBytes {
+				t.Fatalf("memo counts %d key bytes, holds %d, bound %d", counted, held, memoKeyBytes)
 			}
 		}
+	}
+
+	c = Compile(pol(pclause(0, f)))
+	var wg sync.WaitGroup
+	for g := range 8 {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for i := range 200 {
+				last := types.ASN(64501 + (i+g)%3)
+				want := Accepted
+				if last == 64503 {
+					want = Rejected
+				}
+				if v := c.Decide(route("192.0.2.0/24", peer, last)); v.Outcome != want {
+					t.Errorf("goroutine %d, last AS%d: %+v, want %v", g, last, v, want)
+					return
+				}
+			}
+		}()
+	}
+	wg.Wait()
+	if counted, held := c.memoBytes(); counted != held || held > memoKeyBytes {
+		t.Fatalf("memo counts %d key bytes, holds %d, bound %d", counted, held, memoKeyBytes)
+	}
+}
+
+// TestMemoKeyOverBound checks a key longer than the whole bound is answered
+// and not kept.
+func TestMemoKeyOverBound(t *testing.T) {
+	old := memoKeyBytes
+	memoKeyBytes = 8
+	defer func() { memoKeyBytes = old }()
+	c := Compile(pol(pclause(0, normal(t, types.AFIv4, "<^PeerAS AS-CUST$>"))))
+	if v := c.Decide(route("192.0.2.0/24", peer, 64501)); v.Outcome != Accepted {
+		t.Fatalf("%+v, want Accepted", v)
+	}
+	if counted, held := c.memoBytes(); counted != 0 || held != 0 {
+		t.Errorf("memo holds %d (counted %d) key bytes, want none", held, counted)
 	}
 }
 

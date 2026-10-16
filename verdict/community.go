@@ -9,9 +9,10 @@ import (
 	"github.com/rkolesnichenko/rpsl/resolve"
 )
 
-// The well-known communities RPSL names (RFC 1997 values). local_as is
-// rpsl's dictionary's spelling (policy/dict.go) of the third, which RFC 1997
-// calls NO_EXPORT_SUBCONFED and IRRToolSet no_export_subconfed.
+// The well-known communities RPSL names (RFC 1997 values). The third has
+// two spellings: local_as, rpsl's dictionary's (policy/dict.go), and
+// no_export_subconfed, IRRToolSet's and rpsl rtconfig's (RFC 1997's
+// NO_EXPORT_SUBCONFED); both are read.
 const (
 	commNoExport    = 0xFFFFFF01
 	commNoAdvertise = 0xFFFFFF02
@@ -21,7 +22,8 @@ const (
 // parseCommunity reads one community value as a policy writes it: a 4-byte
 // decimal integer ("100"), "hi:lo" with each half a decimal at most 65535
 // (hi<<16|lo; space around the colon is allowed, since RPSL does not tell
-// it apart), or a keyword in any case: no_export, no_advertise, local_as.
+// it apart), or a keyword in any case: no_export, no_advertise, local_as or
+// no_export_subconfed.
 // The kind is "" for a value read, ReasonCommInternet for internet, which
 // RFC 2622 gives no value, and ReasonCommValue for anything else.
 func parseCommunity(s string) (uint32, string) {
@@ -33,7 +35,7 @@ func parseCommunity(s string) (uint32, string) {
 		return commNoExport, ""
 	case strings.EqualFold(t, "no_advertise"):
 		return commNoAdvertise, ""
-	case strings.EqualFold(t, "local_as"):
+	case strings.EqualFold(t, "local_as"), strings.EqualFold(t, "no_export_subconfed"):
 		return commLocalAS, ""
 	}
 	if hi, lo, ok := strings.Cut(t, ":"); ok {

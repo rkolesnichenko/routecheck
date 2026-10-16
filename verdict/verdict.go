@@ -40,10 +40,16 @@ const (
 // clauses of one Index.
 type Verdict struct {
 	Outcome          Outcome
-	Clause           int      // Accepted: Pos of the first clause that said yes
-	EarlierUndecided []int    // Accepted: Pos of undecided clauses before it
-	Fails            []Fail   // Rejected: one per clause, in order
-	Reasons          []Reason // Undecided: every reason, deduplicated
+	Clause           int    // Accepted: Pos of the first clause that said yes
+	EarlierUndecided []int  // Accepted: Pos of undecided clauses before it
+	Fails            []Fail // Rejected: one per clause, in order
+	// Reasons is, for Undecided, every reason, deduplicated. For Accepted it
+	// is the ReasonPeval reasons of the undecided terms at or before the
+	// accepting clause (Index at most its Index: within one attribute peval
+	// does not record which flattened term came first, so an equal Index is
+	// listed), each of which the route may take, and so its actions,
+	// instead; nil when there are none.
+	Reasons []Reason
 }
 
 // Fail is why one clause said no to a route.
@@ -101,8 +107,8 @@ const (
 	// gives no value.
 	ReasonCommInternet = "community-internet"
 	// ReasonCommValue: a community test names a value that is not a 4-byte
-	// integer, hi:lo with halves to 65535, no_export, no_advertise or
-	// local_as.
+	// integer, hi:lo with halves to 65535, no_export, no_advertise,
+	// local_as or no_export_subconfed.
 	ReasonCommValue = "community-value"
 	// ReasonSameASRun: a same-AS repetition ("~*", "~+", "~{m,n}") over
 	// more than one AS (pathre.ErrNotSingleAS).
@@ -137,8 +143,6 @@ type Compiled struct {
 	clauses []clause
 	peval   []Reason
 	memo    pathMemo
-
-	indexBuilds int // prefix indexes built, one per conjunct (TestCompileBuildsIndexOnce)
 }
 
 type clause struct {
@@ -167,7 +171,7 @@ type pathTest struct {
 // once, here.
 func Compile(p peval.Policy) *Compiled {
 	c := &Compiled{policy: p, clauses: make([]clause, len(p.Clauses))}
-	c.memo.limit = memoLimit
+	c.memo.limit = memoKeyBytes
 	type reKey struct {
 		re   *policy.ASPathRE
 		sets uintptr
@@ -183,7 +187,6 @@ func Compile(p peval.Policy) *Compiled {
 				prefixes: newPrefixIndex(pj.Prefixes.List()),
 				not:      newPrefixIndex(pj.NotPrefixes.List()),
 			}
-			c.indexBuilds++
 			for _, m := range pj.Paths {
 				k := reKey{m.RE, reflect.ValueOf(m.Sets).Pointer()}
 				id, ok := ids[k]
@@ -232,7 +235,8 @@ func Decide(p peval.Policy, r Route) Verdict { return Compile(p).Decide(r) }
 // Every test is three-valued. A conjunct is the AND of its tests (any no:
 // no; else any undecided: undecided; else yes); a clause the OR of its
 // conjuncts. Over the clauses in order, the route is Accepted by the first
-// that says yes, naming the undecided ones before it; Rejected when every
+// that says yes, naming the undecided clauses before it and the undecided
+// terms at or before its Index (in Reasons); Rejected when every
 // clause says no and the policy has no undecided term; otherwise Undecided,
 // with the reasons of every undecided test of every undecided clause and
 // each undecided term. A policy with no clause and no undecided term (the
@@ -247,7 +251,7 @@ func (c *Compiled) Decide(r Route) Verdict {
 	for pos := range c.clauses {
 		switch t, _ := c.clause(pos, &s, nil); t {
 		case yes:
-			return Verdict{Outcome: Accepted, Clause: pos, EarlierUndecided: undecided}
+			return Verdict{Outcome: Accepted, Clause: pos, EarlierUndecided: undecided, Reasons: c.pevalUpTo(c.clauses[pos].index)}
 		case undecidedT:
 			undecided = append(undecided, pos)
 		}
@@ -266,6 +270,18 @@ func (c *Compiled) Decide(r Route) Verdict {
 	}
 	reasons = append(reasons, c.peval...)
 	return Verdict{Outcome: Undecided, Reasons: dedup(reasons)}
+}
+
+// pevalUpTo returns the ReasonPeval reasons of the undecided terms whose
+// Index is at most index, deduplicated, in a slice of the caller's own.
+func (c *Compiled) pevalUpTo(index int) []Reason {
+	var out []Reason
+	for _, r := range c.peval {
+		if r.Index <= index {
+			out = append(out, r)
+		}
+	}
+	return dedup(out)
 }
 
 // state is one Decide call's: the route, its masked prefix, and its path as
@@ -413,15 +429,22 @@ func match(pt *pathTest, path []types.ASN) uint8 {
 	return matchUnbound
 }
 
-// memoLimit bounds the answers a pathMemo holds: past it the memo is
-// cleared and fills again, which changes no answer.
-var memoLimit = 1 << 19
+// defaultMemoKeyBytes is the most key bytes (4 per AS of a path, plus 4)
+// a Compiled's path memo holds: 64 MiB, some 2.8 million answers for paths
+// of five ASes. Past it the memo is cleared and fills again, which changes
+// no answer. Map overhead comes on top of the key bytes.
+const defaultMemoKeyBytes = 64 << 20
 
-// pathMemo holds pathre's answers by (pathTest.id, path).
+// memoKeyBytes is the bound Compile gives a memo; tests lower it.
+var memoKeyBytes = defaultMemoKeyBytes
+
+// pathMemo holds pathre's answers by (pathTest.id, path), bounded by the
+// bytes of its keys.
 type pathMemo struct {
 	mu    sync.Mutex
 	m     map[string]uint8
-	limit int
+	bytes int // the key bytes m holds
+	limit int // the most key bytes m may hold
 }
 
 func (p *pathMemo) get(k []byte) (uint8, bool) {
@@ -437,16 +460,28 @@ func (p *pathMemo) put(k []byte, v uint8) {
 	if p.m == nil {
 		p.m = map[string]uint8{}
 	}
-	if len(p.m) >= p.limit {
+	if _, ok := p.m[string(k)]; ok {
+		return // another call stored it meanwhile
+	}
+	if p.bytes+len(k) > p.limit {
 		clear(p.m)
+		p.bytes = 0
+		if len(k) > p.limit {
+			return // a key over the whole bound is not kept
+		}
 	}
 	p.m[string(k)] = v
+	p.bytes += len(k)
 }
 
-func (c *Compiled) memoLen() int {
+// memoBytes returns the key bytes c's memo holds, recounted from its keys.
+func (c *Compiled) memoBytes() (counted, held int) {
 	c.memo.mu.Lock()
 	defer c.memo.mu.Unlock()
-	return len(c.memo.m)
+	for k := range c.memo.m {
+		held += len(k)
+	}
+	return c.memo.bytes, held
 }
 
 // dedup keeps the first of each equal reason, in order.

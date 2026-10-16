@@ -4,6 +4,7 @@ import (
 	"encoding/binary"
 	"math/bits"
 	"net/netip"
+	"sync/atomic"
 
 	"github.com/rkolesnichenko/rpsl/types"
 )
@@ -55,9 +56,15 @@ func (m *lenMask) set(lo, hi int) {
 
 func (m *lenMask) has(n int) bool { return m[n>>6]&(1<<(n&63)) != 0 }
 
+// indexBuilds counts every prefix index built, by whatever path, so a test
+// can tell an index built once from one rebuilt per route
+// (TestCompileBuildsIndexOnce).
+var indexBuilds atomic.Int64
+
 // newPrefixIndex indexes ranges. Empty ranges (types.PrefixRange.IsEmpty)
 // hold no prefix and are left out.
 func newPrefixIndex(ranges []types.PrefixRange) *prefixIndex {
+	indexBuilds.Add(1)
 	x := &prefixIndex{}
 	for _, r := range ranges {
 		if r.IsEmpty() {

@@ -15,7 +15,8 @@
 // (ReasonCommsUnknown); otherwise community(…) holds when every value is
 // present and community == {…} when the two sets are equal, compared as
 // numbers (hi:lo is hi<<16|lo; no_export is 0xFFFFFF01, no_advertise
-// 0xFFFFFF02, local_as 0xFFFFFF03), and is flipped when negated.
+// 0xFFFFFF02, local_as and no_export_subconfed 0xFFFFFF03), and is flipped
+// when negated.
 //
 // ReasonPathUnbound marks a regexp pathre cannot match because it still
 // names PeerAS or a set template (or is missing). peval always binds PeerAS,

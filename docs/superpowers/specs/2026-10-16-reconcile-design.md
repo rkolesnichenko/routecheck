@@ -268,17 +268,24 @@ Every test is three-valued: **yes**, **no**, **undecided**.
   value is `internet` (no defined value, §3) or does not parse; otherwise
   `contains`: every listed value present; `==`: the sets equal. Values
   compare numerically (`hi:lo` = hi<<16|lo; `no_export` 0xFFFFFF01,
-  `no_advertise` 0xFFFFFF02, `local_as` 0xFFFFFF03 — the last is my call,
-  following RFC 1997's NO_EXPORT_SUBCONFED; the builder confirms the
-  mapping against IRRToolSet's), flipped when `Negated`.
+  `no_advertise` 0xFFFFFF02, `local_as` and `no_export_subconfed`
+  0xFFFFFF03 — RFC 1997's NO_EXPORT_SUBCONFED, which rpsl's dictionary
+  spells `local_as` and IRRToolSet 5.1.3 and rpsl's rtconfig spell
+  `no_export_subconfed`; both are read, case-insensitively), flipped when
+  `Negated`.
 
 A conjunct is the three-valued AND of its tests (any no → no; else any
 undecided → undecided; else yes). A clause's filter is the three-valued OR
 of its conjuncts. Then, over the policy's clauses in order:
 
 - **Accepted** if some clause's filter is yes. The verdict names the first
-  such clause; if an earlier clause was undecided, it says so (the route
-  may take that clause, and so its actions, instead).
+  such clause; if an earlier clause or undecided term was undecided, it
+  says so (the route may take that clause or term, and so its actions,
+  instead): the undecided clauses before it in `EarlierUndecided`, and in
+  `Reasons` the `ReasonPeval` entries of the `Policy.Undecided` terms whose
+  `Index` is at most the clause's `Index` (within one attribute peval does
+  not record which flattened term came first, so an equal `Index` is
+  listed).
 - **Rejected** if every clause is no and `Policy.Undecided` is empty, and
   the policy has at least one clause or undecided term.
 - **No policy**: when `Policy.Clauses` and `Policy.Undecided` are both
@@ -289,8 +296,9 @@ of its conjuncts. Then, over the policy's clauses in order:
 
 - **Undecided** otherwise, with every reason: the undecided tests' kinds
   (path not a plain sequence, communities not known, `internet`, same-AS
-  repetition over a sequence, path regexp too expensive for the path) and
-  each undecided term's `peval` `Why`.
+  repetition over a sequence, path regexp too expensive for the path, path
+  regexp unbound — `ReasonPathUnbound`, a caller's bug, since peval always
+  binds PeerAS) and each undecided term's `peval` `Why`.
 
 A clause is identified by its position in `Policy.Clauses` (`Pos`) and
 shown with peval's `Clause.Index`, the attribute's position: one `import:`
@@ -462,7 +470,9 @@ type Verdict struct {
 	Clause           int      // Accepted: Pos of the first clause that said yes
 	EarlierUndecided []int    // Accepted: Pos of undecided clauses before it
 	Fails            []Fail   // Rejected: one per clause
-	Reasons          []Reason // Undecided: every reason, deduplicated
+	Reasons          []Reason // Undecided: every reason, deduplicated;
+	                          // Accepted: the ReasonPeval reasons of undecided
+	                          // terms with Index at most the clause's Index
 }
 
 type Fail struct {
@@ -474,7 +484,7 @@ type Fail struct {
 type Reason struct {
 	Kind   string // ReasonPathNotSequence, ReasonCommsUnknown, ReasonCommInternet,
 	              // ReasonCommValue, ReasonSameASRun, ReasonPathTooExpensive,
-	              // or ReasonPeval
+	              // ReasonPathUnbound, or ReasonPeval
 	Why    string // ReasonPeval: peval's Why text as given (a Why* constant,
 	              // possibly with a suffix: WhyProtocol and WhyInto add the protocol)
 	Clause int    // a filter reason: Pos in Policy.Clauses; ReasonPeval: -1
@@ -598,7 +608,12 @@ alerts, required SHA pinning). Releases with a `release.sh` like mrt's.
   for OpenBGPD, BIRD 2 and GoBGP from their manuals, write it in the docs,
   and add one real capture from at least one of them to the fixtures if
   it can be made locally.
-- `local_as`'s value (§6.4): confirm against IRRToolSet's community code.
+- `local_as`'s value (§6.4): checked in Task 4 — IRRToolSet 5.1.3's
+  binaries know the keyword `no_export_subconfed` and not `local_as`
+  (`strings` on its rtconfig); rpsl's rtconfig maps `no_export_subconfed`
+  to 65535:65283 (0xFFFFFF03), RFC 1997's NO_EXPORT_SUBCONFED. IRRToolSet's
+  own numeric mapping was not read (no source at hand). Both spellings are
+  read as 0xFFFFFF03.
 - Whether mrt's `Routes` exposes everything session replay needs; it skips
   state changes, so `observe` reads `mrt.Records` itself for them. If an
   mrt change is needed, it is a separate mrt release, not a fork.

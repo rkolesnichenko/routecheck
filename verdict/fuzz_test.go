@@ -77,6 +77,11 @@ func FuzzDecide(f *testing.F) {
 			if v.Clause < 0 || v.Clause >= len(p.Clauses) {
 				t.Fatalf("Accepted by clause %d of %d", v.Clause, len(p.Clauses))
 			}
+			for _, rs := range v.Reasons {
+				if rs.Kind != ReasonPeval || rs.Index > p.Clauses[v.Clause].Index {
+					t.Fatalf("Accepted by clause %d with reason %+v", v.Clause, rs)
+				}
+			}
 			for _, e := range v.EarlierUndecided {
 				if e < 0 || e >= v.Clause {
 					t.Fatalf("earlier undecided %d, accepted by %d", e, v.Clause)
