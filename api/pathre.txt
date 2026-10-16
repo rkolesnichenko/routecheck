@@ -1,1 +1,4 @@
 package pathre
+var ErrNotSingleAS = errors.New(…)
+var ErrUnbound = errors.New(…)
+func Match(re *policy.ASPathRE, sets map[types.SetName]resolve.ASNSet, path []types.ASN) (bool, error)

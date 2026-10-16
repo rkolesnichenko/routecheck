@@ -45,6 +45,7 @@ fuzz() {
 
 # One target per line: "<dir> <pkg> <FuzzName>".
 targets='
+. ./pathre FuzzMatch
 '
 
 # dir package fuzz-target; shard i of n takes targets i, i+n, i+2n, ...
