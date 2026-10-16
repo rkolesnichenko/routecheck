@@ -47,6 +47,7 @@ fuzz() {
 targets='
 . ./pathre FuzzMatch
 . ./verdict FuzzDecide
+. ./observe FuzzObserve
 '
 
 # dir package fuzz-target; shard i of n takes targets i, i+n, i+2n, ...

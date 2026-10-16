@@ -1,1 +1,29 @@
 package observe
+var ErrRIBNotPrePolicy = errors.New(…)
+func Route(prefix netip.Prefix, p *bgp.Path, commsKnown bool) verdict.Route
+func Session(records iter.Seq2[mrt.Record, error], sel SessionSel) (iter.Seq2[Observation, error], func() SessionInfo)
+type Evidence struct
+	Neighbours []types.ASN
+	Direct bool
+	CollectorPeers int
+	Time time.Time
+type Observation struct
+	Route verdict.Route
+	Evidence Evidence
+	Family bgp.Family
+type SessionInfo struct
+	LocalAS types.ASN
+	LocalAddr netip.Addr
+	PeerAddr netip.Addr
+	MidSession bool
+	DownAtEnd bool
+	NoRecordsBeforeAt bool
+	NotFirstAS int
+	Malformed int
+	MalformedResets int
+	Skipped int
+type SessionSel struct
+	Peer types.ASN
+	PeerAddr netip.Addr
+	At time.Time
+	PrePolicyRIB bool
