@@ -2,6 +2,8 @@ package hygiene
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"net/netip"
 	"sync"
 
@@ -11,9 +13,26 @@ import (
 	"github.com/rkolesnichenko/rpsl/types"
 )
 
+// ErrAFIMismatch is returned by RouteObject when afi is IPv4 or IPv6 and the
+// route's prefix is of the other family (a caller bug, not a missing object).
+var ErrAFIMismatch = errors.New("hygiene: address family does not match the prefix")
+
+var errReadIncomplete = errors.New("hygiene: route-object read did not complete")
+
+func afiFits(afi types.AFI, p netip.Prefix) bool {
+	switch afi {
+	case types.AFIv4:
+		return p.Addr().Is4()
+	case types.AFIv6:
+		return p.Addr().Is6()
+	}
+	return true
+}
+
 // Checker answers the two per-route questions that do not depend on policy.
 // Its zero value has neither data set and answers nil to both. It is safe
-// for concurrent use; do not copy it after first use.
+// for concurrent use; do not copy it after first use. The route-object cache
+// grows for the Checker's lifetime: use a fresh Checker per run.
 type Checker struct {
 	VRPs *rpki.VRPs     // nil: RPKI answers nil
 	Src  resolve.Source // nil: RouteObject answers nil
@@ -62,9 +81,13 @@ func (c *Checker) RPKI(r verdict.Route) *rpki.State {
 // It returns nil, nil when the route has no origin (AS_SET or empty path)
 // or Src is nil. An origin's objects are read once per family and cached;
 // concurrent calls for one key share the read. An error from Src is
-// returned as is and not cached; a call that waited on a failed read gets
-// that read's error.
+// returned as is and not cached; a call that waited on a failed read reads
+// again unless its own context is done. A prefix of the other family than
+// a non-"any" afi is ErrAFIMismatch.
 func (c *Checker) RouteObject(ctx context.Context, r verdict.Route, afi types.AFI) (*bool, error) {
+	if !afiFits(afi, r.Prefix) {
+		return nil, fmt.Errorf("%w: %s for %s", ErrAFIMismatch, afi, r.Prefix)
+	}
 	as, ok := origin(r)
 	if !ok || c.Src == nil {
 		return nil, nil
@@ -78,24 +101,45 @@ func (c *Checker) RouteObject(ctx context.Context, r verdict.Route, afi types.AF
 }
 
 func (c *Checker) routes(ctx context.Context, k originKey) (*originRoutes, error) {
-	c.mu.Lock()
-	if e, ok := c.cache[k]; ok {
-		c.mu.Unlock()
-		select {
-		case <-e.done:
-			return e, e.err
-		case <-ctx.Done():
-			return nil, ctx.Err()
+	for {
+		c.mu.Lock()
+		if e, ok := c.cache[k]; ok {
+			c.mu.Unlock()
+			select {
+			case <-e.done:
+			case <-ctx.Done():
+				return nil, ctx.Err()
+			}
+			if e.err == nil {
+				return e, nil
+			}
+			// The read failed and its entry is gone. If this caller is still
+			// live the failure may have been the leader's own (its context),
+			// so read again, as the new leader or behind one.
+			if err := ctx.Err(); err != nil {
+				return nil, err
+			}
+			continue
 		}
+		e := &originRoutes{done: make(chan struct{})}
+		if c.cache == nil {
+			c.cache = make(map[originKey]*originRoutes)
+		}
+		c.cache[k] = e
+		c.mu.Unlock()
+		return c.fetch(ctx, k, e)
 	}
-	e := &originRoutes{done: make(chan struct{})}
-	if c.cache == nil {
-		c.cache = make(map[originKey]*originRoutes)
-	}
-	c.cache[k] = e
-	c.mu.Unlock()
+}
 
+// fetch is the leader's read. However it ends, normally, with an error or by
+// a panic in Src, an unsuccessful entry leaves the cache and its waiters are
+// released.
+func (c *Checker) fetch(ctx context.Context, k originKey, e *originRoutes) (*originRoutes, error) {
+	completed := false
 	defer func() {
+		if !completed {
+			e.err = errReadIncomplete
+		}
 		if e.err != nil {
 			c.mu.Lock()
 			delete(c.cache, k)
@@ -103,14 +147,16 @@ func (c *Checker) routes(ctx context.Context, k originKey) (*originRoutes, error
 		}
 		close(e.done)
 	}()
-	var ps []netip.Prefix
-	ps, e.err = c.Src.OriginatedRoutes(ctx, k.as, k.afi)
-	if e.err != nil {
-		return nil, e.err
+	ps, err := c.Src.OriginatedRoutes(ctx, k.as, k.afi)
+	if err != nil {
+		e.err = err
+		completed = true
+		return nil, err
 	}
 	e.prefixes = make(map[netip.Prefix]struct{}, len(ps))
 	for _, p := range ps {
 		e.prefixes[p.Masked()] = struct{}{}
 	}
+	completed = true
 	return e, nil
 }

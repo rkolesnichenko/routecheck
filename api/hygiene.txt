@@ -1,4 +1,5 @@
 package hygiene
+var ErrAFIMismatch = errors.New(…)
 type Checker struct
 	VRPs *rpki.VRPs
 	Src resolve.Source

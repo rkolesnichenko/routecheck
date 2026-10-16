@@ -4,10 +4,12 @@ import (
 	"context"
 	"errors"
 	"net/netip"
+	"runtime"
 	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/rkolesnichenko/routecheck/verdict"
 	"github.com/rkolesnichenko/rpsl/resolve"
@@ -176,5 +178,135 @@ func TestRouteObjectErrorNotCached(t *testing.T) {
 	}
 	if n := src.calls.Load(); n != 2 {
 		t.Errorf("calls = %d, want 2", n)
+	}
+}
+
+func TestRPKIAS0Covers(t *testing.T) {
+	c := &Checker{VRPs: vrps(t, rpki.VRP{Prefix: netip.MustParsePrefix("192.0.2.0/24"), MaxLength: 24, ASN: 0})}
+	r := route("192.0.2.0/24", 64496, 64500)
+	r.OriginSet = true
+	if got := c.RPKI(r); got == nil || *got != rpki.Invalid {
+		t.Errorf("AS_SET origin under an AS0 VRP: got %v, want Invalid", got)
+	}
+}
+
+func TestRouteObjectAFIMismatch(t *testing.T) {
+	c := &Checker{Src: memSource(t)}
+	_, err := c.RouteObject(context.Background(), route("192.0.2.0/24", 1, 64500), types.AFIv6)
+	if !errors.Is(err, ErrAFIMismatch) {
+		t.Errorf("got %v, want ErrAFIMismatch", err)
+	}
+	if got, err := c.RouteObject(context.Background(), route("192.0.2.0/24", 1, 64500), types.AFIAny); err != nil || got == nil || !*got {
+		t.Errorf("AFIAny: got %v, %v", got, err)
+	}
+}
+
+// gated blocks each read until the test releases it, honoring ctx.
+type gated struct {
+	resolve.Source
+	calls   atomic.Int64
+	started chan struct{}
+	release chan struct{}
+}
+
+func (g *gated) OriginatedRoutes(ctx context.Context, as types.ASN, afi types.AFI) ([]netip.Prefix, error) {
+	g.calls.Add(1)
+	g.started <- struct{}{}
+	select {
+	case <-g.release:
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	}
+	return g.Source.OriginatedRoutes(ctx, as, afi)
+}
+
+func TestRouteObjectCancelledLeader(t *testing.T) {
+	g := &gated{Source: memSource(t), started: make(chan struct{}, 4), release: make(chan struct{})}
+	c := &Checker{Src: g}
+	r := route("192.0.2.0/24", 1, 64500)
+
+	leaderCtx, cancel := context.WithCancel(context.Background())
+	leaderErr := make(chan error, 1)
+	go func() {
+		_, err := c.RouteObject(leaderCtx, r, types.AFIv4)
+		leaderErr <- err
+	}()
+	<-g.started // the leader is inside its read
+
+	type res struct {
+		b   *bool
+		err error
+	}
+	waiter := make(chan res, 1)
+	go func() {
+		b, err := c.RouteObject(context.Background(), r, types.AFIv4)
+		waiter <- res{b, err}
+	}()
+	// Let the second caller reach the wait: it must not start a read itself.
+	for i := 0; i < 100; i++ {
+		runtime.Gosched()
+		time.Sleep(time.Millisecond)
+	}
+	if n := g.calls.Load(); n != 1 {
+		t.Fatalf("reads before cancel = %d, want 1", n)
+	}
+	cancel()
+	if err := <-leaderErr; !errors.Is(err, context.Canceled) {
+		t.Fatalf("leader: %v, want context.Canceled", err)
+	}
+	<-g.started // the waiter became the new leader
+	close(g.release)
+	got := <-waiter
+	if got.err != nil || got.b == nil || !*got.b {
+		t.Fatalf("waiter: %v, %v", got.b, got.err)
+	}
+	if n := g.calls.Load(); n != 2 {
+		t.Errorf("reads = %d, want 2", n)
+	}
+}
+
+func TestRouteObjectDeadWaiter(t *testing.T) {
+	g := &gated{Source: memSource(t), started: make(chan struct{}, 4), release: make(chan struct{})}
+	c := &Checker{Src: g}
+	r := route("192.0.2.0/24", 1, 64500)
+	go c.RouteObject(context.Background(), r, types.AFIv4)
+	<-g.started
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if _, err := c.RouteObject(ctx, r, types.AFIv4); !errors.Is(err, context.Canceled) {
+		t.Errorf("dead waiter: %v, want context.Canceled", err)
+	}
+	close(g.release)
+}
+
+type panicking struct {
+	resolve.Source
+	panics atomic.Bool
+}
+
+func (p *panicking) OriginatedRoutes(ctx context.Context, as types.ASN, afi types.AFI) ([]netip.Prefix, error) {
+	if p.panics.Load() {
+		panic("source bug")
+	}
+	return p.Source.OriginatedRoutes(ctx, as, afi)
+}
+
+func TestRouteObjectPanicNotCached(t *testing.T) {
+	p := &panicking{Source: memSource(t)}
+	p.panics.Store(true)
+	c := &Checker{Src: p}
+	r := route("192.0.2.0/24", 1, 64500)
+	func() {
+		defer func() {
+			if recover() == nil {
+				t.Error("panic did not propagate")
+			}
+		}()
+		c.RouteObject(context.Background(), r, types.AFIv4)
+	}()
+	p.panics.Store(false)
+	got, err := c.RouteObject(context.Background(), r, types.AFIv4)
+	if err != nil || got == nil || !*got {
+		t.Fatalf("after panic: got %v, %v (an empty set was cached?)", got, err)
 	}
 }
