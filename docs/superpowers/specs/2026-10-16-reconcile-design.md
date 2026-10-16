@@ -153,11 +153,18 @@ routecheck/
   source precedence in the order given), or a live IRRd (`resolve/irrd`).
   Optionally a local RPSL file (`-policy`) for an aut-num not yet
   published (a draft import policy) — my call. Its objects keep their
-  `source:` as written. With dumps they are `Put` into the Corpus after the
-  dumps, replacing an object of the same class, key and source. With
-  `-irrd` the CLI wraps the server's `PolicySource` so that `AutNum` and
-  `InetRtr` answer from the file first; sets always come from the
-  registry.
+  `source:` as written. Its aut-nums and inet-rtrs answer before the
+  registry's under any `source:`, with dumps and with `-irrd` alike: the
+  CLI wraps the registry's `PolicySource` so that `AutNum` and `InetRtr`
+  answer from the file first (ruling R15; a draft written with another
+  `source:` than the registry's would otherwise lose to the registry's
+  object). Sets come from the registry: with dumps the file's objects are
+  also `Put` into the Corpus after the dumps, replacing an object of the
+  same class, key and source, so its sets join the dumps'; with `-irrd`
+  sets always come from the server. The file is checked (ruling R16): its
+  parse and decode diagnostics are written to stderr, and an object with an
+  error, one the Corpus keeps nothing of, or a file with no aut-num and no
+  inet-rtr fails the run, naming the file and the object.
 - **Routes.** Session mode: one or more MRT files of BGP4MP messages
   (§6.2). Collector mode: one or more MRT RIB dumps (§6.3). Compressed
   files through `mrt.Decompress`.

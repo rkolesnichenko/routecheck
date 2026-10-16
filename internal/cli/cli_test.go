@@ -6,10 +6,12 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"io"
 	"net"
 	"net/netip"
 	"os"
 	"path/filepath"
+	"reflect"
 	"slices"
 	"strings"
 	"testing"
@@ -17,12 +19,16 @@ import (
 
 	"github.com/rkolesnichenko/mrt"
 	"github.com/rkolesnichenko/mrt/bgp"
+	"github.com/rkolesnichenko/routecheck"
 	"github.com/rkolesnichenko/routecheck/internal/mrtgen"
 	"github.com/rkolesnichenko/routecheck/verdict"
 	"github.com/rkolesnichenko/rpsl"
+	"github.com/rkolesnichenko/rpsl/policy"
 	"github.com/rkolesnichenko/rpsl/resolve"
 	"github.com/rkolesnichenko/rpsl/resolve/irrdq"
 	"github.com/rkolesnichenko/rpsl/resolve/irrdserver"
+	"github.com/rkolesnichenko/rpsl/resolve/peval"
+	"github.com/rkolesnichenko/rpsl/types"
 )
 
 func addr(s string) netip.Addr     { return netip.MustParseAddr(s) }
@@ -91,7 +97,7 @@ func TestHelp(t *testing.T) {
 		t.Errorf("exit %d, want 0; stderr %s", code, stderr)
 	}
 	wantContains(t, "usage", stdout,
-		"routecheck -local AS -peer AS (-session FILE | -collector FILE)",
+		"routecheck -peer AS (-session FILE [-local AS] | -collector FILE -local AS)",
 		"-irrd", "-sources", "-policy", "-vrps", "-af", "-direction", "-peer-addr", "-at", "-pre-policy",
 		"-local-rtr", "-peer-rtr", "-format", "-routes", "repeatable", "Exit status")
 }
@@ -164,6 +170,7 @@ func TestLocalFromCapture(t *testing.T) {
 
 func TestFailures(t *testing.T) {
 	missingAutNum := write(t, "reg.txt", []byte("aut-num: AS64500\nexport: to AS64496 announce AS64500\nsource: TEST\n"))
+	dead := closedPort(t)
 	truncated := write(t, "cut.mrt", sessionGolden()[:len(sessionGolden())-7])
 	rib := mrtgen.Header(mrt.TypeTableDumpV2, mrt.SubPeerIndexTable, gAt(0),
 		mrtgen.PeerIndexTable(addr("192.0.2.254"), "", []mrt.Peer{{BGPID: addr("192.0.2.1"), Addr: addr("192.0.2.1"), AS: gX}}))
@@ -184,7 +191,8 @@ func TestFailures(t *testing.T) {
 		{"truncated capture", []string{"-local", "AS64496", "-peer", "AS64500", "-session", capture, "-session", truncated, "-dump", registry}, truncated},
 		{"broken gzip", []string{"-local", "AS64496", "-peer", "AS64500", "-session", brokenGzip, "-dump", registry}, brokenGzip},
 		{"RIB in session mode", []string{"-local", "AS64496", "-peer", "AS64500", "-session", ribFile, "-dump", registry}, "-pre-policy"},
-		{"unreachable irrd", []string{"-local", "AS64496", "-peer", "AS64500", "-session", capture, "-irrd", closedPort(t)}, "routecheck:"},
+		{"unreachable irrd", []string{"-local", "AS64496", "-peer", "AS64500", "-session", capture, "-irrd", dead}, dead},
+		{"second capture missing", []string{"-local", "AS64496", "-peer", "AS64500", "-session", capture, "-session", "testdata/session/nonexistent.mrt", "-dump", registry}, "testdata/session/nonexistent.mrt"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			code, stdout, stderr := run(t, tc.args...)
@@ -501,7 +509,7 @@ source: TEST
 		if code != exitOK {
 			t.Errorf("source %s: exit %d; stderr %s\n%s", src, code, stderr, out)
 		}
-		wantContains(t, "source "+src, out, "1 route: 1 accepted", "accept AS64500", "-policy "+draft)
+		wantContains(t, "source "+src, out, "1 route: 1 accepted", "accept AS64500", "-policy "+draft+": aut-num AS64496 ("+src+") answers first")
 	}
 }
 
@@ -613,4 +621,212 @@ func TestGroups(t *testing.T) {
 	if strings.Contains(out, "203.0.113.80/28") {
 		t.Errorf("more than %d examples:\n%s", maxExamples, out)
 	}
+}
+
+// TestDraftChecked: a -policy draft that does not decode cleanly, holds an
+// object routecheck cannot use, or supplies no aut-num or inet-rtr fails the
+// run (exit 3) naming the file and the object; its diagnostics are written
+// to stderr.
+func TestDraftChecked(t *testing.T) {
+	for _, tc := range []struct {
+		name, text string
+		wants      []string
+	}{
+		{"typo", "aut-num: AS64496\nimport: from AS64500 acept AS64500\nsource: TEST\n",
+			[]string{":2:35: error policy/expect-filter: expected 'accept' clause", ":2:22: warning policy/router", "aut-num AS64496"}},
+		{"bad key", "aut-num: AS6449x\nimport: from AS64500 accept AS64500\nsource: TEST\n",
+			[]string{"invalid ASN", "aut-num AS6449x"}},
+		{"unknown class", "aut-nm: AS64496\nimport: from AS64500 accept AS64500\nsource: TEST\n",
+			[]string{"aut-nm AS64496", "not an object routecheck uses"}},
+		{"no aut-num", "route: 192.0.2.0/24\norigin: AS64500\nsource: TEST\n",
+			[]string{"no aut-num and no inet-rtr"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			draft := write(t, "draft.txt", []byte(tc.text))
+			for _, reg := range [][]string{{"-dump", registry}, {"-irrd", closedPort(t)}} {
+				args := append([]string{"-local", "AS64496", "-peer", "AS64500", "-session", capture, "-policy", draft}, reg...)
+				code, stdout, stderr := run(t, args...)
+				if code != exitFailed {
+					t.Errorf("%s: exit %d, want %d; stderr %s", reg[0], code, exitFailed, stderr)
+				}
+				if stdout != "" {
+					t.Errorf("%s: stdout %q", reg[0], stdout)
+				}
+				wantContains(t, reg[0]+" stderr", stderr, append([]string{draft}, tc.wants...)...)
+			}
+		})
+	}
+}
+
+func TestIRRdAddr(t *testing.T) {
+	for in, want := range map[string]string{
+		"whois.radb.net":      "whois.radb.net:43",
+		"whois.radb.net:4300": "whois.radb.net:4300",
+		"192.0.2.1":           "192.0.2.1:43",
+		"192.0.2.1:4300":      "192.0.2.1:4300",
+		"2001:db8::1":         "[2001:db8::1]:43",
+		"[2001:db8::1]":       "[2001:db8::1]:43",
+		"[2001:db8::1]:4300":  "[2001:db8::1]:4300",
+	} {
+		if got := irrdAddr(in); got != want {
+			t.Errorf("irrdAddr(%q) = %q, want %q", in, got, want)
+		}
+	}
+}
+
+// TestTermText: a term without a filter reads as its peering alone.
+func TestTermText(t *testing.T) {
+	p, diags := policy.ParsePeering("AS64500")
+	if len(diags) > 0 {
+		t.Fatal(diags)
+	}
+	if got := termText("import", policy.Term{Peering: p}); got != "from AS64500" {
+		t.Errorf("import, no filter: %q", got)
+	}
+	if got := termText("export", policy.Term{Peering: p}); got != "to AS64500" {
+		t.Errorf("export, no filter: %q", got)
+	}
+	if got := termText("import", policy.Term{}); strings.Contains(got, "accept") {
+		t.Errorf("empty term: %q", got)
+	}
+}
+
+// TestRejectedHeaderNamesClause: the Rejected groups' header names the
+// clause of the first Fail, not clause 1 by default.
+func TestRejectedHeaderNamesClause(t *testing.T) {
+	p := &printer{cfg: &config{mode: routecheck.ModeSession, routes: "none"}, x: 64500, l: 64496}
+	rv := routecheck.RouteVerdict{
+		Route:   verdict.Route{Prefix: prefix("192.0.2.0/24"), Path: []types.ASN{64500}, PathKnown: true, CommsKnown: true},
+		Verdict: verdict.Verdict{Outcome: verdict.Rejected, Fails: []verdict.Fail{{Clause: 1, Test: verdict.FailPrefixNotIn}}},
+	}
+	p.report("import", routecheck.Report{Toward: 64500, Routes: []routecheck.RouteVerdict{rv}, Rejected: 1}, "import", "AS64496")
+	wantContains(t, "report", p.b.String(), "rejected, by the first failing test of clause 2:")
+}
+
+// TestInputsOpenedOneAtATime: the inputs are opened lazily, each closed
+// before the next is opened, so that many files need one descriptor.
+func TestInputsOpenedOneAtATime(t *testing.T) {
+	open, most := 0, 0
+	orig := openInput
+	t.Cleanup(func() { openInput = orig })
+	openInput = func(name string) (io.ReadCloser, error) {
+		f, err := orig(name)
+		if err != nil {
+			return nil, err
+		}
+		open++
+		most = max(most, open)
+		return closer{f, func() { open-- }}, nil
+	}
+	var args []string
+	for range 20 {
+		args = append(args, "-session", capture)
+	}
+	code, _, stderr := run(t, append(args, "-local", "AS64496", "-peer", "AS64500", "-dump", registry)...)
+	if code != exitRejected {
+		t.Fatalf("exit %d; stderr %s", code, stderr)
+	}
+	if most != 1 || open != 0 {
+		t.Errorf("at most %d inputs open at once, %d left open; want 1 and 0", most, open)
+	}
+}
+
+type closer struct {
+	io.ReadCloser
+	done func()
+}
+
+func (c closer) Close() error { c.done(); return c.ReadCloser.Close() }
+
+// TestJSONView: the JSON is the view of routecheck.Result: every Result,
+// Report, RouteVerdict, Verdict and Route field name, readable values
+// (outcomes and RPKI states by name, clause and term text, communities as
+// hi:lo, missing sets by name), and it decodes back into the view with no
+// unknown field and re-encodes to the same bytes.
+func TestJSONView(t *testing.T) {
+	for _, g := range goldens {
+		t.Run(g.name, func(t *testing.T) {
+			_, out, stderr := run(t, append(slices.Clone(g.args), "-format", "json")...)
+			if stderr != "" {
+				t.Fatalf("stderr %s", stderr)
+			}
+			dec := json.NewDecoder(strings.NewReader(out))
+			dec.DisallowUnknownFields()
+			var view []jsonResult
+			if err := dec.Decode(&view); err != nil {
+				t.Fatalf("does not decode into the view: %v", err)
+			}
+			var again bytes.Buffer
+			if err := encodeJSON(&again, view); err != nil {
+				t.Fatal(err)
+			}
+			if again.String() != out {
+				t.Errorf("re-encoded view differs:\n%s", again.String())
+			}
+		})
+	}
+
+	_, out, _ := run(t, session("-vrps", "testdata/rpki/vrps.json", "-format", "json")...)
+	var doc []map[string]any
+	if err := json.Unmarshal([]byte(out), &doc); err != nil {
+		t.Fatal(err)
+	}
+	keys := func(v any) []string {
+		var ks []string
+		for k := range v.(map[string]any) {
+			ks = append(ks, k)
+		}
+		slices.Sort(ks)
+		return ks
+	}
+	names := func(v any) []string {
+		var ns []string
+		rt := reflect.TypeOf(v)
+		for i := range rt.NumField() {
+			if rt.Field(i).IsExported() {
+				ns = append(ns, rt.Field(i).Name)
+			}
+		}
+		slices.Sort(ns)
+		return ns
+	}
+	imp := doc[0]["Import"].(map[string]any)
+	route := imp["Routes"].([]any)[3].(map[string]any) // 203.0.113.0/24, rejected
+	for _, c := range []struct {
+		label string
+		got   any
+		want  any
+	}{
+		{"Result", doc[0], routecheck.Result{}},
+		{"Report", imp, routecheck.Report{}},
+		{"Policy", imp["Policy"], peval.Policy{}},
+		{"RouteVerdict", route, routecheck.RouteVerdict{}},
+		{"Verdict", route["Verdict"], verdict.Verdict{}},
+		{"Route", route["Route"], verdict.Route{}},
+		{"Fail", route["Verdict"].(map[string]any)["Fails"].([]any)[0], verdict.Fail{}},
+	} {
+		if got, want := keys(c.got), names(c.want); !slices.Equal(got, want) {
+			t.Errorf("%s keys %v, want %v", c.label, got, want)
+		}
+	}
+	wantContains(t, "JSON", out,
+		`"Outcome": "rejected"`, `"Outcome": "accepted"`, `"Outcome": "undecided"`,
+		`"RPKI": "invalid"`, `"RPKI": "valid"`, `"RPKI": "not_found"`,
+		`"Term": "from AS64500 accept <^AS64500 AS64501$>"`, `"Filter": "<^ AS64500 AS64501 $>"`,
+		`"Term": "from AS64500 accept AS64500"`, `"Filter": "{192.0.2.0/24}"`)
+	wantContains(t, "compact JSON", compact(t, out), `"Communities":["64500:100"]`)
+
+	// Missing sets by name.
+	reg := write(t, "reg.txt", []byte("aut-num: AS64496\nimport: from AS64500 accept AS-NOWHERE\nsource: TEST\n"))
+	_, out, _ = run(t, "-local", "AS64496", "-peer", "AS64500", "-session", capture, "-dump", reg, "-direction", "import", "-af", "ipv4", "-format", "json")
+	wantContains(t, "compact JSON", compact(t, out), `"Missing":["AS-NOWHERE"]`)
+}
+
+func compact(t *testing.T, s string) string {
+	t.Helper()
+	var b bytes.Buffer
+	if err := json.Compact(&b, []byte(s)); err != nil {
+		t.Fatal(err)
+	}
+	return b.String()
 }

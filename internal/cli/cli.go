@@ -31,7 +31,7 @@ const (
 // shows.
 const maxExamples = 5
 
-const synopsis = `routecheck -local AS -peer AS (-session FILE | -collector FILE)
+const synopsis = `routecheck -peer AS (-session FILE [-local AS] | -collector FILE -local AS)
            (-dump FILE | -irrd HOST:PORT [-sources LIST]) [-policy FILE]
            [-vrps FILE] [-af ipv4|ipv6|both] [-direction import|export|both]
            [-peer-addr IP] [-at TIME] [-pre-policy]
@@ -56,7 +56,9 @@ given, wins) or a live IRRd (-irrd, with -sources its precedence). -policy
 adds a local RPSL file, a draft not yet published: its aut-nums and
 inet-rtrs answer before the registry's, under any source; with -dump its
 other objects join the dumps' (replacing one of the same class, key and
-source), with -irrd sets always come from the server.
+source), with -irrd sets always come from the server. Its diagnostics are
+written to stderr; an object with an error, an object routecheck keeps
+nothing of, or a file with no aut-num and no inet-rtr fails the run.
 
 In session mode -local defaults to the capture's local AS. When most routes
 seen do not start with X - the announcements skipped for it outnumber the
@@ -90,8 +92,11 @@ type config struct {
 	vrps       string
 	opts       routecheck.Options
 	localGiven bool
-	format     string
-	routes     string
+	// draftSupplies is what -policy answers first ("aut-num AS1 (TEST)"),
+	// set by loadPolicy.
+	draftSupplies []string
+	format        string
+	routes        string
 }
 
 // usageError is a command line routecheck cannot use.
@@ -117,26 +122,24 @@ func Run(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 		return exitFailed
 	}
 
-	// The inputs are opened first, so that a mistyped name fails before a
-	// long registry load.
-	in, err := openInputs(cfg.inputs)
-	if err != nil {
+	// The inputs are looked for first, so that a mistyped name fails before
+	// a long registry load; each is opened only when it is read.
+	if err := checkInputs(cfg.inputs); err != nil {
 		return fail(err)
 	}
-	defer in.close()
 	if cfg.vrps != "" {
 		if cfg.opts.VRPs, err = readVRPs(cfg.vrps); err != nil {
 			return fail(err)
 		}
 	}
-	src, closeSrc, err := loadPolicy(cfg)
+	src, closeSrc, err := loadPolicy(cfg, stderr)
 	if err != nil {
 		return fail(err)
 	}
 	defer closeSrc()
 
 	c := &routecheck.Checker{Eval: peval.Evaluator{Src: src}, Routes: src}
-	results, err := c.Check(ctx, cfg.mode, in.records(), cfg.opts)
+	results, err := c.Check(ctx, cfg.mode, records(cfg.inputs), cfg.opts)
 	if errors.Is(err, routecheck.ErrOptions) {
 		hint := ""
 		if !cfg.localGiven {

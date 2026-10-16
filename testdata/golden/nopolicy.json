@@ -1,32 +1,6 @@
 [
   {
     "AF": "ipv4.unicast",
-    "Import": {
-      "Toward": "AS64511",
-      "Policy": {
-        "Clauses": null,
-        "Undecided": null
-      },
-      "NoPolicy": true,
-      "Routes": null,
-      "Accepted": 0,
-      "Rejected": 0,
-      "Undecided": 0
-    },
-    "Export": [
-      {
-        "Toward": "AS64496",
-        "Policy": {
-          "Clauses": null,
-          "Undecided": null
-        },
-        "NoPolicy": true,
-        "Routes": null,
-        "Accepted": 0,
-        "Rejected": 0,
-        "Undecided": 0
-      }
-    ],
     "Coverage": {
       "Session": {
         "LocalAS": "AS64496",
@@ -45,36 +19,36 @@
       "DirectNotChecked": 0,
       "HintLocalAddr": "192.0.2.6",
       "HintPeerAddr": "192.0.2.5"
-    }
+    },
+    "Import": {
+      "Toward": "AS64511",
+      "NoPolicy": true,
+      "Accepted": 0,
+      "Rejected": 0,
+      "Undecided": 0,
+      "Policy": {
+        "Clauses": null,
+        "Undecided": null
+      },
+      "Routes": null
+    },
+    "Export": [
+      {
+        "Toward": "AS64496",
+        "NoPolicy": true,
+        "Accepted": 0,
+        "Rejected": 0,
+        "Undecided": 0,
+        "Policy": {
+          "Clauses": null,
+          "Undecided": null
+        },
+        "Routes": null
+      }
+    ]
   },
   {
     "AF": "ipv6.unicast",
-    "Import": {
-      "Toward": "AS64511",
-      "Policy": {
-        "Clauses": null,
-        "Undecided": null
-      },
-      "NoPolicy": true,
-      "Routes": null,
-      "Accepted": 0,
-      "Rejected": 0,
-      "Undecided": 0
-    },
-    "Export": [
-      {
-        "Toward": "AS64496",
-        "Policy": {
-          "Clauses": null,
-          "Undecided": null
-        },
-        "NoPolicy": true,
-        "Routes": null,
-        "Accepted": 0,
-        "Rejected": 0,
-        "Undecided": 0
-      }
-    ],
     "Coverage": {
       "Session": {
         "LocalAS": "AS64496",
@@ -93,6 +67,32 @@
       "DirectNotChecked": 0,
       "HintLocalAddr": "192.0.2.6",
       "HintPeerAddr": "192.0.2.5"
-    }
+    },
+    "Import": {
+      "Toward": "AS64511",
+      "NoPolicy": true,
+      "Accepted": 0,
+      "Rejected": 0,
+      "Undecided": 0,
+      "Policy": {
+        "Clauses": null,
+        "Undecided": null
+      },
+      "Routes": null
+    },
+    "Export": [
+      {
+        "Toward": "AS64496",
+        "NoPolicy": true,
+        "Accepted": 0,
+        "Rejected": 0,
+        "Undecided": 0,
+        "Policy": {
+          "Clauses": null,
+          "Undecided": null
+        },
+        "Routes": null
+      }
+    ]
   }
 ]

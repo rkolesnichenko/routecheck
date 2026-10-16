@@ -5,6 +5,7 @@ import (
 	"errors"
 	"net/netip"
 	"reflect"
+	"strconv"
 	"sync"
 
 	"github.com/rkolesnichenko/routecheck/pathre"
@@ -33,6 +34,23 @@ const (
 	Rejected
 	Undecided
 )
+
+// String returns "accepted", "rejected" or "undecided", or "Outcome(n)" for
+// any other value.
+func (o Outcome) String() string {
+	switch o {
+	case Accepted:
+		return "accepted"
+	case Rejected:
+		return "rejected"
+	case Undecided:
+		return "undecided"
+	}
+	return "Outcome(" + strconv.Itoa(int(o)) + ")"
+}
+
+// MarshalText writes o as String does, so that JSON names it.
+func (o Outcome) MarshalText() ([]byte, error) { return []byte(o.String()), nil }
 
 // Verdict is a route's outcome against a policy, with what decided it. A
 // clause is named by its position in Policy.Clauses (Pos), not by its

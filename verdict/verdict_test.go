@@ -674,3 +674,16 @@ func TestDecideAllocs(t *testing.T) {
 		t.Errorf("Decide allocates %v times, want at most 1 (the memo key)", n)
 	}
 }
+
+// TestOutcomeText: an Outcome writes as its name, in text and in JSON.
+func TestOutcomeText(t *testing.T) {
+	for o, want := range map[Outcome]string{Accepted: "accepted", Rejected: "rejected", Undecided: "undecided", 0: "Outcome(0)", 9: "Outcome(9)"} {
+		if got := o.String(); got != want {
+			t.Errorf("%d.String() = %q, want %q", uint8(o), got, want)
+		}
+		b, err := o.MarshalText()
+		if err != nil || string(b) != want {
+			t.Errorf("%d.MarshalText() = %q, %v; want %q", uint8(o), b, err, want)
+		}
+	}
+}

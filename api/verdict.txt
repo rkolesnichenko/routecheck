@@ -23,6 +23,8 @@ type Fail struct
 	Test string
 	Missing []types.SetRef
 type Outcome uint8
+func (Outcome) MarshalText() ([]byte, error)
+func (Outcome) String() string
 type Reason struct
 	Kind string
 	Why string

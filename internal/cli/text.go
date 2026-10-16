@@ -88,7 +88,11 @@ func (p *printer) header() {
 		p.line("policy: -irrd %s", cfg.irrd)
 	}
 	if cfg.policyFile != "" {
-		p.line("policy: -policy %s (its aut-nums and inet-rtrs answer first)", cfg.policyFile)
+		verb := "answers"
+		if len(cfg.draftSupplies) != 1 {
+			verb = "answer"
+		}
+		p.line("policy: -policy %s: %s %s first", cfg.policyFile, strings.Join(cfg.draftSupplies, ", "), verb)
 	}
 	if cfg.opts.VRPs != nil {
 		p.line("rpki: -vrps %s (%s)", cfg.vrps, count(cfg.opts.VRPs.Len(), "VRP", "VRPs"))
@@ -248,9 +252,13 @@ func (p *printer) report(dir string, rep routecheck.Report, label, owner string)
 
 	// Rejected, by the first failing test of the first clause.
 	var rej groups
+	firstClause := 0 // the clause of the first Fail: the first clause, as verdict orders Fails
 	for _, rv := range rep.Routes {
 		if rv.Verdict.Outcome == verdict.Rejected && len(rv.Verdict.Fails) > 0 {
 			f := rv.Verdict.Fails[0]
+			if len(rej.keys) == 0 {
+				firstClause = f.Clause
+			}
 			key := f.Test
 			if len(f.Missing) > 0 {
 				key += " (missing " + refs(f.Missing) + ")"
@@ -259,7 +267,7 @@ func (p *printer) report(dir string, rep routecheck.Report, label, owner string)
 		}
 	}
 	if len(rej.keys) > 0 {
-		p.line("    rejected, by the first failing test of clause 1:")
+		p.line("    rejected, by the first failing test of clause %d:", firstClause+1)
 		p.groups(rej)
 	}
 
@@ -442,10 +450,19 @@ func hygiene(rv routecheck.RouteVerdict) string {
 // part (policy.Term.String writes "PEERING | FILTER").
 func termText(dir string, t policy.Term) string {
 	peering, filter, _ := strings.Cut(t.String(), " | ")
+	peering, filter = strings.TrimSpace(peering), strings.TrimSpace(filter)
+	from, accept := "from ", " accept "
 	if dir == "export" {
-		return "to " + peering + " announce " + filter
+		from, accept = "to ", " announce "
 	}
-	return "from " + peering + " accept " + filter
+	s := ""
+	if peering != "" {
+		s = from + peering
+	}
+	if filter != "" {
+		s = strings.TrimSpace(s + accept + filter)
+	}
+	return s
 }
 
 func refs(rs []types.SetRef) string {
