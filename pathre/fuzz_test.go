@@ -1,20 +1,30 @@
 package pathre_test
 
 import (
+	"bytes"
+	"errors"
 	"testing"
 
 	"github.com/rkolesnichenko/routecheck/internal/reoracle"
+	"github.com/rkolesnichenko/routecheck/pathre"
 	"github.com/rkolesnichenko/rpsl/policy"
 	"github.com/rkolesnichenko/rpsl/types"
 )
 
-// maxFuzzPath caps the path a fuzz input decodes to: a long path makes every
-// input slow (the oracle's clamped counts grow with it) without reaching
-// any code a short one does not.
-const maxFuzzPath = 64
+// maxFuzzPath caps the path a fuzz input decodes to, past what real BGP
+// paths reach; fuzzMaxWork keeps every input fast, so a cost bug shows as
+// ErrTooExpensive rather than as a slow run. Oracle 2 is consulted only on
+// paths of up to oracleFuzzPath ASes: its clamped counts grow with the path,
+// and Go's regexp with them.
+const (
+	maxFuzzPath    = 300
+	fuzzMaxWork    = 1 << 20
+	oracleFuzzPath = 64
+)
 
-// FuzzMatch runs Match on any regexp the parser accepts and any path over six
-// ASes: it must not panic, and wherever oracle 2 answers, it must agree.
+// FuzzMatch runs MatchWith on any regexp the parser accepts and any path
+// over six ASes, with a small work budget: it must not panic, and wherever
+// both it and oracle 2 answer, they must agree.
 func FuzzMatch(f *testing.F) {
 	for _, s := range []struct {
 		re   string
@@ -30,6 +40,8 @@ func FuzzMatch(f *testing.F) {
 		{"((AS64500 | $)* ^)+", []byte{0, 0}},
 		{"PeerAS AS1:AS-X:PeerAS", []byte{0}},
 		{"AS-EMPTY? (AS-A{3,}){0,1001}", []byte{1, 2, 1, 2, 1, 2}},
+		{"(((. .){0,999} .){0,999} .){0,999} AS64502", bytes.Repeat([]byte{0, 1, 3}, 100)},
+		{"^(AS64500 AS64501)* AS64500~+ .* [^AS-A]{2,9}$", bytes.Repeat([]byte{0, 1}, 150)},
 	} {
 		f.Add(s.re, s.path)
 	}
@@ -44,6 +56,15 @@ func FuzzMatch(f *testing.F) {
 		for i, b := range raw {
 			path[i] = reoracle.FirstAS + types.ASN(b%reoracle.NumASes)
 		}
-		agree(t, re, sets, path)
+		o := pathre.MatchOptions{MaxWork: fuzzMaxWork}
+		if len(path) > oracleFuzzPath {
+			_, err := pathre.MatchWith(re, sets, path, o)
+			if err != nil && !errors.Is(err, pathre.ErrTooExpensive) &&
+				!errors.Is(err, pathre.ErrNotSingleAS) && !errors.Is(err, pathre.ErrUnbound) {
+				t.Errorf("<%s> on %d ASes: %v", re, len(path), err)
+			}
+			return
+		}
+		agree(t, re, sets, path, o)
 	})
 }

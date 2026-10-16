@@ -71,7 +71,7 @@ func TestMatchesRoutemodel(t *testing.T) {
 			if err != nil {
 				t.Errorf("line %d: <%s> on %v: %v; want an answer", line, v.RE, v.Path, err)
 			}
-			counts["too-complex, oracle 2 "+agree(t, re, sets, v.Path)]++
+			counts["too-complex, oracle 2 "+agree(t, re, sets, v.Path, pathre.MatchOptions{})]++
 		case v.Err != "" || v.Match == nil:
 			t.Fatalf("line %d: neither an answer nor a known refusal: %s", line, sc.Text())
 		default:

@@ -3,7 +3,9 @@ package pathre_test
 import (
 	"errors"
 	"slices"
+	"strings"
 	"testing"
+	"time"
 
 	"github.com/rkolesnichenko/routecheck/pathre"
 	"github.com/rkolesnichenko/rpsl/policy"
@@ -224,5 +226,100 @@ func TestMatchHandBuilt(t *testing.T) {
 		if (err != nil) != c.err || got != c.want {
 			t.Errorf("%s: Match = %v, %v; want %v, error %v", c.name, got, err, c.want, c.err)
 		}
+	}
+}
+
+// cycle returns a path of n ASes cycling through AS3 to AS9: no AS2.
+func cycle(n int) []types.ASN {
+	path := make([]types.ASN, n)
+	for i := range path {
+		path[i] = types.ASN(i%7 + 3)
+	}
+	return path
+}
+
+// repeatRE writes term k times in sequence, then tail.
+func repeatRE(term string, k int, tail string) string {
+	return strings.Repeat(term+" ", k) + tail
+}
+
+// TestMatchWith covers the work budget: Match is MatchWith with the zero
+// options, 0 or less means DefaultMaxWork, a small budget refuses, and
+// regexps built to be expensive answer or refuse within a second.
+func TestMatchWith(t *testing.T) {
+	re := parse(t, "^AS1 .* AS2$")
+	path := p(1, 7, 7, 2)
+	for _, o := range []pathre.MatchOptions{{}, {MaxWork: -1}, {MaxWork: pathre.DefaultMaxWork}} {
+		if got, err := pathre.MatchWith(re, nil, path, o); !got || err != nil {
+			t.Errorf("MatchWith(%+v) = %v, %v; want true", o, got, err)
+		}
+	}
+	if got, err := pathre.MatchWith(re, nil, path, pathre.MatchOptions{MaxWork: 10}); got || !errors.Is(err, pathre.ErrTooExpensive) {
+		t.Errorf("MatchWith(MaxWork 10) = %v, %v; want ErrTooExpensive", got, err)
+	}
+	// The refusals come first: they do not depend on the work.
+	if _, err := pathre.MatchWith(parse(t, "PeerAS"), nil, path, pathre.MatchOptions{MaxWork: 1}); !errors.Is(err, pathre.ErrUnbound) {
+		t.Errorf("unbound with MaxWork 1: %v", err)
+	}
+
+	for _, c := range []struct {
+		re   string
+		path []types.ASN
+		// want is the answer, or the error when err is set.
+		want bool
+		err  error
+	}{
+		// Each of these took the first matcher seconds and gigabytes:
+		// evaluated from all starts at once, a repetition whose operand
+		// matches the empty path is settled in one step.
+		{"(.?){999} AS2", cycle(1000), false, nil},
+		{repeatRE("(.?){999}", 20, "AS2"), cycle(1000), false, nil},
+		{repeatRE("(.?){999}", 20, "AS9"), cycle(1000), true, nil},
+		{repeatRE("(.?){300}", 10, "AS2"), cycle(500), false, nil},
+		{"(.?){400,} AS2", cycle(500), false, nil},
+		{".* AS2", cycle(4000), false, nil},
+		// Nested repetitions whose every layer differs: the budget stops it.
+		{"(((. .){0,999} .){0,999} .){0,999} AS2", cycle(1000), false, pathre.ErrTooExpensive},
+	} {
+		start := time.Now()
+		got, err := pathre.Match(parse(t, c.re), nil, c.path)
+		took := time.Since(start)
+		if c.err != nil && !errors.Is(err, c.err) || c.err == nil && (err != nil || got != c.want) {
+			t.Errorf("<%.40s…> on %d ASes = %v, %v; want %v, %v", c.re, len(c.path), got, err, c.want, c.err)
+		}
+		if took > time.Second {
+			t.Errorf("<%.40s…> on %d ASes took %v, want under 1s", c.re, len(c.path), took)
+		}
+	}
+}
+
+// BenchmarkMatch times a realistic match, the shape a policy writes, and an
+// adversarial one the budget refuses.
+func BenchmarkMatch(b *testing.B) {
+	path := make([]types.ASN, 30)
+	for i := range path {
+		path[i] = types.ASN(64500 + i%12)
+	}
+	path[0], path[len(path)-1] = 64496, 64511
+	for _, c := range []struct {
+		name string
+		re   string
+		path []types.ASN
+	}{
+		{"realistic", "^AS64496 .* AS64511$", path},
+		{"realistic-sets", "^AS64496+ [AS64500 - AS64510 AS-A]* AS64511~+$", path},
+		{"adversarial", "(((. .){0,999} .){0,999} .){0,999} AS2", cycle(1000)},
+		{"adversarial-empty-operand", repeatRE("(.?){999}", 20, "AS2"), cycle(1000)},
+	} {
+		re, err := policy.ParseASPathRegexp(c.re)
+		if err != nil {
+			b.Fatal(err)
+		}
+		b.Run(c.name, func(b *testing.B) {
+			b.ReportAllocs()
+			for i := 0; i < b.N; i++ {
+				_, _ = pathre.Match(re, nil, c.path)
+			}
+		})
 	}
 }

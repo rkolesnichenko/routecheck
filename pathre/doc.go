@@ -9,8 +9,11 @@
 // "{m}", "{m,n}" and "{m,}" repeat as in POSIX; and "~*", "~+" and "~{m,n}"
 // repeat with every repetition the same AS.
 //
-// The matcher never uses package regexp and never backtracks: for each node
-// of the regexp and each start position it computes the set of positions a
-// match can end at, once. A repetition count above the path's length costs
-// nothing more than one at it, so no count is too large (spec D6).
+// The matcher never uses package regexp and never backtracks. It evaluates
+// each node of the regexp on a set of start positions at once, giving the
+// set of positions a match can end at; the unanchored search is one
+// evaluation from every position. A repetition count above the path's
+// length, plus one, costs no more than that count, and no count is refused
+// for its size (spec D6). Work is bounded instead: MatchWith stops with
+// ErrTooExpensive past MatchOptions.MaxWork steps.
 package pathre

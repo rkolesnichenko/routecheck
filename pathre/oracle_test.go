@@ -11,15 +11,21 @@ import (
 	"github.com/rkolesnichenko/rpsl/types"
 )
 
-// agree compares Match with oracle 2 (internal/reoracle) on one regexp and
-// path. Both must refuse a same-AS repetition over a wider operand, or
+// agree compares MatchWith(o) with oracle 2 (internal/reoracle) on one
+// regexp and path. ErrTooExpensive is an answer only with a MaxWork set. Both must refuse a same-AS repetition over a wider operand, or
 // neither; when both answer, the answers must be equal. A translation Go
 // cannot compile is the only answer the oracle may lack. It reports how the
-// pair came out: "true", "false", "not-single-as", "unbound" or
-// "oracle-too-complex".
-func agree(t testing.TB, re *policy.ASPathRE, sets map[types.SetName]resolve.ASNSet, path []types.ASN) string {
+// pair came out: "true", "false", "not-single-as", "unbound",
+// "oracle-too-complex" or "too-expensive".
+func agree(t testing.TB, re *policy.ASPathRE, sets map[types.SetName]resolve.ASNSet, path []types.ASN, o pathre.MatchOptions) string {
 	t.Helper()
-	got, err := pathre.Match(re, sets, path)
+	got, err := pathre.MatchWith(re, sets, path, o)
+	if errors.Is(err, pathre.ErrTooExpensive) {
+		if o.MaxWork == 0 {
+			t.Errorf("<%s> on %v: %v", re, path, err)
+		}
+		return "too-expensive"
+	}
 	want, oerr := reoracle.Match(re, sets, path)
 	switch {
 	case errors.Is(oerr, reoracle.ErrTooComplex):
@@ -67,7 +73,7 @@ func TestMatchesOracle(t *testing.T) {
 			t.Fatalf("generated <%s> does not parse: %v", body, err)
 		}
 		for j := 0; j < paths; j++ {
-			counts[agree(t, re, sets, g.Path())]++
+			counts[agree(t, re, sets, g.Path(), pathre.MatchOptions{})]++
 		}
 		if t.Failed() {
 			t.FailNow()

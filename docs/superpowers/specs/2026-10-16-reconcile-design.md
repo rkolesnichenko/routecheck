@@ -66,8 +66,11 @@ where it appears):
   a router configured from the registry rejects it too (§6.4).
 - D5. A same-AS repetition (`~*`, `~+`, `~{m,n}`) whose operand is not a
   single-AS atom is undecided, as rpsl's test oracle declines it (§6.5).
-- D6. The matcher has no repetition-count limit: its cost does not grow
-  with the counts (§6.5).
+- D6. The matcher has no repetition-count limit; a work budget instead
+  (`MatchWith`/`MaxWork`), and exceeding it is Undecided
+  (`ReasonPathTooExpensive`, §6.5). (Amended in Task 3's review: the
+  first wording claimed a cost that does not grow with the counts; it grows
+  with them up to L+1.)
 - D8. ASPA path verification is not in the first version (§12).
 - D9. Same Go floor (1.23), conventions (C1–C3), API golden, check script,
   CI shape and repository security settings as rpsl and mrt.
@@ -259,7 +262,8 @@ Every test is three-valued: **yes**, **no**, **undecided**.
   test: ANY is `0.0.0.0/0^0-32` / `::/0^0-128` (`AnyPrefix()`), and an
   empty `Prefixes` matches nothing.
 - Path (`PathMatch`): `pathre.Match`'s answer, flipped when `Negated`;
-  undecided when `PathKnown` is false or the matcher declines (D5).
+  undecided when `PathKnown` is false, when the matcher declines (D5), or
+  when it exceeds its work budget (D6).
 - Community (`CommunityMatch`): undecided when `CommsKnown` is false, when a
   value is `internet` (no defined value, §3) or does not parse; otherwise
   `contains`: every listed value present; `==`: the sets equal. Values
@@ -285,7 +289,8 @@ of its conjuncts. Then, over the policy's clauses in order:
 
 - **Undecided** otherwise, with every reason: the undecided tests' kinds
   (path not a plain sequence, communities not known, `internet`, same-AS
-  repetition over a sequence) and each undecided term's `peval` `Why`.
+  repetition over a sequence, path regexp too expensive for the path) and
+  each undecided term's `peval` `Why`.
 
 A clause is identified by its position in `Policy.Clauses` (`Pos`) and
 shown with peval's `Clause.Index`, the attribute's position: one `import:`
@@ -308,8 +313,18 @@ Source error) is an error for the whole run, never a verdict.
 // absent and matches any AS). re's PeerAS must already be bound.
 func Match(re *policy.ASPathRE, sets map[types.SetName]resolve.ASNSet, path []types.ASN) (bool, error)
 
+// MatchWith is Match with options; Match is MatchWith with the zero ones.
+func MatchWith(re *policy.ASPathRE, sets map[types.SetName]resolve.ASNSet, path []types.ASN, o MatchOptions) (bool, error)
+
+type MatchOptions struct {
+	MaxWork int // steps; 0 means DefaultMaxWork
+}
+
+const DefaultMaxWork = 10_000_000
+
 var ErrNotSingleAS = errors.New("pathre: same-AS repetition over more than one AS")
 var ErrUnbound = errors.New("pathre: PeerAS not bound")
+var ErrTooExpensive = errors.New("pathre: regexp too expensive for this path")
 ```
 
 - Semantics as §3 quotes: alphabet = AS numbers; unanchored = any
@@ -320,13 +335,30 @@ var ErrUnbound = errors.New("pathre: PeerAS not bound")
 - `~` repetitions: the operand must be a single-AS atom (an AS, `.`, a
   class, a set); k repetitions match a run of k copies of one AS the atom
   accepts. Any other operand → `ErrNotSingleAS` (D5), which `verdict`
-  turns into undecided.
-- Algorithm (my call): position sets — for each sub-expression, the set of
-  end positions reachable from a start position, memoized on
-  (node, start). Cost is O(nodes × L²) for a path of L ASes, independent
-  of repetition counts (D6): a `{m,n}` with n > L+1 behaves as `{m,L+1}`
-  once the operand cannot match the empty path, and the builder handles
-  operands that can (a fixed point over end-position sets).
+  turns into undecided. The empty path holds no AS to make a run of, so
+  there every `~` repetition, of any operand, matches zero repetitions
+  only (or nothing when its minimum is above 0), and `ErrNotSingleAS` is
+  returned only on a non-empty path — as rpsl's routemodel does.
+- Algorithm (my call): position sets, evaluated on a set of starts at
+  once — for each sub-expression, the set of end positions reachable from
+  any position of a given start set; the unanchored search is one
+  evaluation of the regexp from every position. A repetition count is
+  clamped at L+1 for a path of L ASes, which keeps the answer (spec §10's
+  argument), and a repetition's layers stop as soon as one is empty or
+  equals the one before, so an operand matching the empty path is settled
+  in one step. Cost is O(size × ⌈(L+1)/64⌉) for a regexp without
+  repetitions; each repetition multiplies the cost of its operand by the
+  layers it runs, at most L+2, so nested repetitions whose layers keep
+  changing grow as L to the power of their nesting depth. It is not
+  independent of the counts below L+1.
+- Work budget: `MatchWith` counts steps (a 64-bit word of a position set
+  allocated, read or written; an AS tested against an atom item; a node
+  compiled), so time and allocation are both bounded, and stops with
+  `ErrTooExpensive` past `MaxWork` (`DefaultMaxWork` = 10,000,000 for
+  `Match`), which `verdict` turns into undecided
+  (`ReasonPathTooExpensive`). The default is about 19 times the most any
+  regexp needs among the routemodel vectors, the RFC examples and 40,000
+  generator regexps over paths of up to 255 ASes.
 - No `regexp` package, no backtracking; must never panic (fuzzed).
 
 ### 6.6 Hygiene
@@ -441,7 +473,8 @@ type Fail struct {
 
 type Reason struct {
 	Kind   string // ReasonPathNotSequence, ReasonCommsUnknown, ReasonCommInternet,
-	              // ReasonCommValue, ReasonSameASRun, or ReasonPeval
+	              // ReasonCommValue, ReasonSameASRun, ReasonPathTooExpensive,
+	              // or ReasonPeval
 	Why    string // ReasonPeval: peval's Why text as given (a Why* constant,
 	              // possibly with a suffix: WhyProtocol and WhyInto add the protocol)
 	Clause int    // a filter reason: Pos in Policy.Clauses; ReasonPeval: -1
