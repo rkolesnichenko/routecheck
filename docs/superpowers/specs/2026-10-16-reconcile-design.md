@@ -158,13 +158,15 @@ routecheck/
   CLI wraps the registry's `PolicySource` so that `AutNum` and `InetRtr`
   answer from the file first (ruling R15; a draft written with another
   `source:` than the registry's would otherwise lose to the registry's
-  object). With dumps its aut-nums, inet-rtrs and routes are also `Put`
-  into the Corpus after the dumps, replacing an object of the same class,
-  key and source. Sets always come from the registry: a set object in the
-  file (as-set, route-set, filter-set, peering-set, rtr-set) is skipped with
-  a warning, broken or not, as is an object of a class routecheck does not
-  use (mntner, person, role, …) and, with `-irrd`, a route (rulings R16,
-  R17). The file is checked: its parse and decode diagnostics are written
+  object). With dumps its aut-nums and inet-rtrs are also `Put` into the
+  Corpus after the dumps, replacing an object of the same class, key and
+  source. Only aut-nums and inet-rtrs ever come from the file: sets and
+  routes always come from the registry, so a set object (as-set,
+  route-set, filter-set, peering-set, rtr-set), a route or route6 (it would
+  change set expansions and route-object answers) and an object of a class
+  routecheck does not use (mntner, person, role, …) are skipped with a
+  warning, broken or not, with dumps and with `-irrd` alike (rulings R16,
+  R17, R18). The file is checked: its parse and decode diagnostics are written
   to stderr, and an aut-num or inet-rtr with an error or one the Corpus
   keeps nothing of, or a file with no aut-num and no inet-rtr, fails the
   run, naming the file and the object.

@@ -110,21 +110,21 @@ func irrdAddr(s string) string {
 // resolve.Corpus that keeps policy objects, in the order given; the source
 // precedence is the order in which each source: first appears in them, so an
 // object of the first dump's registry wins over another registry's. -policy
-// is read last into the same Corpus (its aut-nums, inet-rtrs and routes), so
-// its objects replace any of the same class, primary key and source (its new
+// is read last into the same Corpus (its aut-nums and inet-rtrs only), so
+// they replace any of the same class, primary key and source (its new
 // sources rank last).
 //
 // With -irrd the server is an irrd.Source with -sources as its precedence.
 //
 // Either way, -policy's aut-nums and inet-rtrs answer before the registry's,
 // under any source (spec §5): a draft written with another source: than the
-// registry's is still the one checked. Sets always come from the registry
-// (readDraft skips a draft's sets).
+// registry's is still the one checked. Sets and routes always come from the
+// registry (readDraft skips a draft's).
 func loadPolicy(cfg *config, stderr io.Writer) (resolve.PolicySource, func(), error) {
 	var d *draft
 	if cfg.policyFile != "" {
 		var err error
-		if d, err = readDraft(cfg.policyFile, len(cfg.dumps) > 0, stderr); err != nil {
+		if d, err = readDraft(cfg.policyFile, stderr); err != nil {
 			return nil, nil, err
 		}
 		cfg.draftSupplies = d.supplies
@@ -169,7 +169,7 @@ func loadPolicy(cfg *config, stderr io.Writer) (resolve.PolicySource, func(), er
 
 // draft is a -policy file, read and checked.
 type draft struct {
-	objs     []rpsl.Object   // what joins the dumps: aut-nums, inet-rtrs and (with -dump) routes
+	objs     []rpsl.Object   // what joins the dumps: its aut-nums and inet-rtrs
 	corpus   *resolve.Corpus // the file's aut-nums and inet-rtrs alone
 	sources  []string        // their sources, in first-seen order
 	supplies []string        // "aut-num AS64496 (TEST)", "inet-rtr rtr1.example.net"
@@ -185,11 +185,11 @@ var setClasses = map[string]bool{"as-set": true, "route-set": true, "filter-set"
 // them raises an Error (it would be checked misread: a typo in a policy
 // turns "accept" into a router name) or is not kept (a key that does not
 // parse), and when the file supplies none (it would change nothing). Every
-// other object is skipped with a warning, broken or not: a set (sets come
-// from the registry), a class routecheck does not use (mntner, person, …),
-// and a route or route6 with -irrd (routes come from the server) or with an
-// error. With -dump a clean route or route6 joins the dumps.
-func readDraft(name string, withDumps bool, stderr io.Writer) (*draft, error) {
+// other object is skipped with a warning, broken or not (rulings R17, R18):
+// a set or a route or route6 (they come from the registry: a draft's would
+// change set expansions and route-object answers) and a class routecheck
+// does not use (mntner, person, …).
+func readDraft(name string, stderr io.Writer) (*draft, error) {
 	d := &draft{corpus: &resolve.Corpus{KeepPolicy: true}}
 	var bad error
 	err := readRPSL(name, func(o rpsl.Object, class, key, source string, diags []rpsl.Diagnostic) {
@@ -217,14 +217,7 @@ func readDraft(name string, withDumps bool, stderr io.Writer) (*draft, error) {
 			skip("sets come from the registry")
 			return
 		case class == "route" || class == "route6":
-			switch {
-			case !withDumps:
-				skip("with -irrd, routes come from the server")
-			case failed:
-				skip("it does not decode cleanly")
-			default:
-				d.objs = append(d.objs, o)
-			}
+			skip("routes come from the registry")
 			return
 		default:
 			skip("routecheck does not use this class")

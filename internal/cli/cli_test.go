@@ -658,8 +658,8 @@ func TestDraftChecked(t *testing.T) {
 	}
 }
 
-// TestDraftSkips: objects of a class routecheck does not use, and sets
-// (which always come from the registry), are skipped with a warning; the
+// TestDraftSkips: objects of a class routecheck does not use, and sets and
+// routes (which always come from the registry), are skipped with a warning; the
 // draft's aut-num still answers first. A draft object with no source: is
 // named without one.
 func TestDraftSkips(t *testing.T) {
@@ -675,18 +675,26 @@ as-set: AS-DRAFT
 members: AS64500
 source: TEST
 
+route: 203.0.113.0/24
+origin: AS64500
+source: TEST
+
 aut-num: AS64496
 import: from AS64500 accept AS64500
 `))
 	code, out, stderr := run(t, "-local", "AS64496", "-peer", "AS64500", "-session", capture, "-dump", registry,
-		"-policy", draft, "-af", "ipv4", "-direction", "import")
+		"-policy", draft, "-af", "ipv4", "-direction", "import", "-routes", "all")
 	if code != exitRejected {
 		t.Fatalf("exit %d; stderr %s", code, stderr)
 	}
 	wantContains(t, "stderr", stderr,
 		draft+": mntner MNT-DRAFT skipped: routecheck does not use this class",
 		draft+": route-set RS-BROKEN skipped: sets come from the registry",
-		draft+": as-set AS-DRAFT skipped: sets come from the registry")
+		draft+": as-set AS-DRAFT skipped: sets come from the registry",
+		draft+": route 203.0.113.0/24 skipped: routes come from the registry")
+	// The draft's route is not used: AS64500's expansion does not gain it,
+	// and no route object is found for it (ruling R18).
+	wantContains(t, "stdout", out, "203.0.113.0/24  AS64500 AS64502  rejected: clause 1: prefix not in filter  route object no")
 	wantContains(t, "stdout", out, "policy: -policy "+draft+": aut-num AS64496 answers first\n",
 		"from AS64500 accept AS64500", "1 accepted, 4 rejected")
 	if strings.Contains(out, "()") {
