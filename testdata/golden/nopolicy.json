@@ -1,0 +1,98 @@
+[
+  {
+    "AF": "ipv4.unicast",
+    "Import": {
+      "Toward": "AS64511",
+      "Policy": {
+        "Clauses": null,
+        "Undecided": null
+      },
+      "NoPolicy": true,
+      "Routes": null,
+      "Accepted": 0,
+      "Rejected": 0,
+      "Undecided": 0
+    },
+    "Export": [
+      {
+        "Toward": "AS64496",
+        "Policy": {
+          "Clauses": null,
+          "Undecided": null
+        },
+        "NoPolicy": true,
+        "Routes": null,
+        "Accepted": 0,
+        "Rejected": 0,
+        "Undecided": 0
+      }
+    ],
+    "Coverage": {
+      "Session": {
+        "LocalAS": "AS64496",
+        "LocalAddr": "192.0.2.6",
+        "PeerAddr": "192.0.2.5",
+        "MidSession": false,
+        "DownAtEnd": false,
+        "NoRecordsBeforeAt": false,
+        "NotFirstAS": 0,
+        "Malformed": 0,
+        "MalformedResets": 0,
+        "Skipped": 0
+      },
+      "Collector": null,
+      "OtherFamilies": 0,
+      "DirectNotChecked": 0,
+      "HintLocalAddr": "192.0.2.6",
+      "HintPeerAddr": "192.0.2.5"
+    }
+  },
+  {
+    "AF": "ipv6.unicast",
+    "Import": {
+      "Toward": "AS64511",
+      "Policy": {
+        "Clauses": null,
+        "Undecided": null
+      },
+      "NoPolicy": true,
+      "Routes": null,
+      "Accepted": 0,
+      "Rejected": 0,
+      "Undecided": 0
+    },
+    "Export": [
+      {
+        "Toward": "AS64496",
+        "Policy": {
+          "Clauses": null,
+          "Undecided": null
+        },
+        "NoPolicy": true,
+        "Routes": null,
+        "Accepted": 0,
+        "Rejected": 0,
+        "Undecided": 0
+      }
+    ],
+    "Coverage": {
+      "Session": {
+        "LocalAS": "AS64496",
+        "LocalAddr": "192.0.2.6",
+        "PeerAddr": "192.0.2.5",
+        "MidSession": false,
+        "DownAtEnd": false,
+        "NoRecordsBeforeAt": false,
+        "NotFirstAS": 0,
+        "Malformed": 0,
+        "MalformedResets": 0,
+        "Skipped": 0
+      },
+      "Collector": null,
+      "OtherFamilies": 0,
+      "DirectNotChecked": 0,
+      "HintLocalAddr": "192.0.2.6",
+      "HintPeerAddr": "192.0.2.5"
+    }
+  }
+]

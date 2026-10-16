@@ -1,0 +1,910 @@
+[
+  {
+    "AF": "ipv4.unicast",
+    "Import": {
+      "Toward": "AS4766",
+      "Policy": {
+        "Clauses": [
+          {
+            "Index": 0,
+            "Term": {
+              "Via": null,
+              "Peering": {
+                "AS": {
+                  "AS": "AS4766"
+                },
+                "Router": null,
+                "AtRouter": null
+              },
+              "Actions": null,
+              "Filter": {
+                "AS": {
+                  "Name": "AS-GOLDEN-BEHIND"
+                },
+                "Op": ""
+              }
+            },
+            "Actions": null,
+            "Filter": {
+              "Conjuncts": [
+                {
+                  "Prefixes": {},
+                  "NotPrefixes": {},
+                  "Paths": null,
+                  "Communities": null
+                }
+              ]
+            },
+            "Remote": null
+          },
+          {
+            "Index": 1,
+            "Term": {
+              "Via": null,
+              "Peering": {
+                "AS": {
+                  "AS": "AS4766"
+                },
+                "Router": null,
+                "AtRouter": null
+              },
+              "Actions": null,
+              "Filter": {
+                "Op": 0,
+                "Values": [
+                  "4766:100"
+                ],
+                "Raw": "community(4766:100)"
+              }
+            },
+            "Actions": null,
+            "Filter": {
+              "Conjuncts": [
+                {
+                  "Prefixes": {},
+                  "NotPrefixes": {},
+                  "Paths": null,
+                  "Communities": [
+                    {
+                      "Negated": false,
+                      "Test": {
+                        "Op": 0,
+                        "Values": [
+                          "4766:100"
+                        ],
+                        "Raw": "community(4766:100)"
+                      }
+                    }
+                  ]
+                }
+              ]
+            },
+            "Remote": null
+          },
+          {
+            "Index": 2,
+            "Term": {
+              "Via": null,
+              "Peering": {
+                "AS": {
+                  "AS": "AS4766"
+                },
+                "Router": null,
+                "AtRouter": null
+              },
+              "Actions": null,
+              "Filter": {
+                "Raw": "^AS4766+ .*",
+                "Regexp": {
+                  "Body": {
+                    "Terms": [
+                      {},
+                      {
+                        "Inner": {
+                          "AS": "AS4766"
+                        },
+                        "Op": 1,
+                        "Min": 1,
+                        "Max": -1,
+                        "Same": false
+                      },
+                      {
+                        "Inner": {},
+                        "Op": 0,
+                        "Min": 0,
+                        "Max": -1,
+                        "Same": false
+                      }
+                    ]
+                  }
+                }
+              }
+            },
+            "Actions": null,
+            "Filter": {
+              "Conjuncts": [
+                {
+                  "Prefixes": {},
+                  "NotPrefixes": {},
+                  "Paths": [
+                    {
+                      "Negated": false,
+                      "RE": {
+                        "Body": {
+                          "Terms": [
+                            {},
+                            {
+                              "Inner": {
+                                "AS": "AS4766"
+                              },
+                              "Op": 1,
+                              "Min": 1,
+                              "Max": -1,
+                              "Same": false
+                            },
+                            {
+                              "Inner": {},
+                              "Op": 0,
+                              "Min": 0,
+                              "Max": -1,
+                              "Same": false
+                            }
+                          ]
+                        }
+                      },
+                      "Sets": {}
+                    }
+                  ],
+                  "Communities": null
+                }
+              ]
+            },
+            "Remote": null
+          }
+        ],
+        "Undecided": null
+      },
+      "NoPolicy": false,
+      "Routes": [
+        {
+          "Route": {
+            "Prefix": "1.10.145.0/24",
+            "Path": [
+              "AS4766",
+              "AS4651",
+              "AS23969"
+            ],
+            "PathKnown": true,
+            "OriginSet": false,
+            "Communities": null,
+            "CommsKnown": false
+          },
+          "Evidence": {
+            "Neighbours": [
+              "AS6939"
+            ],
+            "Direct": false,
+            "CollectorPeers": 5,
+            "Time": "2026-10-15T12:00:00Z",
+            "PeerAddr": ""
+          },
+          "Verdict": {
+            "Outcome": 1,
+            "Clause": 2,
+            "EarlierUndecided": [
+              1
+            ],
+            "Fails": null,
+            "Reasons": null
+          },
+          "RPKI": null,
+          "RouteObj": false
+        },
+        {
+          "Route": {
+            "Prefix": "1.18.116.0/24",
+            "Path": [
+              "AS4766",
+              "AS131098"
+            ],
+            "PathKnown": true,
+            "OriginSet": false,
+            "Communities": null,
+            "CommsKnown": false
+          },
+          "Evidence": {
+            "Neighbours": [
+              "AS174",
+              "AS1299",
+              "AS2497",
+              "AS2914",
+              "AS3356",
+              "AS6830",
+              "AS6939",
+              "AS37100"
+            ],
+            "Direct": false,
+            "CollectorPeers": 17,
+            "Time": "2026-10-15T12:00:00Z",
+            "PeerAddr": ""
+          },
+          "Verdict": {
+            "Outcome": 1,
+            "Clause": 2,
+            "EarlierUndecided": [
+              1
+            ],
+            "Fails": null,
+            "Reasons": null
+          },
+          "RPKI": null,
+          "RouteObj": false
+        },
+        {
+          "Route": {
+            "Prefix": "1.18.123.0/24",
+            "Path": [
+              "AS4766",
+              "AS9957",
+              "AS9286",
+              "AS23599"
+            ],
+            "PathKnown": true,
+            "OriginSet": false,
+            "Communities": null,
+            "CommsKnown": false
+          },
+          "Evidence": {
+            "Neighbours": [
+              "AS174",
+              "AS1299",
+              "AS2497",
+              "AS2914",
+              "AS3356",
+              "AS6830",
+              "AS6939",
+              "AS37100"
+            ],
+            "Direct": false,
+            "CollectorPeers": 17,
+            "Time": "2026-10-15T12:00:00Z",
+            "PeerAddr": ""
+          },
+          "Verdict": {
+            "Outcome": 1,
+            "Clause": 2,
+            "EarlierUndecided": [
+              1
+            ],
+            "Fails": null,
+            "Reasons": null
+          },
+          "RPKI": null,
+          "RouteObj": false
+        },
+        {
+          "Route": {
+            "Prefix": "1.18.126.0/24",
+            "Path": [
+              "AS4766",
+              "AS23599"
+            ],
+            "PathKnown": true,
+            "OriginSet": false,
+            "Communities": null,
+            "CommsKnown": false
+          },
+          "Evidence": {
+            "Neighbours": [
+              "AS174",
+              "AS1299",
+              "AS2497",
+              "AS2914",
+              "AS3356",
+              "AS6830",
+              "AS6939",
+              "AS37100"
+            ],
+            "Direct": false,
+            "CollectorPeers": 17,
+            "Time": "2026-10-15T12:00:00Z",
+            "PeerAddr": ""
+          },
+          "Verdict": {
+            "Outcome": 1,
+            "Clause": 0,
+            "EarlierUndecided": null,
+            "Fails": null,
+            "Reasons": null
+          },
+          "RPKI": null,
+          "RouteObj": true
+        },
+        {
+          "Route": {
+            "Prefix": "1.18.127.0/24",
+            "Path": [
+              "AS4766",
+              "AS1237",
+              "AS1237",
+              "AS23596"
+            ],
+            "PathKnown": true,
+            "OriginSet": false,
+            "Communities": null,
+            "CommsKnown": false
+          },
+          "Evidence": {
+            "Neighbours": [
+              "AS2497",
+              "AS6939"
+            ],
+            "Direct": false,
+            "CollectorPeers": 5,
+            "Time": "2026-10-15T12:00:00Z",
+            "PeerAddr": ""
+          },
+          "Verdict": {
+            "Outcome": 1,
+            "Clause": 2,
+            "EarlierUndecided": [
+              1
+            ],
+            "Fails": null,
+            "Reasons": null
+          },
+          "RPKI": null,
+          "RouteObj": false
+        },
+        {
+          "Route": {
+            "Prefix": "1.18.130.0/24",
+            "Path": [
+              "AS4766",
+              "AS23596"
+            ],
+            "PathKnown": true,
+            "OriginSet": false,
+            "Communities": null,
+            "CommsKnown": false
+          },
+          "Evidence": {
+            "Neighbours": [
+              "AS174",
+              "AS1299",
+              "AS2497",
+              "AS2914",
+              "AS3356",
+              "AS6830",
+              "AS6939",
+              "AS37100"
+            ],
+            "Direct": false,
+            "CollectorPeers": 17,
+            "Time": "2026-10-15T12:00:00Z",
+            "PeerAddr": ""
+          },
+          "Verdict": {
+            "Outcome": 1,
+            "Clause": 0,
+            "EarlierUndecided": null,
+            "Fails": null,
+            "Reasons": null
+          },
+          "RPKI": null,
+          "RouteObj": true
+        },
+        {
+          "Route": {
+            "Prefix": "1.18.132.0/24",
+            "Path": [
+              "AS4766",
+              "AS9858",
+              "AS23600"
+            ],
+            "PathKnown": true,
+            "OriginSet": false,
+            "Communities": null,
+            "CommsKnown": false
+          },
+          "Evidence": {
+            "Neighbours": [
+              "AS1299",
+              "AS2914",
+              "AS3356",
+              "AS6939"
+            ],
+            "Direct": false,
+            "CollectorPeers": 10,
+            "Time": "2026-10-15T12:00:00Z",
+            "PeerAddr": ""
+          },
+          "Verdict": {
+            "Outcome": 1,
+            "Clause": 0,
+            "EarlierUndecided": null,
+            "Fails": null,
+            "Reasons": null
+          },
+          "RPKI": null,
+          "RouteObj": true
+        },
+        {
+          "Route": {
+            "Prefix": "1.18.134.0/24",
+            "Path": [
+              "AS4766",
+              "AS23600"
+            ],
+            "PathKnown": true,
+            "OriginSet": false,
+            "Communities": null,
+            "CommsKnown": false
+          },
+          "Evidence": {
+            "Neighbours": [
+              "AS1299",
+              "AS2914",
+              "AS3356",
+              "AS6830",
+              "AS6939",
+              "AS37100"
+            ],
+            "Direct": false,
+            "CollectorPeers": 13,
+            "Time": "2026-10-15T12:00:00Z",
+            "PeerAddr": ""
+          },
+          "Verdict": {
+            "Outcome": 1,
+            "Clause": 0,
+            "EarlierUndecided": null,
+            "Fails": null,
+            "Reasons": null
+          },
+          "RPKI": null,
+          "RouteObj": true
+        },
+        {
+          "Route": {
+            "Prefix": "1.32.198.0/24",
+            "Path": [
+              "AS4766",
+              "AS64050"
+            ],
+            "PathKnown": true,
+            "OriginSet": false,
+            "Communities": null,
+            "CommsKnown": false
+          },
+          "Evidence": {
+            "Neighbours": [
+              "AS6939",
+              "AS37100"
+            ],
+            "Direct": false,
+            "CollectorPeers": 6,
+            "Time": "2026-10-15T12:00:00Z",
+            "PeerAddr": ""
+          },
+          "Verdict": {
+            "Outcome": 1,
+            "Clause": 2,
+            "EarlierUndecided": [
+              1
+            ],
+            "Fails": null,
+            "Reasons": null
+          },
+          "RPKI": null,
+          "RouteObj": true
+        },
+        {
+          "Route": {
+            "Prefix": "1.32.201.0/24",
+            "Path": [
+              "AS4766",
+              "AS64050",
+              "AS64050"
+            ],
+            "PathKnown": true,
+            "OriginSet": false,
+            "Communities": null,
+            "CommsKnown": false
+          },
+          "Evidence": {
+            "Neighbours": [
+              "AS6939"
+            ],
+            "Direct": false,
+            "CollectorPeers": 4,
+            "Time": "2026-10-15T12:00:00Z",
+            "PeerAddr": ""
+          },
+          "Verdict": {
+            "Outcome": 1,
+            "Clause": 2,
+            "EarlierUndecided": [
+              1
+            ],
+            "Fails": null,
+            "Reasons": null
+          },
+          "RPKI": null,
+          "RouteObj": false
+        },
+        {
+          "Route": {
+            "Prefix": "1.32.202.0/24",
+            "Path": [
+              "AS4766",
+              "AS64050",
+              "AS64050"
+            ],
+            "PathKnown": true,
+            "OriginSet": false,
+            "Communities": null,
+            "CommsKnown": false
+          },
+          "Evidence": {
+            "Neighbours": [
+              "AS6939"
+            ],
+            "Direct": false,
+            "CollectorPeers": 4,
+            "Time": "2026-10-15T12:00:00Z",
+            "PeerAddr": ""
+          },
+          "Verdict": {
+            "Outcome": 1,
+            "Clause": 2,
+            "EarlierUndecided": [
+              1
+            ],
+            "Fails": null,
+            "Reasons": null
+          },
+          "RPKI": null,
+          "RouteObj": false
+        },
+        {
+          "Route": {
+            "Prefix": "1.32.203.0/24",
+            "Path": [
+              "AS4766",
+              "AS64050",
+              "AS64050"
+            ],
+            "PathKnown": true,
+            "OriginSet": false,
+            "Communities": null,
+            "CommsKnown": false
+          },
+          "Evidence": {
+            "Neighbours": [
+              "AS6939"
+            ],
+            "Direct": false,
+            "CollectorPeers": 4,
+            "Time": "2026-10-15T12:00:00Z",
+            "PeerAddr": ""
+          },
+          "Verdict": {
+            "Outcome": 1,
+            "Clause": 2,
+            "EarlierUndecided": [
+              1
+            ],
+            "Fails": null,
+            "Reasons": null
+          },
+          "RPKI": null,
+          "RouteObj": false
+        },
+        {
+          "Route": {
+            "Prefix": "1.32.204.0/24",
+            "Path": [
+              "AS4766",
+              "AS64050",
+              "AS64050"
+            ],
+            "PathKnown": true,
+            "OriginSet": false,
+            "Communities": null,
+            "CommsKnown": false
+          },
+          "Evidence": {
+            "Neighbours": [
+              "AS6939"
+            ],
+            "Direct": false,
+            "CollectorPeers": 4,
+            "Time": "2026-10-15T12:00:00Z",
+            "PeerAddr": ""
+          },
+          "Verdict": {
+            "Outcome": 1,
+            "Clause": 2,
+            "EarlierUndecided": [
+              1
+            ],
+            "Fails": null,
+            "Reasons": null
+          },
+          "RPKI": null,
+          "RouteObj": false
+        },
+        {
+          "Route": {
+            "Prefix": "1.32.217.0/24",
+            "Path": [
+              "AS4766",
+              "AS64050"
+            ],
+            "PathKnown": true,
+            "OriginSet": false,
+            "Communities": null,
+            "CommsKnown": false
+          },
+          "Evidence": {
+            "Neighbours": [
+              "AS1299",
+              "AS2497",
+              "AS6830",
+              "AS6939",
+              "AS37100"
+            ],
+            "Direct": false,
+            "CollectorPeers": 12,
+            "Time": "2026-10-15T12:00:00Z",
+            "PeerAddr": ""
+          },
+          "Verdict": {
+            "Outcome": 1,
+            "Clause": 2,
+            "EarlierUndecided": [
+              1
+            ],
+            "Fails": null,
+            "Reasons": null
+          },
+          "RPKI": null,
+          "RouteObj": false
+        },
+        {
+          "Route": {
+            "Prefix": "1.32.223.0/24",
+            "Path": [
+              "AS4766",
+              "AS64050"
+            ],
+            "PathKnown": true,
+            "OriginSet": false,
+            "Communities": null,
+            "CommsKnown": false
+          },
+          "Evidence": {
+            "Neighbours": [
+              "AS1299",
+              "AS2497",
+              "AS2914",
+              "AS3356",
+              "AS6830",
+              "AS6939",
+              "AS37100"
+            ],
+            "Direct": false,
+            "CollectorPeers": 17,
+            "Time": "2026-10-15T12:00:00Z",
+            "PeerAddr": ""
+          },
+          "Verdict": {
+            "Outcome": 1,
+            "Clause": 2,
+            "EarlierUndecided": [
+              1
+            ],
+            "Fails": null,
+            "Reasons": null
+          },
+          "RPKI": null,
+          "RouteObj": false
+        },
+        {
+          "Route": {
+            "Prefix": "1.32.227.0/24",
+            "Path": [
+              "AS4766",
+              "AS64050",
+              "AS64050"
+            ],
+            "PathKnown": true,
+            "OriginSet": false,
+            "Communities": null,
+            "CommsKnown": false
+          },
+          "Evidence": {
+            "Neighbours": [
+              "AS6939"
+            ],
+            "Direct": false,
+            "CollectorPeers": 4,
+            "Time": "2026-10-15T12:00:00Z",
+            "PeerAddr": ""
+          },
+          "Verdict": {
+            "Outcome": 1,
+            "Clause": 2,
+            "EarlierUndecided": [
+              1
+            ],
+            "Fails": null,
+            "Reasons": null
+          },
+          "RPKI": null,
+          "RouteObj": false
+        },
+        {
+          "Route": {
+            "Prefix": "1.32.240.0/24",
+            "Path": [
+              "AS4766",
+              "AS64050",
+              "AS64050"
+            ],
+            "PathKnown": true,
+            "OriginSet": false,
+            "Communities": null,
+            "CommsKnown": false
+          },
+          "Evidence": {
+            "Neighbours": [
+              "AS6939"
+            ],
+            "Direct": false,
+            "CollectorPeers": 5,
+            "Time": "2026-10-15T12:00:00Z",
+            "PeerAddr": ""
+          },
+          "Verdict": {
+            "Outcome": 1,
+            "Clause": 2,
+            "EarlierUndecided": [
+              1
+            ],
+            "Fails": null,
+            "Reasons": null
+          },
+          "RPKI": null,
+          "RouteObj": false
+        },
+        {
+          "Route": {
+            "Prefix": "1.32.241.0/24",
+            "Path": [
+              "AS4766",
+              "AS64050"
+            ],
+            "PathKnown": true,
+            "OriginSet": false,
+            "Communities": null,
+            "CommsKnown": false
+          },
+          "Evidence": {
+            "Neighbours": [
+              "AS1299",
+              "AS2497",
+              "AS6830",
+              "AS6939",
+              "AS37100"
+            ],
+            "Direct": false,
+            "CollectorPeers": 12,
+            "Time": "2026-10-15T12:00:00Z",
+            "PeerAddr": ""
+          },
+          "Verdict": {
+            "Outcome": 1,
+            "Clause": 2,
+            "EarlierUndecided": [
+              1
+            ],
+            "Fails": null,
+            "Reasons": null
+          },
+          "RPKI": null,
+          "RouteObj": false
+        },
+        {
+          "Route": {
+            "Prefix": "1.32.245.0/24",
+            "Path": [
+              "AS4766",
+              "AS64050"
+            ],
+            "PathKnown": true,
+            "OriginSet": false,
+            "Communities": null,
+            "CommsKnown": false
+          },
+          "Evidence": {
+            "Neighbours": [
+              "AS6939",
+              "AS37100"
+            ],
+            "Direct": false,
+            "CollectorPeers": 6,
+            "Time": "2026-10-15T12:00:00Z",
+            "PeerAddr": ""
+          },
+          "Verdict": {
+            "Outcome": 1,
+            "Clause": 2,
+            "EarlierUndecided": [
+              1
+            ],
+            "Fails": null,
+            "Reasons": null
+          },
+          "RPKI": null,
+          "RouteObj": false
+        }
+      ],
+      "Accepted": 19,
+      "Rejected": 0,
+      "Undecided": 0
+    },
+    "Export": null,
+    "Coverage": {
+      "Session": null,
+      "Collector": {
+        "Entries": 31782,
+        "Malformed": 0,
+        "Skipped": 0,
+        "Ignored": 0,
+        "Through": 179,
+        "NotSequence": 0,
+        "Direct": 0,
+        "NoNeighbour": 0
+      },
+      "OtherFamilies": 0,
+      "DirectNotChecked": 0,
+      "HintLocalAddr": "",
+      "HintPeerAddr": ""
+    }
+  },
+  {
+    "AF": "ipv6.unicast",
+    "Import": {
+      "Toward": "AS4766",
+      "Policy": {
+        "Clauses": null,
+        "Undecided": null
+      },
+      "NoPolicy": true,
+      "Routes": null,
+      "Accepted": 0,
+      "Rejected": 0,
+      "Undecided": 0
+    },
+    "Export": null,
+    "Coverage": {
+      "Session": null,
+      "Collector": {
+        "Entries": 31782,
+        "Malformed": 0,
+        "Skipped": 0,
+        "Ignored": 0,
+        "Through": 179,
+        "NotSequence": 0,
+        "Direct": 0,
+        "NoNeighbour": 0
+      },
+      "OtherFamilies": 0,
+      "DirectNotChecked": 0,
+      "HintLocalAddr": "",
+      "HintPeerAddr": ""
+    }
+  }
+]

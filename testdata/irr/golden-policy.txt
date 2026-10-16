@@ -1,0 +1,63 @@
+aut-num:   AS64496
+as-name:   GOLDEN-L
+remarks:   Synthetic (testdata/README.md). The local AS of every golden.
+remarks:   From AS4766 (collector golden): a set of the ASes seen behind it,
+remarks:   a community test (undecided in collector mode), any path from it.
+import:    from AS4766 accept AS-GOLDEN-BEHIND
+import:    from AS4766 accept community(4766:100)
+import:    from AS4766 accept <^AS4766+ .*>
+remarks:   From AS64500 (session golden).
+import:    from AS64500 accept AS64500
+import:    from AS64500 accept <^AS64500 AS64501$>
+mp-import: afi ipv6.unicast from AS64500 accept AS64500
+remarks:   Nothing from AS64511 (nopolicy golden).
+source:    TEST
+
+aut-num:   AS64500
+as-name:   GOLDEN-X
+remarks:   Synthetic. Announces its own routes to AS64496.
+export:    to AS64496 announce AS64500
+mp-export: afi ipv6.unicast to AS64496 announce AS64500
+source:    TEST
+
+aut-num:   AS64511
+as-name:   GOLDEN-NOPOLICY
+remarks:   Synthetic. Announces nothing to AS64496.
+export:    to AS64497 announce AS64511
+source:    TEST
+
+as-set:    AS-GOLDEN-BEHIND
+members:   AS23596, AS23599, AS23600
+source:    TEST
+
+route:     1.18.126.0/24
+origin:    AS23599
+source:    TEST
+
+route:     1.18.130.0/24
+origin:    AS23596
+source:    TEST
+
+route:     1.18.132.0/24
+origin:    AS23600
+source:    TEST
+
+route:     1.18.134.0/24
+origin:    AS23600
+source:    TEST
+
+route:     1.32.198.0/24
+origin:    AS64050
+source:    TEST
+
+route:     192.0.2.0/24
+origin:    AS64500
+source:    TEST
+
+route:     198.51.100.0/24
+origin:    AS64501
+source:    TEST
+
+route6:    2001:db8:1::/48
+origin:    AS64500
+source:    TEST
