@@ -31,13 +31,13 @@ bad() { echo "FAIL: $*"; fail=1; }
 # at -fuzztime; a real crash always prints "Failing input written to". So a run
 # that fails that way without a failing input is retried once.
 fuzz() {
-	out=$(cd "$1" && go test -run='^$' -fuzz="^$3\$" -fuzztime="$FUZZTIME" "$2" 2>&1)
+	out=$(cd "$1" && go test -run='^$' -fuzz="^$3\$" -fuzztime="$FUZZTIME" -fuzzminimizetime=5s "$2" 2>&1)
 	rc=$?
 	printf '%s\n' "$out"
 	if [ "$rc" -ne 0 ] && printf '%s' "$out" | grep -q "context deadline exceeded" &&
 		! printf '%s' "$out" | grep -q "Failing input written"; then
 		step "fuzz $3: harness deadline without a failing input; retrying once"
-		(cd "$1" && go test -run='^$' -fuzz="^$3\$" -fuzztime="$FUZZTIME" "$2")
+		(cd "$1" && go test -run='^$' -fuzz="^$3\$" -fuzztime="$FUZZTIME" -fuzzminimizetime=5s "$2")
 		rc=$?
 	fi
 	return "$rc"
@@ -46,6 +46,7 @@ fuzz() {
 # One target per line: "<dir> <pkg> <FuzzName>".
 targets='
 . ./pathre FuzzMatch
+. ./verdict FuzzDecide
 '
 
 # dir package fuzz-target; shard i of n takes targets i, i+n, i+2n, ...

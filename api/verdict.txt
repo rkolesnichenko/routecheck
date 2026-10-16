@@ -1,1 +1,44 @@
 package verdict
+const Accepted Outcome = iota + 1
+const FailNoConjunct = "filter matches nothing"
+const FailPrefixInNot = "prefix in NOT"
+const FailPrefixNotIn = "prefix not in filter"
+const ReasonCommInternet = "community-internet"
+const ReasonCommValue = "community-value"
+const ReasonCommsUnknown = "communities-unknown"
+const ReasonPathNotSequence = "path-not-sequence"
+const ReasonPathTooExpensive = "path-too-expensive"
+const ReasonPathUnbound = "path-unbound"
+const ReasonPeval = "peval"
+const ReasonSameASRun = "same-as-run"
+const Rejected Outcome
+const Undecided Outcome
+func Compile(p peval.Policy) *Compiled
+func Decide(p peval.Policy, r Route) Verdict
+type Compiled struct
+func (*Compiled) Decide(r Route) Verdict
+func (*Compiled) Policy() peval.Policy
+type Fail struct
+	Clause int
+	Test string
+	Missing []types.SetRef
+type Outcome uint8
+type Reason struct
+	Kind string
+	Why string
+	Clause int
+	Index int
+	Term string
+type Route struct
+	Prefix netip.Prefix
+	Path []types.ASN
+	PathKnown bool
+	OriginSet bool
+	Communities []uint32
+	CommsKnown bool
+type Verdict struct
+	Outcome Outcome
+	Clause int
+	EarlierUndecided []int
+	Fails []Fail
+	Reasons []Reason
