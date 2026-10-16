@@ -295,9 +295,18 @@ func TestCheckSessionImport(t *testing.T) {
 	}
 
 	// A capture with no selected record names no local AS: Local must be given.
+	// Both post-drain Local errors are option errors (ErrOptions), not run
+	// failures.
 	_, err := c.Check(context.Background(), routecheck.ModeSession, records(nil), routecheck.Options{Peer: types.ASN(asX)})
-	if err == nil {
-		t.Error("no Local and no capture: no error")
+	if !errors.Is(err, routecheck.ErrOptions) || !strings.Contains(fmt.Sprint(err), "names no local AS") {
+		t.Errorf("no Local and no capture: %v, want ErrOptions", err)
+	}
+	// A capture whose local AS is X itself (an internal session).
+	ibgp := mrtgen.Header(mrt.TypeBGP4MP, mrt.SubMessageAS4, at(1), mrtgen.BGP4MP(mrt.SubMessageAS4, asX, asX, peerAddr, localAddr,
+		mrtgen.Update(nil, nlri("192.0.2.0/24"), attrs4(seq(asX)), false)))
+	_, err = c.Check(context.Background(), routecheck.ModeSession, records([][]byte{ibgp}), routecheck.Options{Peer: types.ASN(asX)})
+	if !errors.Is(err, routecheck.ErrOptions) || !strings.Contains(fmt.Sprint(err), "is the peer") {
+		t.Errorf("capture's local AS is the peer: %v, want ErrOptions", err)
 	}
 	// With Local given, an empty capture is an empty report.
 	res = run(t, c, routecheck.ModeSession, nil, routecheck.Options{Local: types.ASN(asL), Peer: types.ASN(asX), Directions: routecheck.DirImport})
@@ -617,7 +626,7 @@ source: TEST
 		Local: types.ASN(asL), Peer: types.ASN(asX),
 	})
 	var tooLarge *resolve.SetTooLargeError
-	if !errors.As(err, &tooLarge) || res != nil {
+	if !errors.As(err, &tooLarge) || errors.Is(err, routecheck.ErrOptions) || res != nil {
 		t.Errorf("Check = %v, %v; want nil and a *resolve.SetTooLargeError", res, err)
 	}
 	// A missing aut-num is an error too, never a verdict.
@@ -625,7 +634,7 @@ source: TEST
 	res, err = c.Check(context.Background(), routecheck.ModeSession, records(capture()), routecheck.Options{
 		Local: types.ASN(asL), Peer: types.ASN(asX), Directions: routecheck.DirExport,
 	})
-	if !errors.Is(err, resolve.ErrNotFound) || res != nil {
+	if !errors.Is(err, resolve.ErrNotFound) || errors.Is(err, routecheck.ErrOptions) || res != nil {
 		t.Errorf("missing aut-num: Check = %v, %v", res, err)
 	}
 }
@@ -728,8 +737,8 @@ func TestCheckOptions(t *testing.T) {
 	for _, tt := range tests {
 		o := base
 		tt.edit(&o)
-		if res, err := c.Check(context.Background(), tt.mode, records(capture()), o); err == nil || res != nil {
-			t.Errorf("%s: Check = %v, %v; want an error", tt.name, res, err)
+		if res, err := c.Check(context.Background(), tt.mode, records(capture()), o); !errors.Is(err, routecheck.ErrOptions) || res != nil {
+			t.Errorf("%s: Check = %v, %v; want an ErrOptions error", tt.name, res, err)
 		}
 	}
 }
@@ -739,7 +748,7 @@ func TestCheckInputErrors(t *testing.T) {
 	o := routecheck.Options{Local: types.ASN(asL), Peer: types.ASN(asX)}
 	// A RIB dump in session mode without PrePolicyRIB.
 	rib := [][]byte{pitRec(at(0), cpeer(1, asX)), ribRec(at(0), "192.0.2.0/24", ent(0, asX))}
-	if res, err := c.Check(context.Background(), routecheck.ModeSession, records(rib), o); !errors.Is(err, observe.ErrRIBNotPrePolicy) || res != nil {
+	if res, err := c.Check(context.Background(), routecheck.ModeSession, records(rib), o); !errors.Is(err, observe.ErrRIBNotPrePolicy) || errors.Is(err, routecheck.ErrOptions) || res != nil {
 		t.Errorf("RIB in session mode: Check = %v, %v", res, err)
 	}
 	// With it, the dump is X's Adj-RIB-In.
@@ -762,5 +771,97 @@ func TestCheckContext(t *testing.T) {
 	res, err := c.Check(ctx, routecheck.ModeSession, records(capture()), routecheck.Options{Local: types.ASN(asL), Peer: types.ASN(asX)})
 	if !errors.Is(err, context.Canceled) || res != nil {
 		t.Errorf("cancelled: Check = %v, %v", res, err)
+	}
+}
+
+// counted passes recs on, calling at(n) before the nth record (from 1) and
+// counting the records pulled.
+func counted(recs [][]byte, at func(n int), pulled *int) func(func(mrt.Record, error) bool) {
+	return func(yield func(mrt.Record, error) bool) {
+		for rec, err := range records(recs) {
+			*pulled++
+			at(*pulled)
+			if !yield(rec, err) {
+				return
+			}
+		}
+	}
+}
+
+// manyRoutes is a session capture of n routes from X to Y.
+func manyRoutes(n int) [][]byte {
+	recs := [][]byte{established(at(0))}
+	for i := range n {
+		p := netip.PrefixFrom(netip.AddrFrom4([4]byte{10, byte(i >> 8), byte(i), 0}), 24)
+		recs = append(recs, upd(at(1), nlri(p.String()), attrs4(seq(asX, asY))))
+	}
+	return recs
+}
+
+func TestCheckCancelDuringRead(t *testing.T) {
+	c := checker(registry(t, autL, autX))
+	const n = 3 * 4096
+	coll := [][]byte{pitRec(at(0), cpeer(1, asN1))}
+	for i := range n {
+		p := netip.PrefixFrom(netip.AddrFrom4([4]byte{10, byte(i >> 8), byte(i), 0}), 24)
+		coll = append(coll, ribRec(at(0), p.String(), ent(0, asN1, asX, asY)))
+	}
+	for _, tt := range []struct {
+		name string
+		mode routecheck.Mode
+		recs [][]byte
+	}{
+		{"session", routecheck.ModeSession, manyRoutes(n)},
+		{"collector", routecheck.ModeCollector, coll},
+	} {
+		ctx, cancel := context.WithCancel(context.Background())
+		pulled := 0
+		res, err := c.Check(ctx, tt.mode, counted(tt.recs, func(k int) {
+			if k == 10 {
+				cancel()
+			}
+		}, &pulled), routecheck.Options{Local: types.ASN(asL), Peer: types.ASN(asX)})
+		cancel()
+		if !errors.Is(err, context.Canceled) || errors.Is(err, routecheck.ErrOptions) || res != nil {
+			t.Errorf("%s: Check = %v, %v; want context.Canceled", tt.name, res, err)
+		}
+		// The read stops at the next check, not at the end of the input.
+		if pulled > 4096 {
+			t.Errorf("%s: %d of %d records read after the cancel at 10", tt.name, pulled, len(tt.recs))
+		}
+	}
+}
+
+// cancelling is a Source that cancels a context on its first
+// OriginatedRoutes call, which only deciding makes.
+type cancelling struct {
+	resolve.Source
+	cancel context.CancelFunc
+}
+
+func (s cancelling) OriginatedRoutes(ctx context.Context, as types.ASN, afi types.AFI) ([]netip.Prefix, error) {
+	s.cancel()
+	return s.Source.OriginatedRoutes(context.Background(), as, afi)
+}
+
+func TestCheckCancelDuringDecide(t *testing.T) {
+	src := registry(t, autL, autX)
+	c := checker(src)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	c.Routes = cancelling{src, cancel}
+	// One report, so no later per-report check can catch the cancel, and
+	// every route of its own origin, so hygiene's cache (which reads ctx on
+	// a hit) never answers: only the check every 4096 routes can.
+	recs := [][]byte{established(at(0))}
+	for i := range 3 * 4096 {
+		p := netip.PrefixFrom(netip.AddrFrom4([4]byte{10, byte(i >> 8), byte(i), 0}), 24)
+		recs = append(recs, upd(at(1), nlri(p.String()), attrs4(seq(asX, bgp.ASN(4200000000+i)))))
+	}
+	res, err := c.Check(ctx, routecheck.ModeSession, records(recs), routecheck.Options{
+		Local: types.ASN(asL), Peer: types.ASN(asX), AF: []types.AddrFamily{af(t, "ipv4.unicast")}, Directions: routecheck.DirImport,
+	})
+	if !errors.Is(err, context.Canceled) || res != nil {
+		t.Errorf("Check = %v, %v; want context.Canceled", res, err)
 	}
 }

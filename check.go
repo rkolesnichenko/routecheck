@@ -100,7 +100,8 @@ type Result struct {
 	// Export is X's export policy: in session mode one Report, toward L,
 	// over every route; in collector mode one per neighbour X was seen
 	// announcing to, ordered by AS, each over the routes seen announced to
-	// that neighbour. Nil when the export direction is not checked.
+	// that neighbour, and an empty non-nil slice when no neighbour was seen.
+	// Nil when the export direction is not checked.
 	Export []Report
 	// Coverage is what the input shows about its own completeness.
 	Coverage Coverage
@@ -162,12 +163,19 @@ type RouteVerdict struct {
 	RouteObj *bool
 }
 
+// ErrOptions is wrapped by every error Check returns for options it cannot
+// use — a command-line mistake, not a failure of the run. That includes
+// the two found only after the capture is read: Local not set and the
+// capture naming no local AS, and the capture's local AS being Peer.
+var ErrOptions = errors.New("routecheck: invalid options")
+
 // compiles counts the policies Check compiles (Review Focus 4: once per
 // family, direction and Toward); read by tests only.
 var compiles atomic.Int64
 
-// ctxEvery is how many routes Check decides between two reads of its
-// context, besides one before each policy is evaluated.
+// ctxEvery is how many records Check reads, and how many routes it
+// decides, between two reads of its context; it also reads it before each
+// policy is evaluated.
 const ctxEvery = 4096
 
 // Check reads the routes from records (mrt.Records over the inputs) and
@@ -186,7 +194,9 @@ const ctxEvery = 4096
 // Check returns an error, and no Results, for options it cannot use, an
 // input observe cannot read (a truncated stream, observe.ErrRIBNotPrePolicy),
 // a policy peval cannot evaluate (a missing aut-num, a limit), an error from
-// Routes, and ctx's error once it is done.
+// Routes, and ctx's error once it is done (also while observe reads the
+// input, which it reads whole before yielding a route). Errors for options
+// wrap ErrOptions.
 func (c *Checker) Check(ctx context.Context, mode Mode, records iter.Seq2[mrt.Record, error], o Options) ([]Result, error) {
 	afs, dirs, err := o.check(mode)
 	if err != nil {
@@ -212,9 +222,9 @@ func (c *Checker) Check(ctx context.Context, mode Mode, records iter.Seq2[mrt.Re
 		coll    func() observe.CollectorInfo
 	)
 	if mode == ModeSession {
-		obs, session = observe.Session(records, observe.SessionSel{Peer: o.Peer, PeerAddr: o.PeerAddr, At: o.At, PrePolicyRIB: o.PrePolicyRIB})
+		obs, session = observe.Session(withContext(ctx, records), observe.SessionSel{Peer: o.Peer, PeerAddr: o.PeerAddr, At: o.At, PrePolicyRIB: o.PrePolicyRIB})
 	} else {
-		obs, coll = observe.Collector(records, o.Peer)
+		obs, coll = observe.Collector(withContext(ctx, records), o.Peer)
 	}
 	other := 0
 	for ob, err := range obs {
@@ -242,10 +252,10 @@ func (c *Checker) Check(ctx context.Context, mode Mode, records iter.Seq2[mrt.Re
 			local = sinfo.LocalAS
 		}
 		if local == 0 {
-			return nil, errors.New("routecheck: Options.Local is not set and the capture names no local AS")
+			return nil, fmt.Errorf("%w: Options.Local is not set and the capture names no local AS", ErrOptions)
 		}
 		if local == o.Peer {
-			return nil, fmt.Errorf("routecheck: the capture's local AS is the peer, %s", local)
+			return nil, fmt.Errorf("%w: the capture's local AS is the peer, %s", ErrOptions, local)
 		}
 		base.HintLocalAddr, base.HintPeerAddr = sinfo.LocalAddr, sinfo.PeerAddr
 	} else {
@@ -286,39 +296,62 @@ func (c *Checker) Check(ctx context.Context, mode Mode, records iter.Seq2[mrt.Re
 			}
 		}
 		results = append(results, res)
+		// Its reports are built: release the family's observations (R14).
+		byAF[a], fam.obs, fam.memo = nil, nil, nil
 	}
 	return results, nil
+}
+
+// withContext passes records on, reading ctx every ctxEvery records; once
+// ctx is done it yields ctx's error, which observe returns as is (it is not
+// a *mrt.RecordError), and stops.
+func withContext(ctx context.Context, records iter.Seq2[mrt.Record, error]) iter.Seq2[mrt.Record, error] {
+	return func(yield func(mrt.Record, error) bool) {
+		n := 0
+		for rec, err := range records {
+			n++
+			if n%ctxEvery == 0 {
+				if cerr := ctx.Err(); cerr != nil {
+					yield(nil, cerr)
+					return
+				}
+			}
+			if !yield(rec, err) {
+				return
+			}
+		}
+	}
 }
 
 // check validates o for mode and returns its families and directions with
 // the defaults applied.
 func (o Options) check(mode Mode) ([]types.AddrFamily, Direction, error) {
 	if mode != ModeSession && mode != ModeCollector {
-		return nil, 0, fmt.Errorf("routecheck: unknown mode %d", mode)
+		return nil, 0, fmt.Errorf("%w: unknown mode %d", ErrOptions, mode)
 	}
 	if o.Peer == 0 {
-		return nil, 0, errors.New("routecheck: Options.Peer is not set")
+		return nil, 0, fmt.Errorf("%w: Options.Peer is not set", ErrOptions)
 	}
 	if o.Local == o.Peer {
-		return nil, 0, fmt.Errorf("routecheck: Options.Local and Options.Peer are both %s", o.Peer)
+		return nil, 0, fmt.Errorf("%w: Options.Local and Options.Peer are both %s", ErrOptions, o.Peer)
 	}
 	dirs := o.Directions
 	if dirs == 0 {
 		dirs = DirBoth
 	}
 	if dirs > DirBoth {
-		return nil, 0, fmt.Errorf("routecheck: unknown direction %d", o.Directions)
+		return nil, 0, fmt.Errorf("%w: unknown direction %d", ErrOptions, o.Directions)
 	}
 	if mode == ModeCollector {
 		switch {
 		case o.Local == 0 && dirs&DirImport != 0:
-			return nil, 0, errors.New("routecheck: collector mode needs Options.Local to check the import direction")
+			return nil, 0, fmt.Errorf("%w: collector mode needs Options.Local to check the import direction", ErrOptions)
 		case !o.At.IsZero():
-			return nil, 0, errors.New("routecheck: Options.At is for session mode")
+			return nil, 0, fmt.Errorf("%w: Options.At is for session mode", ErrOptions)
 		case o.PeerAddr.IsValid():
-			return nil, 0, errors.New("routecheck: Options.PeerAddr is for session mode")
+			return nil, 0, fmt.Errorf("%w: Options.PeerAddr is for session mode", ErrOptions)
 		case o.PrePolicyRIB:
-			return nil, 0, errors.New("routecheck: Options.PrePolicyRIB is for session mode")
+			return nil, 0, fmt.Errorf("%w: Options.PrePolicyRIB is for session mode", ErrOptions)
 		}
 	}
 	afs := o.AF
@@ -330,10 +363,10 @@ func (o Options) check(mode Mode) ([]types.AddrFamily, Direction, error) {
 	}
 	for i, a := range afs {
 		if (a.AFI != types.AFIv4 && a.AFI != types.AFIv6) || (a.SAFI != types.SAFIUnicast && a.SAFI != types.SAFIMulticast) {
-			return nil, 0, fmt.Errorf("routecheck: address family %q is not ipv4 or ipv6, unicast or multicast", a)
+			return nil, 0, fmt.Errorf("%w: address family %q is not ipv4 or ipv6, unicast or multicast", ErrOptions, a)
 		}
 		if slices.Contains(afs[:i], a) {
-			return nil, 0, fmt.Errorf("routecheck: address family %s given twice", a)
+			return nil, 0, fmt.Errorf("%w: address family %s given twice", ErrOptions, a)
 		}
 	}
 	return slices.Clone(afs), dirs, nil

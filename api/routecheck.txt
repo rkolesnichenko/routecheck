@@ -4,6 +4,7 @@ const DirExport Direction = 2
 const DirImport Direction = 1
 const ModeCollector Mode
 const ModeSession Mode = iota + 1
+var ErrOptions = errors.New(…)
 type Checker struct
 	Eval peval.Evaluator
 	Routes resolve.Source
