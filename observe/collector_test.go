@@ -306,8 +306,76 @@ func TestCollectorIgnoresUpdates(t *testing.T) {
 	if got, want := prefixes(obs), []string{"10.0.0.0/24"}; !slices.Equal(got, want) {
 		t.Errorf("prefixes = %v, want %v", got, want)
 	}
-	if info != (CollectorInfo{Entries: 1, Through: 1}) {
+	if info != (CollectorInfo{Entries: 1, Through: 1, Ignored: 3}) {
 		t.Errorf("info = %+v", info)
+	}
+
+	// Ruling R12 (1): broken BGP4MP records are ignored too, never Skipped. A
+	// record with AFI 3 is a *mrt.RecordError from the reader; a message
+	// whose BGP header is broken is one from mrt.Routes when it gets there;
+	// a BGP4MP_ET record is a BGP4MP record.
+	badAFI := msg(at(1), mrt.SubMessageAS4, asX, peerAddr, localAddr, nil)
+	badAFI[12+8+2+1] = 3
+	badHeader := msg(at(1), mrt.SubMessageAS4, asX, peerAddr, localAddr, []byte{1, 2, 3})
+	st := mrt.SubMessageAS4
+	et := mrtgen.Header(mrt.TypeBGP4MPET, st, at(1), mrtgen.BGP4MP(st, asX, asL, peerAddr, localAddr,
+		mrtgen.Update(nil, nlri("10.9.2.0/24"), attrs4(asX), false)))
+	obs, info = mustCollect(t,
+		pitRec(at(2), cpeer(1, asP1)),
+		badAFI, badHeader, et,
+		ribRec(at(2), "10.0.0.0/24", ent(0, mrtgen.Seq(asP1, asX))),
+	)
+	if got, want := prefixes(obs), []string{"10.0.0.0/24"}; !slices.Equal(got, want) {
+		t.Errorf("broken BGP4MP: prefixes = %v, want %v", got, want)
+	}
+	if info != (CollectorInfo{Entries: 1, Through: 1, Ignored: 3}) {
+		t.Errorf("broken BGP4MP: info = %+v, want Skipped 0, Ignored 3", info)
+	}
+}
+
+// Ruling R12 (1): a broken PEER_INDEX_TABLE still reaches mrt.Routes, so the
+// previous table is not used for the entries after it.
+func TestCollectorBrokenPeerIndexTable(t *testing.T) {
+	good := pitRec(at(0), cpeer(1, asP1))
+	body := mrtgen.PeerIndexTable(collectorID, "", []mrt.Peer{cpeer(1, asP1)})
+	broken := mrtgen.Header(mrt.TypeTableDumpV2, mrt.SubPeerIndexTable, at(1), body[:len(body)-2])
+	obs, info := mustCollect(t, good, broken, ribRec(at(1), "10.0.0.0/24", ent(0, mrtgen.Seq(asP1, asX))))
+	if len(obs) != 0 || info.Skipped != 2 || info.Ignored != 0 {
+		t.Errorf("after a broken PIT: %v, %+v; want no observation, Skipped 2", prefixes(obs), info)
+	}
+}
+
+// Ruling R12 (2): with X first, the collector peer's AS decides: X is a
+// direct feed, another AS is the neighbour (a transparent route server),
+// AS_TRANS names no AS.
+func TestCollectorDirectNeedsPeerAS(t *testing.T) {
+	obs, info := mustCollect(t,
+		pitRec(at(0), cpeer(1, asX), cpeer(2, asP1)),
+		ribRec(at(0), "10.0.0.0/24", ent(0, mrtgen.Seq(asX, asY))),
+		ribRec(at(0), "10.0.1.0/24", ent(1, mrtgen.Seq(asX, asY))),
+		// A legacy TABLE_DUMP from a 4-byte peer: its AS is AS_TRANS.
+		tableDump(at(0), pfx("10.0.2.0/24"), netip.MustParseAddr("198.51.100.9"), bgp.ASTrans,
+			slices.Concat(mrtgen.Origin(bgp.OriginIGP), mrtgen.ASPath(false, mrtgen.Seq(asX, asY)))),
+	)
+	if got, want := prefixes(obs), []string{"10.0.0.0/24", "10.0.1.0/24", "10.0.2.0/24"}; !slices.Equal(got, want) {
+		t.Fatalf("prefixes = %v, want %v", got, want)
+	}
+	if ev := obs[0].Evidence; !ev.Direct || len(ev.Neighbours) != 0 {
+		t.Errorf("peer AS X: %+v, want direct", ev)
+	}
+	if ev := obs[1].Evidence; ev.Direct || !slices.Equal(ev.Neighbours, asns(asP1)) {
+		t.Errorf("peer AS P1: %+v, want neighbour P1, not direct", ev)
+	}
+	if ev := obs[2].Evidence; ev.Direct || len(ev.Neighbours) != 0 {
+		t.Errorf("peer AS AS_TRANS: %+v, want no neighbour, not direct", ev)
+	}
+	for _, o := range obs {
+		if !slices.Equal(o.Route.Path, asns(asX, asY)) || !o.Route.PathKnown {
+			t.Errorf("%v: path %v", o.Route.Prefix, o.Route.Path)
+		}
+	}
+	if info.Direct != 1 || info.NoNeighbour != 1 || info.Through != 3 {
+		t.Errorf("info = %+v, want Direct 1, NoNeighbour 1", info)
 	}
 }
 
@@ -416,5 +484,20 @@ func TestCollectorLeftOfEmptySegments(t *testing.T) {
 		if as, kind := leftOf(tt.segs, len(tt.segs)-1, 0); as != tt.as || kind != tt.kind {
 			t.Errorf("%d: leftOf = %d, %d; want %d, %d", i, as, kind, tt.as, tt.kind)
 		}
+	}
+}
+
+// Another sighting of a known (family, prefix, suffix) allocates nothing: the
+// suffix and its key are built only for a new key.
+func TestCollectorRepeatSightingDoesNotAllocate(t *testing.T) {
+	c := collection{x: asX, byKey: map[string]int{}, peers: map[mrt.Peer]uint32{}}
+	r := mrt.Route{Time: at(0), Kind: mrt.KindRIB, Peer: cpeer(1, asP1), Family: v4u, Prefix: pfx("10.0.0.0/24"),
+		Path: &bgp.Path{ASPath: bgp.ASPath{Segments: []bgp.Segment{mrtgen.Seq(asP1, asX, asY), mrtgen.Set(asP3, asZ)}}}}
+	c.entry(r)
+	if n := testing.AllocsPerRun(100, func() { c.entry(r) }); n != 0 {
+		t.Errorf("a repeated sighting: %v allocations, want 0", n)
+	}
+	if len(c.obs) != 1 || c.info.Through != 102 || len(c.obs[0].peers) != 1 { // AllocsPerRun runs f once more to warm up
+		t.Errorf("%d observations, Through %d", len(c.obs), c.info.Through)
 	}
 }

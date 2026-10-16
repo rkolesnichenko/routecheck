@@ -96,7 +96,7 @@ func fuzzCollector(t *testing.T, data []byte) {
 	if errs > 1 || (errs == 1 && len(obs) > 0) {
 		t.Fatalf("Collector: %d errors with %d observations", errs, len(obs))
 	}
-	if in.Entries < 0 || in.Skipped < 0 || in.Malformed < 0 || in.Malformed > in.Entries ||
+	if in.Entries < 0 || in.Skipped < 0 || in.Ignored < 0 || in.Malformed < 0 || in.Malformed > in.Entries ||
 		in.Through > in.Entries-in.Malformed || in.NotSequence < 0 || in.NotSequence > in.Through ||
 		in.Direct < 0 || in.NoNeighbour < 0 || in.Direct+in.NoNeighbour > in.Through-in.NotSequence ||
 		len(obs) > in.Through-in.NotSequence {

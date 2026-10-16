@@ -5,7 +5,6 @@ import (
 	"encoding/binary"
 	"errors"
 	"iter"
-	"net/netip"
 	"slices"
 	"strings"
 	"time"
@@ -17,35 +16,39 @@ import (
 )
 
 // CollectorInfo is what Collector found in the dumps besides the routes.
-// Every count is of RIB entries (one per collector peer and prefix), not of
-// observations.
+// Every count except Ignored is of RIB entries (one per collector peer and
+// prefix) or of records mrt could not read, not of observations.
 type CollectorInfo struct {
-	Entries int // RIB entries read (TABLE_DUMP_V2 and legacy TABLE_DUMP); BGP4MP records are not entries
+	Entries int // RIB entries read (TABLE_DUMP_V2 and legacy TABLE_DUMP)
 	// Malformed: entries RFC 7606 keeps no route from (see classify),
 	// skipped whether or not X is on their path, since a path that did not
 	// decode cleanly cannot be trusted to show it.
 	Malformed int
-	Skipped   int // records and RIB entries mrt could not read or place (a *mrt.RecordError)
+	Skipped   int // RIB-dump records and entries mrt could not read or place (a *mrt.RecordError)
+	Ignored   int // BGP4MP and BGP4MP_ET records, readable or not: collector mode does not read them
 	Through   int // well-formed entries whose AS path holds X
 	// Of Through: X's leftmost occurrence is in an AS_SET or a confederation
 	// segment, so there is no suffix to cut; no observation.
 	NotSequence int
-	Direct      int // of Through: X is the path's first AS, the collector's own peer
-	// Of Through: the element left of X is in an AS_SET or a confederation
-	// segment, or is AS_TRANS; observed, with no neighbour and not direct.
+	Direct      int // of Through: X is the path's first AS and the collector peer's AS is X
+	// Of Through: observed, with no neighbour and not direct, because what is
+	// left of X names no AS: an AS_SET or a confederation segment, AS_TRANS,
+	// or (X first) a collector peer whose AS is AS_TRANS or 0.
 	NoNeighbour int
 }
 
 // Collector reads route-collector RIB dumps (TABLE_DUMP_V2 and legacy
 // TABLE_DUMP, any number of them concatenated, each with its own
 // PEER_INDEX_TABLE) and yields the routes X announced, as X announced them
-// (spec §6.3, controller ruling R11), in prefix order (then address family,
-// then path). It reads the whole input before it yields anything, since
-// observations are deduplicated across it. The info function is valid after
-// the sequence is drained.
+// (spec §6.3, controller rulings R11 and R12), in prefix order (then address
+// family, then path). It reads the whole input before it yields anything,
+// since observations are deduplicated across it. The info function is valid
+// after the sequence is drained.
 //
 // The rules:
-//   - Only RIB entries are read; BGP4MP records are not used.
+//   - Only RIB dumps are read. BGP4MP and BGP4MP_ET records, and the
+//     *mrt.RecordErrors of records of those types, are dropped before
+//     decoding and counted in Ignored.
 //   - A RIB entry RFC 7606 keeps no route from (see classify) is skipped and
 //     counted in Malformed.
 //   - The observed route is the suffix of the entry's path from X's
@@ -58,10 +61,15 @@ type CollectorInfo struct {
 //     changed them (spec D3).
 //   - The neighbour X announced it to is the AS immediately left of X when
 //     that element is in an AS_SEQUENCE (the previous segment's last AS when
-//     X starts a segment). With nothing left of X, X is a collector peer and
-//     the sighting is direct. Otherwise (an AS_SET or a confederation
-//     segment, or AS_TRANS, which names no AS) there is no neighbour and the
+//     X starts a segment) and is not AS_TRANS, which names no AS. An AS_SET,
+//     a confederation segment or AS_TRANS there gives no neighbour, and the
 //     sighting is not direct (NoNeighbour).
+//   - With nothing left of X, the collector peer decides: when its AS is X,
+//     X is the collector's own peer and the sighting is direct (Direct); when
+//     it is another AS, that peer passed X's route on unchanged (a
+//     transparent route server) and is the neighbour; when it is AS_TRANS (a
+//     legacy TABLE_DUMP holding a 4-byte AS in 2 bytes) or 0, there is no
+//     neighbour and the sighting is not direct (NoNeighbour).
 //   - Observations are deduplicated by (address family, prefix, suffix); the
 //     suffix compares by segments, so X {Y} and X Y differ while two
 //     adjacent AS_SEQUENCEs equal one, and an AS_SET's order does not count.
@@ -71,13 +79,13 @@ type CollectorInfo struct {
 //     time among the sightings (a RIB's record time, not the entry's
 //     originated time); PeerAddr is zero.
 //
-// A *mrt.RecordError is counted in Skipped; any other error (a truncated
-// stream, a read error) is yielded and ends the sequence with no
+// Any other *mrt.RecordError is counted in Skipped; any other error (a
+// truncated stream, a read error) is yielded and ends the sequence with no
 // observations.
 func Collector(records iter.Seq2[mrt.Record, error], x types.ASN) (iter.Seq2[Observation, error], func() CollectorInfo) {
 	var info CollectorInfo
 	seq := func(yield func(Observation, error) bool) {
-		c := collection{x: bgp.ASN(x), byKey: map[suffixKey]int{}, peers: map[mrt.Peer]uint32{}}
+		c := collection{x: bgp.ASN(x), byKey: map[string]int{}, peers: map[mrt.Peer]uint32{}}
 		obs, err := c.run(records)
 		info = c.info
 		if err != nil {
@@ -93,18 +101,11 @@ func Collector(records iter.Seq2[mrt.Record, error], x types.ASN) (iter.Seq2[Obs
 	return seq, func() CollectorInfo { return info }
 }
 
-// suffixKey is what observations are deduplicated by.
-type suffixKey struct {
-	fam    bgp.Family
-	prefix netip.Prefix
-	suffix string // encodeSuffix
-}
-
 // sighting is one observation being gathered.
 type sighting struct {
 	route      verdict.Route
 	fam        bgp.Family
-	suffix     string
+	key        string      // the dedup key (encodeKey)
 	neighbours []types.ASN // sorted, unique
 	peers      []uint32    // interned collector peers, sorted, unique
 	direct     bool
@@ -116,12 +117,39 @@ type collection struct {
 	x     bgp.ASN
 	info  CollectorInfo
 	obs   []sighting
-	byKey map[suffixKey]int   // index into obs
+	byKey map[string]int      // dedup key → index into obs
 	peers map[mrt.Peer]uint32 // interned collector peers
+	buf   []byte              // encodeKey's output, reused
+	set   []bgp.ASN           // encodeKey's set scratch, reused
+}
+
+func isBGP4MP(t mrt.Type) bool { return t == mrt.TypeBGP4MP || t == mrt.TypeBGP4MPET }
+
+// ribDumps passes records on without the BGP4MP ones, so mrt.Routes never
+// decodes an UPDATE, and counts what it drops. A truncated stream or a read
+// error passes, whatever the record type, since it ends the input.
+func (c *collection) ribDumps(records iter.Seq2[mrt.Record, error]) iter.Seq2[mrt.Record, error] {
+	return func(yield func(mrt.Record, error) bool) {
+		for rec, err := range records {
+			if err != nil {
+				var re *mrt.RecordError
+				if errors.As(err, &re) && !errors.Is(err, mrt.ErrTruncated) && isBGP4MP(re.Header.Type) {
+					c.info.Ignored++
+					continue
+				}
+			} else if isBGP4MP(rec.Header().Type) {
+				c.info.Ignored++
+				continue
+			}
+			if !yield(rec, err) {
+				return
+			}
+		}
+	}
 }
 
 func (c *collection) run(records iter.Seq2[mrt.Record, error]) ([]Observation, error) {
-	for r, err := range mrt.Routes(records) {
+	for r, err := range mrt.Routes(c.ribDumps(records)) {
 		if err != nil {
 			var re *mrt.RecordError
 			if !errors.As(err, &re) || errors.Is(err, mrt.ErrTruncated) {
@@ -148,7 +176,7 @@ type neighbourKind uint8
 
 const (
 	leftAS     neighbourKind = iota // an AS in an AS_SEQUENCE: the neighbour
-	leftNone                        // nothing: a direct feed
+	leftNone                        // nothing: the collector peer decides
 	leftOpaque                      // an AS_SET, a confederation segment or AS_TRANS: no neighbour
 )
 
@@ -164,32 +192,44 @@ func (c *collection) entry(r mrt.Route) {
 		c.info.NotSequence++
 		return
 	}
-	suffix := make([]bgp.Segment, 0, len(segs)-si)
-	suffix = append(suffix, bgp.Segment{Type: bgp.ASSequence, ASNs: segs[si].ASNs[ai:]})
-	suffix = append(suffix, segs[si+1:]...)
 
 	nb, kind := leftOf(segs, si, ai)
-	switch kind {
-	case leftNone:
+	direct := false
+	if kind == leftNone {
+		switch r.Peer.AS {
+		case c.x:
+			direct = true
+		case bgp.ASTrans, 0:
+			kind = leftOpaque
+		default:
+			nb, kind = r.Peer.AS, leftAS
+		}
+	}
+	switch {
+	case direct:
 		c.info.Direct++
-	case leftOpaque:
+	case kind == leftOpaque:
 		c.info.NoNeighbour++
 	}
 
-	k := suffixKey{r.Family, r.Prefix, encodeSuffix(suffix)}
-	i, ok := c.byKey[k]
+	c.encodeKey(r, segs, si, ai)
+	i, ok := c.byKey[string(c.buf)] // no allocation for a lookup
 	if !ok {
+		suffix := make([]bgp.Segment, 0, len(segs)-si)
+		suffix = append(suffix, bgp.Segment{Type: bgp.ASSequence, ASNs: segs[si].ASNs[ai:]})
+		suffix = append(suffix, segs[si+1:]...)
 		p := bgp.Path{ASPath: bgp.ASPath{Segments: suffix}}
-		c.obs = append(c.obs, sighting{route: Route(r.Prefix, &p, false), fam: r.Family, suffix: k.suffix})
+		key := string(c.buf)
+		c.obs = append(c.obs, sighting{route: Route(r.Prefix, &p, false), fam: r.Family, key: key})
 		i = len(c.obs) - 1
-		c.byKey[k] = i
+		c.byKey[key] = i
 	}
 	s := &c.obs[i]
-	switch kind {
-	case leftAS:
-		s.neighbours = insertSorted(s.neighbours, types.ASN(nb))
-	case leftNone:
+	switch {
+	case direct:
 		s.direct = true
+	case kind == leftAS:
+		s.neighbours = insertSorted(s.neighbours, types.ASN(nb))
 	}
 	id, ok := c.peers[r.Peer]
 	if !ok {
@@ -213,8 +253,8 @@ func leftmost(segs []bgp.Segment, x bgp.ASN) (si, ai int, found bool) {
 }
 
 // leftOf says what is immediately left of element ai of segment si, which
-// is an AS_SEQUENCE: an AS (the neighbour), nothing (a direct feed), or an
-// element that names no neighbour.
+// is an AS_SEQUENCE: an AS (the neighbour), nothing, or an element that
+// names no neighbour.
 func leftOf(segs []bgp.Segment, si, ai int) (bgp.ASN, neighbourKind) {
 	var a bgp.ASN
 	switch {
@@ -239,21 +279,43 @@ func leftOf(segs []bgp.Segment, si, ai int) (bgp.ASN, neighbourKind) {
 	return a, leftAS
 }
 
-// encodeSuffix is the canonical form segments compare by: an AS_SEQUENCE
-// or AS_CONFED_SEQUENCE element is its type and AS (so adjacent sequences of
-// one type join); any other segment is one unit of a zero byte, its type, its
-// sorted unique ASes' count and the ASes (a set's order does not count).
-func encodeSuffix(segs []bgp.Segment) string {
-	var b []byte
-	for _, s := range segs {
+// encodeKey writes into c.buf the dedup key of the suffix of segs from
+// element ai of segment si: the address family, the prefix, then the
+// suffix's canonical form, the one segments compare by. In it an
+// AS_SEQUENCE or AS_CONFED_SEQUENCE element is its type and AS (so adjacent
+// sequences of one type join); any other segment is one unit of a zero
+// byte, its type, its sorted unique ASes' count and the ASes (a set's order
+// does not count).
+func (c *collection) encodeKey(r mrt.Route, segs []bgp.Segment, si, ai int) {
+	b := binary.BigEndian.AppendUint16(c.buf[:0], uint16(r.Family.AFI))
+	b = append(b, byte(r.Family.SAFI))
+	addr := r.Prefix.Addr()
+	if addr.Is4() {
+		a := addr.As4()
+		b = append(b, 4)
+		b = append(b, a[:]...)
+	} else {
+		a := addr.As16()
+		b = append(b, 16)
+		b = append(b, a[:]...)
+	}
+	b = append(b, byte(r.Prefix.Bits()))
+	for k := si; k < len(segs); k++ {
+		s := segs[k]
+		asns := s.ASNs
+		if k == si {
+			asns = asns[ai:]
+		}
 		switch s.Type {
 		case bgp.ASSequence, bgp.ASConfedSequence:
-			for _, a := range s.ASNs {
+			for _, a := range asns {
 				b = append(b, byte(s.Type))
 				b = binary.BigEndian.AppendUint32(b, uint32(a))
 			}
 		default:
-			set := slices.Compact(slices.Sorted(slices.Values(s.ASNs)))
+			c.set = append(c.set[:0], asns...)
+			slices.Sort(c.set)
+			set := slices.Compact(c.set)
 			b = append(b, 0, byte(s.Type))
 			b = binary.BigEndian.AppendUint32(b, uint32(len(set)))
 			for _, a := range set {
@@ -261,7 +323,7 @@ func encodeSuffix(segs []bgp.Segment) string {
 			}
 		}
 	}
-	return string(b)
+	c.buf = b
 }
 
 func insertSorted[T cmp.Ordered](s []T, v T) []T {
@@ -273,7 +335,7 @@ func insertSorted[T cmp.Ordered](s []T, v T) []T {
 }
 
 // finish sorts the observations: prefix, address family, path, then the
-// suffix's encoding (a total order: the key is unique per prefix and family).
+// key (a total order: keys are unique).
 func (c *collection) finish() []Observation {
 	slices.SortFunc(c.obs, func(a, b sighting) int {
 		return cmp.Or(
@@ -282,7 +344,7 @@ func (c *collection) finish() []Observation {
 			cmp.Compare(a.fam.AFI, b.fam.AFI),
 			cmp.Compare(a.fam.SAFI, b.fam.SAFI),
 			slices.Compare(a.route.Path, b.route.Path),
-			strings.Compare(a.suffix, b.suffix),
+			strings.Compare(a.key, b.key),
 		)
 	})
 	out := make([]Observation, len(c.obs))
