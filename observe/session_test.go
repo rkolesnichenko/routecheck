@@ -884,6 +884,19 @@ func TestSessionRIBBaseline(t *testing.T) {
 	if len(obs) == 1 && !slices.Equal(obs[0].Route.Path, asns(asX)) {
 		t.Errorf("the RIB's route did not replace the UPDATE's: %v", obs[0].Route.Path)
 	}
+	// A state change or a reset between two RIB records of one dump: the later
+	// entry is a route the session holds, so it is not down at the end.
+	rib2 := mrtgen.Header(mrt.TypeTableDumpV2, mrt.SubRIBIPv4Unicast, at(10), mrtgen.RIB(mrt.SubRIBIPv4Unicast, 1, pfx("10.0.2.0/24"),
+		[]mrtgen.Entry{{PeerIndex: 0, Originated: at(5), Attrs: attrs4(asX)}}))
+	for name, between := range map[string][]byte{
+		"state change": state(at(10), mrt.StateEstablished, mrt.StateIdle),
+		"reset":        msg(at(10), mrt.SubMessageAS4, asX, peerAddr, localAddr, []byte{1, 2, 3}),
+	} {
+		obs, info := mustRun(t, SessionSel{Peer: types.ASN(asX), PeerAddr: peerAddr, PrePolicyRIB: true}, pit, rib, between, rib2)
+		if got := prefixes(obs); !slices.Equal(got, []string{"10.0.2.0/24"}) || info.DownAtEnd {
+			t.Errorf("%s between RIB records: %v, DownAtEnd %v", name, got, info.DownAtEnd)
+		}
+	}
 	// Without the bview the same UPDATEs are mid-session.
 	_, info = mustRun(t, pre, early...)
 	if !info.MidSession {
@@ -953,5 +966,31 @@ func TestSessionRIBAddPath(t *testing.T) {
 		{Prefix: pfx("10.0.0.0/24"), HasPathID: true}, {Prefix: pfx("10.0.1.0/24"), HasPathID: true}}))
 	if len(obs) != 3 {
 		t.Fatalf("after withdrawing ID 0: %v", prefixes(obs))
+	}
+}
+
+// On a 2-byte subtype both ASes may be AS_TRANS, standing for two different
+// 4-byte ASes: that is not an internal session, so a malformed LOCAL_PREF is
+// attribute discard; two equal real ASes are internal.
+func TestSessionInternalNeedsRealASes(t *testing.T) {
+	badLP := mrtgen.Raw(mrtgen.FlagTransitive, 5, []byte{1})
+	for _, tc := range []struct {
+		name     string
+		as       bgp.ASN
+		kept     bool
+		malforms int
+	}{
+		{"AS_TRANS on both sides: external", bgp.ASTrans, true, 0},
+		{"the same real AS on both sides: internal", 64510, false, 1},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			attrs := slices.Concat(mrtgen.Origin(bgp.OriginIGP), mrtgen.ASPath(false, mrtgen.Seq(tc.as)), mrtgen.NextHop(nh4), badLP)
+			rec := mrtgen.Header(mrt.TypeBGP4MP, mrt.SubMessage, at(1), mrtgen.BGP4MP(mrt.SubMessage, tc.as, tc.as, peerAddr, localAddr,
+				mrtgen.Update(nil, nlri("10.0.0.0/24"), attrs, false)))
+			obs, info := mustRun(t, SessionSel{Peer: types.ASN(tc.as)}, rec)
+			if (len(obs) == 1) != tc.kept || info.Malformed != tc.malforms {
+				t.Errorf("obs %v, Malformed %d; want kept %v, Malformed %d", prefixes(obs), info.Malformed, tc.kept, tc.malforms)
+			}
+		})
 	}
 }

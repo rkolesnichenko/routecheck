@@ -312,6 +312,7 @@ func (r *replay) rib(rec mrt.RIB) {
 func (r *replay) ribEntry(addr netip.Addr, k key, attrs bgp.Attrs, t time.Time) {
 	s := r.session(addr)
 	s.ribBaseline(r.ribGen)
+	s.down = false // an entry for the peer: the session holds this route now
 	p, d := attrs.Decode()
 	if classify(nil, d, facts{reachable: true, otherAttrs: true}) != dispOK {
 		delete(s.routes, k)
@@ -334,7 +335,9 @@ func (r *replay) message(m mrt.BGP4MPMessage) {
 	}
 	u, d1 := bgp.ParseUpdate(m.Message, m.Context())
 	p, d2 := u.Attrs.Decode()
-	f := facts{ibgp: m.LocalAS == m.PeerAS}
+	// Internal only when the ASes are equal and real: on a 2-byte subtype both
+	// may be AS_TRANS standing for two different 4-byte ASes.
+	f := facts{ibgp: m.LocalAS == m.PeerAS && m.PeerAS != bgp.ASTrans}
 	f.reachable = len(u.Announced) > 0 || (p.MPReach != nil && (len(p.MPReach.NLRI) > 0 || len(p.MPReach.RawNLRI) > 0))
 	for a, err := range u.Attrs.All() {
 		if err != nil || a.Code != bgp.AttrMPUnreach {
