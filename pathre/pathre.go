@@ -17,8 +17,7 @@ import (
 // accepts, which has a meaning only when the operand is one AS. It is
 // returned wherever in the regexp such a repetition is, but only for a
 // non-empty path: the empty path holds no AS to make a run of, so there
-// every same-AS repetition matches zero repetitions only, and Match answers
-// (as rpsl's routemodel does).
+// every same-AS repetition matches zero repetitions only, and Match answers.
 var ErrNotSingleAS = errors.New("pathre: same-AS repetition over more than one AS")
 
 // ErrUnbound is returned for a regexp that still names PeerAS or an as-set
