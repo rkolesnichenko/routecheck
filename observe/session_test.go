@@ -231,6 +231,9 @@ func TestSessionReplay(t *testing.T) {
 		if len(o.Evidence.Neighbours) != 0 || o.Evidence.Direct || o.Evidence.CollectorPeers != 0 {
 			t.Errorf("session evidence carries collector fields: %+v", o.Evidence)
 		}
+		if o.Evidence.PeerAddr != peerAddr {
+			t.Errorf("Evidence.PeerAddr = %v, want %v", o.Evidence.PeerAddr, peerAddr)
+		}
 	}
 }
 
@@ -396,51 +399,92 @@ func setLen(m []byte) []byte {
 func TestSessionMalformed(t *testing.T) {
 	a, b := nlri("10.0.0.0/24"), nlri("10.0.1.0/24")
 	good := attrs4(asX, asY)
-	before := [][]byte{established(at(0)), upd(at(1), nil, slices.Concat(a, b), good)}
+	v6route := slices.Concat(mrtgen.Origin(bgp.OriginIGP), mrtgen.ASPath(true, mrtgen.Seq(asX)),
+		mrtgen.MPReach(v6u, []netip.Addr{nh6}, nlri("2001:db8:1::/48"), false))
+	before := [][]byte{established(at(0)), upd(at(1), nil, slices.Concat(a, b), good), upd(at(1), nil, nil, v6route)}
+	badComm := mrtgen.Raw(mrtgen.FlagOptional|mrtgen.FlagTransitive, 8, []byte{1, 2, 3, 4, 5})
 	// truncated: a COMMUNITIES header claiming 16 bytes, with none after it.
 	truncated := slices.Concat(attrs4(asX), []byte{mrtgen.FlagOptional | mrtgen.FlagTransitive, 8, 16})
 	// prefix length 33 in the NLRI field.
 	badNLRI := setLen(append(mrtgen.Update(nil, a, attrs4(asX), false), 33, 10, 0, 0, 0, 0))
+	// An UPDATE between X and X: an internal session.
+	ibgp := func(attrs []byte) []byte {
+		st := mrt.SubMessageAS4
+		return mrtgen.Header(mrt.TypeBGP4MP, st, at(2), mrtgen.BGP4MP(st, asX, asX, peerAddr, localAddr, mrtgen.Update(nil, a, attrs, false)))
+	}
+	all := []string{"10.0.0.0/24", "10.0.1.0/24", "2001:db8:1::/48"}
 	tests := []struct {
 		name              string
 		last              []byte
 		want              []string
 		malformed, resets int
+		down              bool
 		comms             []uint32 // of 10.0.0.0/24 when present
 	}{
 		{"COMMUNITIES not a multiple of 4: treat-as-withdraw",
-			upd(at(2), nil, a, slices.Concat(attrs4(asX), mrtgen.Raw(mrtgen.FlagOptional|mrtgen.FlagTransitive, 8, []byte{1, 2, 3, 4, 5}))),
-			[]string{"10.0.1.0/24"}, 1, 0, nil},
+			upd(at(2), nil, a, slices.Concat(attrs4(asX), badComm)),
+			[]string{"10.0.1.0/24", "2001:db8:1::/48"}, 1, 0, false, nil},
 		{"NEXT_HOP of 3 bytes: treat-as-withdraw",
 			upd(at(2), nil, a, slices.Concat(mrtgen.Origin(bgp.OriginIGP), mrtgen.ASPath(true, mrtgen.Seq(asX)), mrtgen.Raw(mrtgen.FlagTransitive, 3, []byte{1, 2, 3}))),
-			[]string{"10.0.1.0/24"}, 1, 0, nil},
+			[]string{"10.0.1.0/24", "2001:db8:1::/48"}, 1, 0, false, nil},
 		{"malformed AS_PATH: treat-as-withdraw",
 			upd(at(2), nil, a, slices.Concat(mrtgen.Origin(bgp.OriginIGP), mrtgen.Raw(mrtgen.FlagTransitive, 2, []byte{2, 1, 0}), mrtgen.NextHop(nh4))),
-			[]string{"10.0.1.0/24"}, 1, 0, nil},
+			[]string{"10.0.1.0/24", "2001:db8:1::/48"}, 1, 0, false, nil},
 		{"treat-as-withdraw still applies the withdrawals",
 			upd(at(2), b, a, slices.Concat(attrs4(asX), mrtgen.Raw(mrtgen.FlagOptional|mrtgen.FlagTransitive, 8, []byte{1}))),
-			nil, 1, 0, nil},
+			[]string{"2001:db8:1::/48"}, 1, 0, false, nil},
+		{"treat-as-withdraw over MP_REACH_NLRI (IPv6)",
+			upd(at(2), nil, nil, slices.Concat(v6route, badComm)),
+			[]string{"10.0.0.0/24", "10.0.1.0/24"}, 1, 0, false, nil},
+		{"missing ORIGIN: treat-as-withdraw (RFC 7606 §3.d)",
+			upd(at(2), nil, a, slices.Concat(mrtgen.ASPath(true, mrtgen.Seq(asX)), mrtgen.NextHop(nh4))),
+			[]string{"10.0.1.0/24", "2001:db8:1::/48"}, 1, 0, false, nil},
+		{"missing ORIGIN over MP_REACH_NLRI",
+			upd(at(2), nil, nil, slices.Concat(mrtgen.ASPath(true, mrtgen.Seq(asX)), mrtgen.MPReach(v6u, []netip.Addr{nh6}, nlri("2001:db8:1::/48"), false))),
+			[]string{"10.0.0.0/24", "10.0.1.0/24"}, 1, 0, false, nil},
+		{"missing NEXT_HOP with IPv4 NLRI: treat-as-withdraw",
+			upd(at(2), nil, a, slices.Concat(mrtgen.Origin(bgp.OriginIGP), mrtgen.ASPath(true, mrtgen.Seq(asX)))),
+			[]string{"10.0.1.0/24", "2001:db8:1::/48"}, 1, 0, false, nil},
+		{"NEXT_HOP 0.0.0.0: treat-as-withdraw",
+			upd(at(2), nil, a, slices.Concat(mrtgen.Origin(bgp.OriginIGP), mrtgen.ASPath(true, mrtgen.Seq(asX)), mrtgen.NextHop(netip.IPv4Unspecified()))),
+			[]string{"10.0.1.0/24", "2001:db8:1::/48"}, 1, 0, false, nil},
+		{"NEXT_HOP multicast: treat-as-withdraw",
+			upd(at(2), nil, a, slices.Concat(mrtgen.Origin(bgp.OriginIGP), mrtgen.ASPath(true, mrtgen.Seq(asX)), mrtgen.NextHop(netip.MustParseAddr("224.0.0.1")))),
+			[]string{"10.0.1.0/24", "2001:db8:1::/48"}, 1, 0, false, nil},
 		{"duplicate COMMUNITIES: the first wins, not malformed",
 			upd(at(2), nil, a, slices.Concat(attrs4(asX), mrtgen.Communities(7), mrtgen.Communities(8))),
-			[]string{"10.0.0.0/24", "10.0.1.0/24"}, 0, 0, []uint32{7}},
+			all, 0, 0, false, []uint32{7}},
 		{"malformed AGGREGATOR: attribute discard, not malformed",
 			upd(at(2), nil, a, slices.Concat(attrs4(asX), mrtgen.Raw(mrtgen.FlagOptional|mrtgen.FlagTransitive, 7, []byte{1, 2, 3}))),
-			[]string{"10.0.0.0/24", "10.0.1.0/24"}, 0, 0, nil},
+			all, 0, 0, false, nil},
 		{"malformed LOCAL_PREF from an external peer: attribute discard",
 			upd(at(2), nil, a, slices.Concat(attrs4(asX), mrtgen.Raw(mrtgen.FlagTransitive, 5, []byte{1}))),
-			[]string{"10.0.0.0/24", "10.0.1.0/24"}, 0, 0, nil},
-		{"attribute framing past the block: reset",
-			upd(at(2), nil, a, truncated), nil, 0, 1, nil},
+			all, 0, 0, false, nil},
+		{"malformed LOCAL_PREF on an internal session: treat-as-withdraw",
+			ibgp(slices.Concat(attrs4(asX), mrtgen.Raw(mrtgen.FlagTransitive, 5, []byte{1}))),
+			[]string{"10.0.1.0/24", "2001:db8:1::/48"}, 1, 0, false, nil},
+		{"malformed AGGREGATOR on an internal session: still attribute discard",
+			ibgp(slices.Concat(attrs4(asX), mrtgen.Raw(mrtgen.FlagOptional|mrtgen.FlagTransitive, 7, []byte{1, 2, 3}))),
+			all, 0, 0, false, nil},
+		{"attribute framing past the block: treat-as-withdraw (RFC 7606 §4)",
+			upd(at(2), nil, a, truncated), []string{"10.0.1.0/24", "2001:db8:1::/48"}, 1, 0, false, nil},
+		{"withdrawals only, with a malformed attribute: reset (RFC 7606 §5.2)",
+			upd(at(2), b, nil, slices.Concat(mrtgen.Origin(bgp.OriginIGP), badComm)), nil, 0, 1, true, nil},
+		{"withdrawals only, with a discarded malformed attribute: used",
+			upd(at(2), b, nil, mrtgen.Raw(mrtgen.FlagOptional|mrtgen.FlagTransitive, 7, []byte{1, 2, 3})),
+			[]string{"10.0.0.0/24", "2001:db8:1::/48"}, 0, 0, false, nil},
 		{"NLRI that do not parse: reset",
-			msg(at(2), mrt.SubMessageAS4, asX, peerAddr, localAddr, badNLRI), nil, 0, 1, nil},
+			msg(at(2), mrt.SubMessageAS4, asX, peerAddr, localAddr, badNLRI), nil, 0, 1, true, nil},
 		{"MP_REACH_NLRI next hop of 5 bytes: reset",
 			upd(at(2), nil, nil, slices.Concat(mrtgen.Origin(bgp.OriginIGP), mrtgen.ASPath(true, mrtgen.Seq(asX)),
 				mrtgen.Raw(mrtgen.FlagOptional, 14, slices.Concat([]byte{0, 2, 1, 5, 1, 2, 3, 4, 5, 0}, mrtgen.NLRIBytes(nlri("2001:db8::/32"), false))))),
-			nil, 0, 1, nil},
+			nil, 0, 1, true, nil},
 		{"MP_UNREACH_NLRI too short: reset",
-			upd(at(2), nil, nil, mrtgen.Raw(mrtgen.FlagOptional, 15, []byte{0, 2})), nil, 0, 1, nil},
+			upd(at(2), nil, nil, mrtgen.Raw(mrtgen.FlagOptional, 15, []byte{0, 2})), nil, 0, 1, true, nil},
+		{"MP_REACH_NLRI framing past the block: reset",
+			upd(at(2), nil, nil, slices.Concat(mrtgen.Origin(bgp.OriginIGP), []byte{mrtgen.FlagOptional, 14, 40, 0, 2})), nil, 0, 1, true, nil},
 		{"a broken BGP header: reset",
-			msg(at(2), mrt.SubMessageAS4, asX, peerAddr, localAddr, []byte{1, 2, 3}), nil, 0, 1, nil},
+			msg(at(2), mrt.SubMessageAS4, asX, peerAddr, localAddr, []byte{1, 2, 3}), nil, 0, 1, true, nil},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -451,64 +495,90 @@ func TestSessionMalformed(t *testing.T) {
 			if info.Malformed != tc.malformed || info.MalformedResets != tc.resets {
 				t.Errorf("Malformed, MalformedResets = %d, %d, want %d, %d", info.Malformed, info.MalformedResets, tc.malformed, tc.resets)
 			}
+			if info.DownAtEnd != tc.down {
+				t.Errorf("DownAtEnd = %v, want %v", info.DownAtEnd, tc.down)
+			}
 			if len(obs) > 0 && obs[0].Route.Prefix == a[0].Prefix && !slices.Equal(obs[0].Route.Communities, tc.comms) {
 				t.Errorf("communities = %v, want %v", obs[0].Route.Communities, tc.comms)
 			}
 		})
 	}
-	// After a reset, X's next announcements form the state again.
-	obs, info := mustRun(t, selX, append(slices.Clone(before), upd(at(2), nil, a, truncated), upd(at(3), nil, b, good))...)
-	if got := prefixes(obs); !slices.Equal(got, []string{"10.0.1.0/24"}) || info.MidSession {
-		t.Errorf("after a reset: %v, MidSession %v", got, info.MidSession)
+	// After a reset, X's next announcements form the state again, and the
+	// session is no longer down.
+	obs, info := mustRun(t, selX, append(slices.Clone(before),
+		msg(at(2), mrt.SubMessageAS4, asX, peerAddr, localAddr, badNLRI), upd(at(3), nil, b, good))...)
+	if got := prefixes(obs); !slices.Equal(got, []string{"10.0.1.0/24"}) || info.MidSession || info.DownAtEnd {
+		t.Errorf("after a reset: %v, MidSession %v, DownAtEnd %v", got, info.MidSession, info.DownAtEnd)
 	}
 }
 
 func TestClassify(t *testing.T) {
-	d := func(sev bgp.Severity, code string, attr bgp.AttrCode) bgp.Diagnostic {
-		return bgp.Diagnostic{Severity: sev, Code: code, Attr: attr}
+	d := func(sev bgp.Severity, code string, attr bgp.AttrCode) []bgp.Diagnostic {
+		return []bgp.Diagnostic{{Severity: sev, Code: code, Attr: attr}}
 	}
+	both := func(x, y []bgp.Diagnostic) []bgp.Diagnostic { return slices.Concat(x, y) }
+	ann := facts{reachable: true, otherAttrs: true} // an UPDATE announcing NLRI with attributes
+	ibgp := facts{reachable: true, otherAttrs: true, ibgp: true}
+	wdOnly := facts{otherAttrs: true} // withdrawals only, with attributes
+	mpUnreachOnly := facts{}          // withdrawals only, MP_UNREACH_NLRI its only attribute
+	W, E, I := bgp.SeverityWarning, bgp.SeverityError, bgp.SeverityInfo
 	tests := []struct {
 		name  string
 		upd   []bgp.Diagnostic
 		attrs []bgp.Diagnostic
+		f     facts
 		want  disposition
 	}{
-		{"none", nil, nil, dispOK},
-		{"trailing bytes after the message", []bgp.Diagnostic{d(bgp.SeverityWarning, "bgp/message-header", 0)}, nil, dispOK},
-		{"prefix bits cleared", []bgp.Diagnostic{d(bgp.SeverityInfo, "bgp/prefix-bits", 0)}, nil, dispOK},
-		{"MP prefix bits cleared", nil, []bgp.Diagnostic{d(bgp.SeverityInfo, "bgp/prefix-bits", bgp.AttrMPReach)}, dispOK},
-		{"AS4_PATH ignored", nil, []bgp.Diagnostic{d(bgp.SeverityInfo, "bgp/as4path-ignored", bgp.AttrAS4Path)}, dispOK},
-		{"duplicate", nil, []bgp.Diagnostic{d(bgp.SeverityWarning, "bgp/attr-duplicate", bgp.AttrCommunities)}, dispOK},
-		{"AS4_PATH malformed", nil, []bgp.Diagnostic{d(bgp.SeverityWarning, "bgp/attr-value", bgp.AttrAS4Path)}, dispOK},
-		{"AS4_AGGREGATOR", nil, []bgp.Diagnostic{d(bgp.SeverityWarning, "bgp/attr-length", bgp.AttrAS4Aggregator)}, dispOK},
-		{"AGGREGATOR", nil, []bgp.Diagnostic{d(bgp.SeverityWarning, "bgp/attr-length", bgp.AttrAggregator)}, dispOK},
-		{"ATOMIC_AGGREGATE", nil, []bgp.Diagnostic{d(bgp.SeverityWarning, "bgp/attr-length", bgp.AttrAtomicAggregate)}, dispOK},
-		{"LOCAL_PREF", nil, []bgp.Diagnostic{d(bgp.SeverityWarning, "bgp/attr-length", bgp.AttrLocalPref)}, dispOK},
-		{"ORIGINATOR_ID", nil, []bgp.Diagnostic{d(bgp.SeverityWarning, "bgp/attr-length", bgp.AttrOriginatorID)}, dispOK},
-		{"CLUSTER_LIST", nil, []bgp.Diagnostic{d(bgp.SeverityWarning, "bgp/attr-length", bgp.AttrClusterList)}, dispOK},
-		{"ORIGIN", nil, []bgp.Diagnostic{d(bgp.SeverityWarning, "bgp/attr-value", bgp.AttrOrigin)}, dispWithdraw},
-		{"AS_PATH", nil, []bgp.Diagnostic{d(bgp.SeverityWarning, "bgp/aspath-width", bgp.AttrASPath)}, dispWithdraw},
-		{"NEXT_HOP", nil, []bgp.Diagnostic{d(bgp.SeverityWarning, "bgp/attr-length", bgp.AttrNextHop)}, dispWithdraw},
-		{"MED", nil, []bgp.Diagnostic{d(bgp.SeverityWarning, "bgp/attr-length", bgp.AttrMED)}, dispWithdraw},
-		{"COMMUNITIES", nil, []bgp.Diagnostic{d(bgp.SeverityWarning, "bgp/attr-length", bgp.AttrCommunities)}, dispWithdraw},
-		{"EXTENDED COMMUNITIES", nil, []bgp.Diagnostic{d(bgp.SeverityWarning, "bgp/attr-length", bgp.AttrExtCommunities)}, dispWithdraw},
-		{"LARGE_COMMUNITY", nil, []bgp.Diagnostic{d(bgp.SeverityWarning, "bgp/attr-length", bgp.AttrLargeCommunity)}, dispWithdraw},
-		{"OTC", nil, []bgp.Diagnostic{d(bgp.SeverityWarning, "bgp/attr-length", bgp.AttrOnlyToCustomer)}, dispWithdraw},
-		{"withdraw and discard: withdraw", nil, []bgp.Diagnostic{d(bgp.SeverityWarning, "bgp/attr-length", bgp.AttrAggregator), d(bgp.SeverityWarning, "bgp/attr-length", bgp.AttrMED)}, dispWithdraw},
-		{"MP_REACH next hop", nil, []bgp.Diagnostic{d(bgp.SeverityWarning, "bgp/attr-value", bgp.AttrMPReach)}, dispReset},
-		{"MP_REACH duplicate", nil, []bgp.Diagnostic{d(bgp.SeverityWarning, "bgp/attr-duplicate", bgp.AttrMPReach)}, dispReset},
-		{"MP_UNREACH NLRI", nil, []bgp.Diagnostic{d(bgp.SeverityError, "bgp/nlri-length", bgp.AttrMPUnreach)}, dispReset},
-		{"attribute framing", nil, []bgp.Diagnostic{d(bgp.SeverityError, "bgp/attr-truncated", bgp.AttrCommunities)}, dispReset},
-		{"attribute framing, no code", nil, []bgp.Diagnostic{d(bgp.SeverityError, "bgp/attr-truncated", 0)}, dispReset},
-		{"withdraw and reset: reset", nil, []bgp.Diagnostic{d(bgp.SeverityWarning, "bgp/attr-length", bgp.AttrMED), d(bgp.SeverityError, "bgp/attr-truncated", 0)}, dispReset},
-		{"update length", []bgp.Diagnostic{d(bgp.SeverityError, "bgp/update-length", 0)}, nil, dispReset},
-		{"NLRI length", []bgp.Diagnostic{d(bgp.SeverityError, "bgp/nlri-length", 0)}, nil, dispReset},
-		{"message cut short", []bgp.Diagnostic{d(bgp.SeverityError, "bgp/message-truncated", 0)}, nil, dispReset},
-		{"an unknown Warning not about an attribute", nil, []bgp.Diagnostic{d(bgp.SeverityWarning, "bgp/new-thing", 0)}, dispWithdraw},
-		{"an unknown Error", nil, []bgp.Diagnostic{d(bgp.SeverityError, "bgp/new-thing", bgp.AttrCommunities)}, dispReset},
+		{"none", nil, nil, ann, dispOK},
+		{"trailing bytes after the message", d(W, "bgp/message-header", 0), nil, ann, dispOK},
+		{"prefix bits cleared", d(I, "bgp/prefix-bits", 0), nil, ann, dispOK},
+		{"MP prefix bits cleared", nil, d(I, "bgp/prefix-bits", bgp.AttrMPReach), ann, dispOK},
+		{"AS4_PATH ignored", nil, d(I, "bgp/as4path-ignored", bgp.AttrAS4Path), ann, dispOK},
+		{"duplicate", nil, d(W, "bgp/attr-duplicate", bgp.AttrCommunities), ann, dispOK},
+		{"AS4_PATH malformed", nil, d(W, "bgp/attr-value", bgp.AttrAS4Path), ann, dispOK},
+		{"AS4_AGGREGATOR", nil, d(W, "bgp/attr-length", bgp.AttrAS4Aggregator), ann, dispOK},
+		{"AGGREGATOR", nil, d(W, "bgp/attr-length", bgp.AttrAggregator), ann, dispOK},
+		{"ATOMIC_AGGREGATE", nil, d(W, "bgp/attr-length", bgp.AttrAtomicAggregate), ann, dispOK},
+		{"LOCAL_PREF", nil, d(W, "bgp/attr-length", bgp.AttrLocalPref), ann, dispOK},
+		{"ORIGINATOR_ID", nil, d(W, "bgp/attr-length", bgp.AttrOriginatorID), ann, dispOK},
+		{"CLUSTER_LIST", nil, d(W, "bgp/attr-length", bgp.AttrClusterList), ann, dispOK},
+		{"iBGP LOCAL_PREF", nil, d(W, "bgp/attr-length", bgp.AttrLocalPref), ibgp, dispWithdraw},
+		{"iBGP ORIGINATOR_ID", nil, d(W, "bgp/attr-length", bgp.AttrOriginatorID), ibgp, dispWithdraw},
+		{"iBGP CLUSTER_LIST", nil, d(W, "bgp/attr-length", bgp.AttrClusterList), ibgp, dispWithdraw},
+		{"iBGP AGGREGATOR", nil, d(W, "bgp/attr-length", bgp.AttrAggregator), ibgp, dispOK},
+		{"iBGP AS4_PATH", nil, d(W, "bgp/attr-value", bgp.AttrAS4Path), ibgp, dispOK},
+		{"ORIGIN", nil, d(W, "bgp/attr-value", bgp.AttrOrigin), ann, dispWithdraw},
+		{"AS_PATH", nil, d(W, "bgp/aspath-width", bgp.AttrASPath), ann, dispWithdraw},
+		{"NEXT_HOP", nil, d(W, "bgp/attr-length", bgp.AttrNextHop), ann, dispWithdraw},
+		{"MED", nil, d(W, "bgp/attr-length", bgp.AttrMED), ann, dispWithdraw},
+		{"COMMUNITIES", nil, d(W, "bgp/attr-length", bgp.AttrCommunities), ann, dispWithdraw},
+		{"EXTENDED COMMUNITIES", nil, d(W, "bgp/attr-length", bgp.AttrExtCommunities), ann, dispWithdraw},
+		{"LARGE_COMMUNITY", nil, d(W, "bgp/attr-length", bgp.AttrLargeCommunity), ann, dispWithdraw},
+		{"OTC", nil, d(W, "bgp/attr-length", bgp.AttrOnlyToCustomer), ann, dispWithdraw},
+		{"missing ORIGIN", nil, nil, facts{reachable: true, otherAttrs: true, missingOrigin: true}, dispWithdraw},
+		{"missing or invalid NEXT_HOP", nil, nil, facts{reachable: true, otherAttrs: true, badNextHop: true}, dispWithdraw},
+		{"withdraw and discard: withdraw", nil, both(d(W, "bgp/attr-length", bgp.AttrAggregator), d(W, "bgp/attr-length", bgp.AttrMED)), ann, dispWithdraw},
+		{"attribute framing: treat-as-withdraw (§4)", nil, d(E, "bgp/attr-truncated", bgp.AttrCommunities), ann, dispWithdraw},
+		{"attribute framing, no code", nil, d(E, "bgp/attr-truncated", 0), ann, dispWithdraw},
+		{"MP_REACH framing: reset", nil, d(E, "bgp/attr-truncated", bgp.AttrMPReach), ann, dispReset},
+		{"MP_UNREACH framing: reset", nil, d(E, "bgp/attr-truncated", bgp.AttrMPUnreach), ann, dispReset},
+		{"MP_REACH next hop", nil, d(W, "bgp/attr-value", bgp.AttrMPReach), ann, dispReset},
+		{"MP_REACH duplicate", nil, d(W, "bgp/attr-duplicate", bgp.AttrMPReach), ann, dispReset},
+		{"MP_UNREACH NLRI", nil, d(E, "bgp/nlri-length", bgp.AttrMPUnreach), ann, dispReset},
+		{"withdraw and reset: reset", nil, both(d(W, "bgp/attr-length", bgp.AttrMED), d(E, "bgp/nlri-length", bgp.AttrMPReach)), ann, dispReset},
+		{"update length", d(E, "bgp/update-length", 0), nil, ann, dispReset},
+		{"NLRI length", d(E, "bgp/nlri-length", 0), nil, ann, dispReset},
+		{"message cut short", d(E, "bgp/message-truncated", 0), nil, ann, dispReset},
+		{"an unknown Warning not about an attribute", nil, d(W, "bgp/new-thing", 0), ann, dispWithdraw},
+		{"an unknown Error", nil, d(E, "bgp/new-thing", bgp.AttrCommunities), ann, dispReset},
+		{"§5.2: no NLRI, attributes, treat-as-withdraw: reset", nil, d(W, "bgp/attr-length", bgp.AttrCommunities), wdOnly, dispReset},
+		{"§5.2: no NLRI, attribute framing: reset", nil, d(E, "bgp/attr-truncated", bgp.AttrCommunities), wdOnly, dispReset},
+		{"§5.2: no NLRI, attribute discard only: used", nil, d(W, "bgp/attr-length", bgp.AttrAggregator), wdOnly, dispOK},
+		{"§5.2: no NLRI, no error: used", nil, nil, wdOnly, dispOK},
+		{"§5.2: only MP_UNREACH_NLRI, so not escalated", nil, d(W, "bgp/new-thing", 0), mpUnreachOnly, dispWithdraw},
 	}
 	for _, tc := range tests {
-		if got := classify(tc.upd, tc.attrs); got != tc.want {
+		if got := classify(tc.upd, tc.attrs, tc.f); got != tc.want {
 			t.Errorf("%s: classify = %v, want %v", tc.name, got, tc.want)
 		}
 	}
@@ -754,5 +824,134 @@ func TestSessionStopsEarly(t *testing.T) {
 	}
 	if n != 1 {
 		t.Errorf("n = %d", n)
+	}
+}
+
+// Ruling R10 (3): two sessions holding one key are two Adj-RIB-Outs, two
+// observations, told apart by Evidence.PeerAddr, ordered by peer address.
+func TestSessionSameKeyTwoSessions(t *testing.T) {
+	second := netip.MustParseAddr("192.0.2.5")
+	upd2 := func(ts time.Time, attrs []byte) []byte {
+		return msg(ts, mrt.SubMessageAS4, asX, second, localAddr, mrtgen.Update(nil, nlri("10.0.0.0/24"), attrs, false))
+	}
+	st := mrt.SubStateChangeAS4
+	est2 := mrtgen.Header(mrt.TypeBGP4MP, st, at(0), mrtgen.StateChange(st, asX, asL, second, localAddr, mrt.StateOpenConfirm, mrt.StateEstablished))
+	for _, tc := range []struct {
+		name  string
+		attrs []byte
+		path  []types.ASN
+	}{
+		{"identical routes", attrs4(asX, asY), asns(asX, asY)},
+		{"different routes", attrs4(asX, asZ), asns(asX, asZ)},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			// The second session's records come first: the order is by address, not arrival.
+			obs, info := mustRun(t, selX, est2, established(at(0)), upd2(at(1), tc.attrs),
+				upd(at(2), nil, nlri("10.0.0.0/24"), attrs4(asX, asY)))
+			if len(obs) != 2 || info.MidSession {
+				t.Fatalf("got %+v, MidSession %v", obs, info.MidSession)
+			}
+			if obs[0].Evidence.PeerAddr != peerAddr || obs[1].Evidence.PeerAddr != second {
+				t.Errorf("peer addresses %v, %v; want %v, %v", obs[0].Evidence.PeerAddr, obs[1].Evidence.PeerAddr, peerAddr, second)
+			}
+			if !slices.Equal(obs[0].Route.Path, asns(asX, asY)) || !slices.Equal(obs[1].Route.Path, tc.path) {
+				t.Errorf("paths %v, %v", obs[0].Route.Path, obs[1].Route.Path)
+			}
+		})
+	}
+}
+
+// Ruling R10 (5): a RIB dump is a baseline. UPDATEs before it are superseded
+// (also for a session the dump names with no entries), and MidSession is cleared.
+func TestSessionRIBBaseline(t *testing.T) {
+	second := netip.MustParseAddr("192.0.2.5")
+	pit := mrtgen.Header(mrt.TypeTableDumpV2, mrt.SubPeerIndexTable, at(10), mrtgen.PeerIndexTable(
+		netip.MustParseAddr("192.0.2.254"), "", []mrt.Peer{
+			{BGPID: peerAddr, Addr: peerAddr, AS: asX},
+			{BGPID: second, Addr: second, AS: asX},
+		}))
+	rib := mrtgen.Header(mrt.TypeTableDumpV2, mrt.SubRIBIPv4Unicast, at(10), mrtgen.RIB(mrt.SubRIBIPv4Unicast, 0, pfx("10.0.1.0/24"),
+		[]mrtgen.Entry{{PeerIndex: 0, Originated: at(5), Attrs: attrs4(asX)}}))
+	early := [][]byte{
+		upd(at(1), nil, nlri("10.0.0.0/24", "10.0.1.0/24"), attrs4(asX, asY)), // mid-session
+		msg(at(2), mrt.SubMessageAS4, asX, second, localAddr, mrtgen.Update(nil, nlri("10.0.9.0/24"), attrs4(asX), false)),
+	}
+	pre := SessionSel{Peer: types.ASN(asX), PrePolicyRIB: true}
+	obs, info := mustRun(t, pre, append(slices.Clone(early), pit, rib)...)
+	if got := prefixes(obs); !slices.Equal(got, []string{"10.0.1.0/24"}) || info.MidSession {
+		t.Errorf("UPDATEs then a bview: %v, MidSession %v", got, info.MidSession)
+	}
+	if len(obs) == 1 && !slices.Equal(obs[0].Route.Path, asns(asX)) {
+		t.Errorf("the RIB's route did not replace the UPDATE's: %v", obs[0].Route.Path)
+	}
+	// Without the bview the same UPDATEs are mid-session.
+	_, info = mustRun(t, pre, early...)
+	if !info.MidSession {
+		t.Errorf("MidSession false before the bview")
+	}
+	// A bview after At does not apply.
+	obs, _ = mustRun(t, SessionSel{Peer: types.ASN(asX), PrePolicyRIB: true, At: at(5)}, append(slices.Clone(early), pit, rib)...)
+	if got := prefixes(obs); !slices.Equal(got, []string{"10.0.0.0/24", "10.0.1.0/24", "10.0.9.0/24"}) {
+		t.Errorf("bview after At: %v", got)
+	}
+	// Legacy TABLE_DUMP: a run of records is one baseline (both entries stay).
+	obs, info = mustRun(t, pre, append(slices.Clone(early),
+		tableDump(at(10), pfx("10.0.3.0/24"), peerAddr, asX, slices.Concat(mrtgen.Origin(bgp.OriginIGP), mrtgen.ASPath(false, mrtgen.Seq(asX)))),
+		tableDump(at(10), pfx("10.0.4.0/24"), peerAddr, asX, slices.Concat(mrtgen.Origin(bgp.OriginIGP), mrtgen.ASPath(false, mrtgen.Seq(asX)))))...)
+	// The second session is not named by a TABLE_DUMP, so its UPDATE stays.
+	if got := prefixes(obs); !slices.Equal(got, []string{"10.0.3.0/24", "10.0.4.0/24", "10.0.9.0/24"}) {
+		t.Errorf("TABLE_DUMP baseline: %v", got)
+	}
+}
+
+// ribGeneric is a TABLE_DUMP_V2 RIB_GENERIC_ADDPATH record for one IPv4
+// unicast prefix with path identifier id; its entries carry none (RFC 8050 §4.2).
+func ribGeneric(ts time.Time, p netip.Prefix, id uint32, entries []mrtgen.Entry) []byte {
+	b := binary.BigEndian.AppendUint32(nil, 7)
+	b = binary.BigEndian.AppendUint16(b, uint16(bgp.AFIIPv4))
+	b = append(b, byte(bgp.SAFIUnicast))
+	b = append(b, mrtgen.PrefixBytes(p, id, true)...)
+	b = binary.BigEndian.AppendUint16(b, uint16(len(entries)))
+	for _, e := range entries {
+		b = binary.BigEndian.AppendUint16(b, e.PeerIndex)
+		b = binary.BigEndian.AppendUint32(b, uint32(e.Originated.Unix()))
+		b = binary.BigEndian.AppendUint16(b, uint16(len(e.Attrs)))
+		b = append(b, e.Attrs...)
+	}
+	return mrtgen.Header(mrt.TypeTableDumpV2, mrt.SubRIBGenericAddPath, ts, b)
+}
+
+// Ruling R10 (8): add-path RIB subtypes take the path ID from each entry;
+// RIB_GENERIC_ADDPATH from the record's NLRI.
+func TestSessionRIBAddPath(t *testing.T) {
+	pit := mrtgen.Header(mrt.TypeTableDumpV2, mrt.SubPeerIndexTable, at(0), mrtgen.PeerIndexTable(
+		netip.MustParseAddr("192.0.2.254"), "", []mrt.Peer{{BGPID: peerAddr, Addr: peerAddr, AS: asX}}))
+	st := mrt.SubRIBIPv4UnicastAddPath
+	rib := mrtgen.Header(mrt.TypeTableDumpV2, st, at(0), mrtgen.RIB(st, 0, pfx("10.0.0.0/24"), []mrtgen.Entry{
+		{PeerIndex: 0, Originated: at(-1), PathID: 5, Attrs: attrs4(asX, asY)},
+		{PeerIndex: 0, Originated: at(-1), PathID: 6, Attrs: attrs4(asX, asZ)},
+	}))
+	gen := ribGeneric(at(0), pfx("10.0.1.0/24"), 9, []mrtgen.Entry{{PeerIndex: 0, Originated: at(-1), Attrs: attrs4(asX)}})
+	pre := SessionSel{Peer: types.ASN(asX), PrePolicyRIB: true}
+	ap := func(ts time.Time, withdrawn []bgp.NLRI) []byte {
+		return msg(ts, mrt.SubMessageAS4AddPath, asX, peerAddr, localAddr, mrtgen.Update(withdrawn, nil, nil, true))
+	}
+	obs, _ := mustRun(t, pre, pit, rib, gen)
+	if got := prefixes(obs); !slices.Equal(got, []string{"10.0.0.0/24", "10.0.0.0/24", "10.0.1.0/24"}) {
+		t.Fatalf("prefixes = %v", got)
+	}
+	// The IDs are the keys: an add-path withdrawal of ID 5 and of ID 9 leaves ID 6 only.
+	obs, _ = mustRun(t, pre, pit, rib, gen, ap(at(1), []bgp.NLRI{
+		{Prefix: pfx("10.0.0.0/24"), PathID: 5, HasPathID: true},
+		{Prefix: pfx("10.0.1.0/24"), PathID: 9, HasPathID: true},
+	}))
+	if len(obs) != 1 || !slices.Equal(obs[0].Route.Path, asns(asX, asZ)) {
+		t.Fatalf("after withdrawing IDs 5 and 9: %+v", obs)
+	}
+	// Withdrawing ID 0 removes nothing.
+	obs, _ = mustRun(t, pre, pit, rib, gen, ap(at(1), []bgp.NLRI{
+		{Prefix: pfx("10.0.0.0/24"), HasPathID: true}, {Prefix: pfx("10.0.1.0/24"), HasPathID: true}}))
+	if len(obs) != 3 {
+		t.Fatalf("after withdrawing ID 0: %v", prefixes(obs))
 	}
 }

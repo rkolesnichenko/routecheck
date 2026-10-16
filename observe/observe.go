@@ -9,14 +9,15 @@ import (
 	"github.com/rkolesnichenko/rpsl/types"
 )
 
-// Evidence is what an observation rests on. In session mode only Time is set:
-// the route was on the session itself. In collector mode the other fields say
+// Evidence is what an observation rests on. In session mode only Time and
+// PeerAddr are set: the route was on that session itself. In collector mode the other fields say
 // through whom it was seen.
 type Evidence struct {
 	Neighbours     []types.ASN // collector mode: the ASes X announced it to, sorted
 	Direct         bool        // collector mode: X is a collector's own peer
 	CollectorPeers int         // collector mode: collector peers it was seen through
 	Time           time.Time   // when it was announced (a RIB entry: when it was learned)
+	PeerAddr       netip.Addr  // session mode: the session's peer address; zero in collector mode
 }
 
 // Observation is one route as X announced it, with its address family and
@@ -97,9 +98,12 @@ func (d disposition) String() string {
 }
 
 // discarded are the attributes RFC 7606 §7 (and RFC 6793 §6 for the AS4
-// ones) handles by attribute discard on an external session: a malformed one
-// is dropped and the route kept. None of them feeds verdict.Route, and a
-// discarded AS4_PATH leaves AS_TRANS in the path, which makes PathKnown false.
+// ones) handles by attribute discard: a malformed one is dropped and the
+// route kept. The rows assume an external session; on an internal one
+// (LocalAS == PeerAS) LOCAL_PREF, ORIGINATOR_ID and CLUSTER_LIST are
+// treat-as-withdraw instead (§7.5, §7.9, §7.10; see internalWithdraw). None
+// of them feeds verdict.Route, and a discarded AS4_PATH leaves AS_TRANS in
+// the path, which makes PathKnown false.
 var discarded = [256]bool{
 	bgp.AttrLocalPref:       true, // §7.5, external neighbour
 	bgp.AttrAtomicAggregate: true, // §7.6
@@ -110,42 +114,79 @@ var discarded = [256]bool{
 	bgp.AttrAS4Aggregator:   true, // RFC 6793 §6
 }
 
+// internalWithdraw are the discarded attributes that are treat-as-withdraw
+// on an internal session.
+var internalWithdraw = [256]bool{
+	bgp.AttrLocalPref:    true,
+	bgp.AttrOriginatorID: true,
+	bgp.AttrClusterList:  true,
+}
+
+// facts are what classify needs to know about an UPDATE besides mrt's
+// diagnostics.
+type facts struct {
+	reachable     bool // it announces NLRI (the NLRI field or MP_REACH_NLRI)
+	otherAttrs    bool // it carries a path attribute other than MP_UNREACH_NLRI
+	ibgp          bool // the session is internal (LocalAS == PeerAS)
+	missingOrigin bool // it announces NLRI and has no (well-formed) ORIGIN
+	badNextHop    bool // the NLRI field announces prefixes and NEXT_HOP is missing or not a host address
+}
+
 // classify decides an UPDATE's disposition from the diagnostics of
-// bgp.ParseUpdate (upd) and of Attrs.Decode (attrs); a RIB entry has attrs only.
+// bgp.ParseUpdate (upd) and of Attrs.Decode (attrs), and the facts f; a RIB
+// entry has attrs only.
 //
 // mrt's severities do not draw RFC 7606's line: a known attribute of the
 // wrong length is a Warning and goes to Path.Unknown, so a route whose
-// COMMUNITIES did not decode would otherwise look like a route with none.
-// The rule, strongest first (RFC 7606 §3.h):
-//   - reset: any Error from ParseUpdate (the message's framing or its NLRI,
-//     §3.j, §5.3); any Error from Decode (bgp/attr-truncated: attributes past
-//     the break, an MP_REACH_NLRI among them, cannot be located, §3.j; and
-//     bgp/nlri-length inside MP_REACH_NLRI or MP_UNREACH_NLRI); any Warning
-//     about MP_REACH_NLRI or MP_UNREACH_NLRI (undecodable, a next hop of the
-//     wrong length §7.11, or a duplicate §3.g).
-//   - treat-as-withdraw: any other Warning from Decode, except a duplicate
-//     attribute (§3.g: the first copy is used) and an attribute RFC 7606
-//     discards (see discarded).
+// COMMUNITIES did not decode would otherwise look like a route with none
+// (rulings R9, R10). The rule, strongest first (RFC 7606 §3.h):
+//   - reset: any Error from ParseUpdate (the message's framing or its NLRI
+//     field, §3.j, §5.3); any diagnostic of Warning or above about
+//     MP_REACH_NLRI or MP_UNREACH_NLRI (undecodable or cut, so its NLRI
+//     cannot be located, §3.j; a next hop of the wrong length, §7.11; a
+//     duplicate, §3.g); any other Error from Decode that is not
+//     bgp/attr-truncated (none exists in mrt v0.1.0; an unknown one is taken
+//     at its worst); and §5.2: an UPDATE that would be treat-as-withdraw but
+//     announces no NLRI while carrying an attribute other than
+//     MP_UNREACH_NLRI.
+//   - treat-as-withdraw: bgp/attr-truncated (§4: attribute framing runs past
+//     the block, whose Total Path Attribute Length is intact, so the NLRI
+//     field is still located; an MP_REACH_NLRI after the break is not seen);
+//     any other Warning from Decode, except a duplicate attribute (§3.g: the
+//     first copy is used) and an attribute discarded on this session (see
+//     discarded); a missing ORIGIN when it announces NLRI, and a missing or
+//     invalid NEXT_HOP when the NLRI field announces prefixes (§3.d, RFC 4271
+//     §6.3).
 //   - otherwise the UPDATE is used as it is: Info diagnostics (a cleared
 //     prefix bit, an ignored AS4_PATH) and ParseUpdate's Warning for bytes
 //     after the message's own length.
-func classify(upd, attrs []bgp.Diagnostic) disposition {
-	d := dispOK
+func classify(upd, attrs []bgp.Diagnostic, f facts) disposition {
 	for _, x := range upd {
 		if x.Severity >= bgp.SeverityError {
 			return dispReset
 		}
 	}
+	d := dispOK
+	if f.missingOrigin || f.badNextHop {
+		d = dispWithdraw
+	}
 	for _, x := range attrs {
 		switch {
 		case x.Severity < bgp.SeverityWarning:
-		case x.Severity >= bgp.SeverityError,
-			x.Attr == bgp.AttrMPReach, x.Attr == bgp.AttrMPUnreach:
+		case x.Attr == bgp.AttrMPReach, x.Attr == bgp.AttrMPUnreach:
 			return dispReset
-		case x.Code == "bgp/attr-duplicate", discarded[x.Attr]:
+		case x.Code == "bgp/attr-truncated":
+			d = dispWithdraw
+		case x.Severity >= bgp.SeverityError:
+			return dispReset
+		case x.Code == "bgp/attr-duplicate":
+		case discarded[x.Attr] && !(f.ibgp && internalWithdraw[x.Attr]):
 		default:
 			d = dispWithdraw
 		}
+	}
+	if d == dispWithdraw && !f.reachable && f.otherAttrs {
+		return dispReset // §5.2
 	}
 	return d
 }

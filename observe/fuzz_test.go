@@ -55,7 +55,7 @@ func FuzzObserve(f *testing.F) {
 				if len(o.Route.Path) == 0 || o.Route.Path[0] != types.ASN(asX) {
 					t.Fatalf("observation %d does not start with X: %v", i, o.Route.Path)
 				}
-				if !o.Route.Prefix.IsValid() || !o.Route.CommsKnown {
+				if !o.Route.Prefix.IsValid() || !o.Route.CommsKnown || !o.Evidence.PeerAddr.IsValid() {
 					t.Fatalf("observation %d: %+v", i, o.Route)
 				}
 				if i > 0 {

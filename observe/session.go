@@ -38,28 +38,31 @@ type SessionInfo struct {
 	// X announced before the capture began are missing.
 	MidSession bool
 	// DownAtEnd: every selected session was down at the end (its last state
-	// change left Established and no UPDATE followed); the result is empty.
+	// change, or a malformed reset, left it down and no UPDATE followed); the
+	// result is empty.
 	DownAtEnd bool
 	// NoRecordsBeforeAt: At is set and every selected record is after it.
 	NoRecordsBeforeAt bool
 
 	NotFirstAS      int // announcements whose path does not start with X: skipped, and the key's earlier route deleted
 	Malformed       int // announcements treated as withdrawals (RFC 7606 treat-as-withdraw; a RIB entry counts one)
-	MalformedResets int // UPDATEs whose NLRI could not be trusted (RFC 7606 session reset): the session's state was cleared
+	MalformedResets int // UPDATEs RFC 7606 answers with a session reset: the session's state was cleared and it is down until X's next UPDATE
 	Skipped         int // records mrt could not read (a *mrt.RecordError), and RIB entries it could not frame or place
 }
 
 // Session replays the BGP messages X sent on a session (BGP4MP and
 // BGP4MP_ET, non-LOCAL subtypes) and yields X's Adj-RIB-Out toward the local
 // AS at the end of the capture, or at sel.At, in prefix order (then address
-// family, then add-path ID). It reads the whole input before it yields
+// family, then add-path ID, then peer address). It reads the whole input before it yields
 // anything. The info function is valid after the sequence is drained.
 //
 // The rules (spec §6.2, controller ruling R8):
 //   - A record is selected when its peer AS is sel.Peer and, if
 //     sel.PeerAddr is valid, its peer address is sel.PeerAddr. Each peer
-//     address is a session of its own, with its own state; the result is
-//     their union.
+//     address is a session of its own, with its own Adj-RIB-Out; the result
+//     is their union, and Evidence.PeerAddr says which session a route is
+//     from. Two sessions holding the same key give two observations, even
+//     when their routes are identical.
 //   - The state is keyed by (address family, prefix, add-path ID; 0 for a
 //     message without add-path). In an UPDATE the withdrawals are applied
 //     first, then the announcements; an announcement replaces the key's route.
@@ -70,13 +73,15 @@ type SessionInfo struct {
 //     is deleted and it is counted in NotFirstAS.
 //   - RFC 7606 decides a malformed UPDATE (see classify): treat-as-withdraw
 //     deletes its announcements' keys (Malformed), and a session reset, or a
-//     BGP message header that does not parse, clears the state
-//     (MalformedResets).
+//     BGP message header that does not parse, clears the state and leaves the
+//     session down until X's next UPDATE (MalformedResets).
 //   - Records after sel.At are not applied.
 //   - A RIB dump (TABLE_DUMP_V2 or TABLE_DUMP) ends the sequence with
-//     ErrRIBNotPrePolicy unless sel.PrePolicyRIB; then each of its entries
-//     for the peer is an announcement, so a RIB followed by UPDATEs is the
-//     RIB with the UPDATEs on top.
+//     ErrRIBNotPrePolicy unless sel.PrePolicyRIB. Then a dump is a baseline:
+//     a PEER_INDEX_TABLE (or the first record of a run of legacy TABLE_DUMP
+//     records) clears the state of every selected session it names, and each
+//     entry for the peer is an announcement, so UPDATEs before the dump are
+//     superseded and UPDATEs after it apply on top.
 //
 // A *mrt.RecordError from records is counted in Skipped; any other error
 // (a truncated stream, a read error) is yielded and ends the sequence with no
@@ -110,10 +115,12 @@ type key struct {
 
 // session is the replay state of one peer address.
 type session struct {
+	addr     netip.Addr
 	routes   map[key]Observation
-	complete bool // a transition into Established, a RIB entry or a reset since the last clear
+	complete bool // a transition into Established, a RIB baseline or a reset since the last clear
 	mid      bool // an UPDATE was applied while not complete
-	down     bool // the last event was a state change out of (or not into) Established
+	down     bool // the last event was a state change out of (or not into) Established, or a reset
+	ribGen   int  // the RIB baseline this session's state was last cleared for
 }
 
 func (s *session) clear(complete bool) {
@@ -129,6 +136,8 @@ type replay struct {
 	table           []mrt.Peer // the latest PEER_INDEX_TABLE's peers
 	before, after   int        // selected records at or before At, and after it
 	sawFirstMessage bool
+	ribGen          int  // counts RIB baselines: PEER_INDEX_TABLEs and runs of TABLE_DUMP records
+	inTableDump     bool // the previous record was a legacy TABLE_DUMP
 }
 
 func (r *replay) selected(as bgp.ASN, addr netip.Addr) bool {
@@ -148,7 +157,7 @@ func (r *replay) applies(t time.Time) bool {
 func (r *replay) session(addr netip.Addr) *session {
 	s := r.sessions[addr]
 	if s == nil {
-		s = &session{routes: map[key]Observation{}}
+		s = &session{addr: addr, routes: map[key]Observation{}}
 		r.sessions[addr] = s
 	}
 	return s
@@ -177,12 +186,19 @@ func (r *replay) run(records iter.Seq2[mrt.Record, error]) ([]Observation, error
 			}
 			continue
 		}
+		_, isTableDump := rec.(mrt.TableDump)
+		if isTableDump && !r.inTableDump {
+			r.ribGen++
+		}
+		r.inTableDump = isTableDump
 		switch rec := rec.(type) {
 		case mrt.PeerIndexTable:
 			if !r.sel.PrePolicyRIB {
 				return nil, ErrRIBNotPrePolicy
 			}
 			r.table = rec.Peers
+			r.ribGen++
+			r.baseline(rec)
 		case mrt.RIB:
 			if !r.sel.PrePolicyRIB {
 				return nil, ErrRIBNotPrePolicy
@@ -231,6 +247,31 @@ func entryTime(originated, record time.Time) time.Time {
 	return originated
 }
 
+// baseline clears every selected session the PEER_INDEX_TABLE names: the
+// dump that follows is its whole table (ruling R10 5).
+func (r *replay) baseline(t mrt.PeerIndexTable) {
+	var named []netip.Addr
+	for _, p := range t.Peers {
+		if r.selected(p.AS, p.Addr) {
+			named = append(named, p.Addr)
+		}
+	}
+	if len(named) == 0 || !r.applies(t.Header().Time) {
+		return
+	}
+	for _, a := range named {
+		r.session(a).ribBaseline(r.ribGen)
+	}
+}
+
+// ribBaseline clears s once for RIB baseline gen.
+func (s *session) ribBaseline(gen int) {
+	if s.ribGen != gen {
+		s.clear(true)
+		s.down, s.ribGen = false, gen
+	}
+}
+
 // rib applies a TABLE_DUMP_V2 RIB record's entries for the peer.
 func (r *replay) rib(rec mrt.RIB) {
 	if !rec.Prefix.IsValid() { // a RIB_GENERIC family without prefixes
@@ -270,9 +311,9 @@ func (r *replay) rib(rec mrt.RIB) {
 // no session to reset.
 func (r *replay) ribEntry(addr netip.Addr, k key, attrs bgp.Attrs, t time.Time) {
 	s := r.session(addr)
-	s.complete, s.down = true, false
+	s.ribBaseline(r.ribGen)
 	p, d := attrs.Decode()
-	if classify(nil, d) != dispOK {
+	if classify(nil, d, facts{reachable: true, otherAttrs: true}) != dispOK {
 		delete(s.routes, k)
 		r.info.Malformed++
 		return
@@ -285,9 +326,7 @@ func (r *replay) message(m mrt.BGP4MPMessage) {
 	s := r.session(m.PeerAddr)
 	mt, err := m.MessageType()
 	if err != nil { // a message header error resets the session (RFC 4271 §6.1)
-		s.clear(true)
-		s.down = false
-		r.info.MalformedResets++
+		r.reset(s)
 		return
 	}
 	if mt != bgp.MessageUpdate {
@@ -295,14 +334,22 @@ func (r *replay) message(m mrt.BGP4MPMessage) {
 	}
 	u, d1 := bgp.ParseUpdate(m.Message, m.Context())
 	p, d2 := u.Attrs.Decode()
-	disp := classify(d1, d2)
-	s.down = false
+	f := facts{ibgp: m.LocalAS == m.PeerAS}
+	f.reachable = len(u.Announced) > 0 || (p.MPReach != nil && (len(p.MPReach.NLRI) > 0 || len(p.MPReach.RawNLRI) > 0))
+	for a, err := range u.Attrs.All() {
+		if err != nil || a.Code != bgp.AttrMPUnreach {
+			f.otherAttrs = true
+			break
+		}
+	}
+	f.missingOrigin = f.reachable && !p.HasOrigin
+	f.badNextHop = len(u.Announced) > 0 && !hostAddr(p.NextHop)
+	disp := classify(d1, d2, f)
 	if disp == dispReset {
-		// The router holds nothing from X now, and X sends its table again.
-		s.clear(true)
-		r.info.MalformedResets++
+		r.reset(s)
 		return
 	}
+	s.down = false
 	if !s.complete {
 		s.mid = true
 	}
@@ -344,6 +391,21 @@ func (r *replay) message(m mrt.BGP4MPMessage) {
 	}
 }
 
+// reset is RFC 7606's session reset: the router drops everything X sent and
+// the session is down until X speaks again (ruling R10 4); X then sends its
+// whole table, so the state is complete.
+func (r *replay) reset(s *session) {
+	s.clear(true)
+	s.down = true
+	r.info.MalformedResets++
+}
+
+// hostAddr reports whether a is usable as an IPv4 NEXT_HOP (RFC 4271 §6.3):
+// present, and not unspecified, multicast or the limited broadcast address.
+func hostAddr(a netip.Addr) bool {
+	return a.Is4() && !a.IsUnspecified() && !a.IsMulticast() && a != netip.AddrFrom4([4]byte{255, 255, 255, 255})
+}
+
 // announce sets k's route, or, when the path does not start with X, deletes
 // k's earlier route and counts it (ruling R8 b).
 func (r *replay) announce(s *session, k key, rt verdict.Route, xFirst bool, t time.Time) {
@@ -352,7 +414,7 @@ func (r *replay) announce(s *session, k key, rt verdict.Route, xFirst bool, t ti
 		r.info.NotFirstAS++
 		return
 	}
-	s.routes[k] = Observation{Route: rt, Evidence: Evidence{Time: t}, Family: k.fam}
+	s.routes[k] = Observation{Route: rt, Evidence: Evidence{Time: t, PeerAddr: s.addr}, Family: k.fam}
 }
 
 // firstIs reports whether p's path starts with an AS_SEQUENCE whose first AS
@@ -374,7 +436,7 @@ func (r *replay) finish() []Observation {
 	}
 	var all []entry
 	down := len(r.sessions) > 0
-	for addr, s := range r.sessions {
+	for _, s := range r.sessions {
 		if s.mid {
 			r.info.MidSession = true
 		}
@@ -382,7 +444,7 @@ func (r *replay) finish() []Observation {
 			down = false
 		}
 		for k, o := range s.routes {
-			all = append(all, entry{addr, k, o})
+			all = append(all, entry{s.addr, k, o})
 		}
 	}
 	r.info.DownAtEnd = down
