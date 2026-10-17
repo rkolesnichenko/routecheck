@@ -25,8 +25,8 @@ collector cannot vouch for, a regexp over its work budget, a term that names a
 router the command line did not give) makes the route Undecided, with the
 reason.
 
-Status: pre-v1 (0.x). The API may still change between minor versions. Nothing
-is released yet; see [CHANGELOG.md](CHANGELOG.md).
+Status: pre-v1 (0.x). The API may still change between minor versions. The
+latest release is v0.1.0; see [CHANGELOG.md](CHANGELOG.md).
 
 ## Install
 

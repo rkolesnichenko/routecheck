@@ -8,7 +8,9 @@ a minor version may change the API.
 
 ## [Unreleased]
 
-First version, not yet released. It requires rpsl v0.29.0 (`rpsl`,
+## [0.1.0] - 2026-10-17
+
+First version. It requires rpsl v0.29.0 (`rpsl`,
 `rpsl/types`, `rpsl/resolve`) and mrt v0.1.0.
 
 ### Added
@@ -182,4 +184,5 @@ route can be higher.
 - **Out of scope:** ASPA, BMP and RIS Live, transparent route servers,
   `import-via:`/`export-via:`/`default:`, L's own export, and clause actions.
 
-[Unreleased]: https://github.com/rkolesnichenko/routecheck/commits/main
+[Unreleased]: https://github.com/rkolesnichenko/routecheck/compare/v0.1.0...HEAD
+[0.1.0]: https://github.com/rkolesnichenko/routecheck/releases/tag/v0.1.0
