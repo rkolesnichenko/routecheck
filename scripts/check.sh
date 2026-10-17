@@ -36,14 +36,21 @@ out=$(go test -count=1 -cover ./... 2>&1) || { printf '%s\n' "$out"; bad "covera
 printf '%s\n' "$out" | grep 'coverage:'
 
 step "no public package imports net"
-# Only internal/cli and cmd/routecheck may open sockets.
-if go list -deps . ./pathre ./verdict ./observe ./hygiene | grep -qx net; then
-	bad "a library package imports net"
+# Only internal/cli and cmd/routecheck may open sockets. go list's status is
+# checked on its own: through a pipe only grep's would count.
+if deps=$(go list -deps . ./pathre ./verdict ./observe ./hygiene); then
+	if printf '%s\n' "$deps" | grep -qx net; then
+		bad "a library package imports net"
+	fi
+else
+	bad "go list"
 fi
 
 step "no home-directory path in a committed file"
-# The pattern is a bracket class, so it does not match this line itself.
-if git grep -n -I -E '/(Users|home)/' -- . ':!.data'; then
+# Tracked files and new ones not yet added (--untracked); ignored files, such
+# as .data/ and .superpowers/, are not searched. In the pattern a slash is
+# followed by a group, (Users|home), so the pattern's own text never matches.
+if git grep -n -I --untracked -E '/(Users|home)/'; then
 	bad "a file holds a home-directory path"
 fi
 
