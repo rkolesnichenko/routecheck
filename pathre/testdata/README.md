@@ -20,7 +20,7 @@ Regenerate, from the root of a checkout that has `rpsl` and `routecheck` side by
 (on rpsl's `routemodel-vectors` branch):
 
 ```
-cd ../rpsl/resolve && RPSL_ROUTEMODEL_COMMIT=$(git rev-parse HEAD) RPSL_ROUTEMODEL_VECTORS=$PWD/../../routecheck/pathre/testdata/routemodel-vectors.jsonl go test -run TestWriteVectors ./internal/routemodel
+cd ../rpsl/resolve && RPSL_ROUTEMODEL_COMMIT=$(git rev-parse HEAD) RPSL_ROUTEMODEL_VECTORS=$PWD/../../routecheck/pathre/testdata/routemodel-vectors.jsonl go test -count=1 -run TestWriteVectors ./internal/routemodel
 ```
 
 Never edit the file by hand; regenerate it and update the commit above.
