@@ -205,7 +205,7 @@ Packages, imports strictly downward:
 ## Tests and oracles
 
 - **pathre oracle 1.** `pathre/testdata/routemodel-vectors.jsonl`, written by rpsl's test-only
-  `TestWriteVectors` (rpsl branch `routemodel-vectors`, commit in its README and header). Never
+  `TestWriteVectors` (on rpsl's `main` since PR #35; commit in its README and header). Never
   edit it by hand.
 - **pathre oracle 2.** `internal/reoracle`.
 - **verdict.**
@@ -245,7 +245,7 @@ Packages, imports strictly downward:
 - `ROUTECHECK_GOLDEN_UPDATE=1 go test ./internal/cli` rewrites `testdata/golden/*` and
   `testdata/session/*.mrt`. Review the diff.
 - **The pathre vectors.** Regenerate them from a checkout with `rpsl` and `routecheck` side by side,
-  on rpsl's `routemodel-vectors` branch, then update the commit in `pathre/testdata/README.md`:
+  on rpsl's `main`, then update the commit in `pathre/testdata/README.md`:
   `cd ../rpsl/resolve && RPSL_ROUTEMODEL_COMMIT=$(git rev-parse HEAD) RPSL_ROUTEMODEL_VECTORS=$PWD/../../routecheck/pathre/testdata/routemodel-vectors.jsonl go test -count=1 -run TestWriteVectors ./internal/routemodel`
 - **Real data (opt-in).** `scripts/fetch-data.sh` downloads into `.data/realdata/` and pins each
   file in `.data/realdata/MANIFEST`. It fetches RIPE's split dumps, the newest route-views2 RIB

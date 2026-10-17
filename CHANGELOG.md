@@ -22,7 +22,7 @@ First version, not yet released. It requires rpsl v0.29.0 (`rpsl`,
   - `ErrUnbound` for an unbound PeerAS.
   - Checked against two oracles:
     - 20,000+ vectors written by rpsl's `routemodel` (rpsl commit
-      `bbe2c4b52886e41d9ca5ee975fe1dc46f50d67fc`, branch `routemodel-vectors`);
+      `bbe2c4b52886e41d9ca5ee975fe1dc46f50d67fc`, merged into rpsl's `main` in PR #35);
     - an in-repo translation to Go's `regexp` over AS tokens.
 - `verdict`: one route against one `peval.Policy`.
   - Every test is three-valued.
