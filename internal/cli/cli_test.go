@@ -551,6 +551,42 @@ source: TEST
 		t.Fatalf("json: exit %d; stderr %s\n%s", code, stderr, out)
 	}
 	wantContains(t, "json", compact(t, out), `"Kind":"unevaluable"`, `"Clause":-1,"Index":-1`, `AS-ANYSET`)
+
+	// Ruling R21: an unevaluable report with no routes (ipv6 here: the
+	// capture has none) still says so, in text and in JSON.
+	reg6 := write(t, "reg6.txt", []byte(`aut-num: AS64496
+import: from AS64500 accept AS64500
+mp-import: afi ipv6.unicast from AS64500 accept <^AS64500 AS-ANYSET$>
+source: TEST
+
+aut-num: AS64500
+export: to AS64496 announce AS64500
+source: TEST
+
+as-set: AS-ANYSET
+members: AS-ANY
+source: TEST
+
+route: 192.0.2.0/24
+origin: AS64500
+source: TEST
+`))
+	args6 := []string{"-local", "AS64496", "-peer", "AS64500", "-session", f, "-dump", reg6, "-direction", "import"}
+	code, out, stderr = run(t, args6...)
+	if code != exitOK {
+		t.Fatalf("no routes: exit %d; stderr %s\n%s", code, stderr, out)
+	}
+	wantContains(t, "no routes, text", out,
+		"ipv6.unicast\n  import, AS64496 from AS64500: 0 routes: 0 accepted, 0 rejected, 0 undecided\n    policy not evaluable, no route decided: peval: ",
+		"AS-ANYSET")
+	code, out, stderr = run(t, append(slices.Clone(args6), "-format", "json")...)
+	if code != exitOK {
+		t.Fatalf("no routes, json: exit %d; stderr %s\n%s", code, stderr, out)
+	}
+	wantContains(t, "no routes, json", compact(t, out), `"Unevaluable":"peval: `, `"Unevaluable":""`)
+	if !strings.Contains(out, "AS-ANYSET") {
+		t.Errorf("no routes, json: the set is not named:\n%s", out)
+	}
 }
 
 // TestPolicyOverIRRd: with -irrd, -policy's aut-num answers first and the

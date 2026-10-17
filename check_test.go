@@ -663,6 +663,12 @@ source: TEST
 		t.Errorf("import: NoPolicy %v, policy %+v; want a report with an empty policy", imp.NoPolicy, imp.Policy)
 	}
 	checkCounts(t, "import", *imp, 0, 0, 4)
+	if !strings.Contains(imp.Unevaluable, "AS-ANYSET") || !strings.Contains(imp.Unevaluable, "AS-ANY denotes") {
+		t.Errorf("import: Unevaluable %q", imp.Unevaluable)
+	}
+	if u := res[0].Export[0].Unevaluable; u != "" {
+		t.Errorf("export: Unevaluable %q, want empty", u)
+	}
 	for _, rv := range imp.Routes {
 		v := rv.Verdict
 		if v.Outcome != verdict.Undecided || len(v.Reasons) != 1 {
@@ -683,6 +689,34 @@ source: TEST
 	if got := summaries(res[0].Export[0]); !slices.Equal(got, want) {
 		t.Errorf("export: %v, want %v", got, want)
 	}
+
+	// Ruling R21: the other family. L's ipv6 import names the set and X sent
+	// no ipv6 route: that report has no routes and still says it is
+	// unevaluable, while ipv4, whose policy evaluates, decides as usual.
+	autLv6 := `aut-num: AS64496
+as-name: L
+import: from AS64500 accept AS64500
+mp-import: afi ipv6.unicast from AS64500 accept <^AS64500 AS-ANYSET$>
+source: TEST
+`
+	res = run(t, checker(registry(t, autLv6, autX, anySet)), routecheck.ModeSession, capture(), routecheck.Options{
+		Local: types.ASN(asL), Peer: types.ASN(asX), Directions: routecheck.DirImport,
+	})
+	if len(res) != 2 || res[1].AF != af(t, "ipv6.unicast") {
+		t.Fatalf("families: %+v", res)
+	}
+	v4, v6 := res[0].Import, res[1].Import
+	if v4.Unevaluable != "" || len(v4.Policy.Clauses) == 0 {
+		t.Errorf("ipv4: Unevaluable %q, %d clauses; want an evaluated policy", v4.Unevaluable, len(v4.Policy.Clauses))
+	}
+	if got, want := summaries(*v4), []string{"10.0.0.0/8 rejected", "192.0.2.0/24 accepted:0", "198.51.100.0/24 rejected", "203.0.113.0/24 rejected"}; !slices.Equal(got, want) {
+		t.Errorf("ipv4: %v, want %v", got, want)
+	}
+	if !strings.Contains(v6.Unevaluable, "AS-ANYSET") || v6.NoPolicy || len(v6.Routes) != 0 || len(v6.Policy.Clauses) != 0 {
+		t.Errorf("ipv6: Unevaluable %q, NoPolicy %v, %d routes, %d clauses; want unevaluable with no routes",
+			v6.Unevaluable, v6.NoPolicy, len(v6.Routes), len(v6.Policy.Clauses))
+	}
+	checkCounts(t, "ipv6", *v6, 0, 0, 0)
 
 	// Collector mode, export toward a neighbour: the same report shape.
 	autXAny := `aut-num: AS64500

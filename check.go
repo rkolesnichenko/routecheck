@@ -142,6 +142,12 @@ type Report struct {
 	// NoPolicy: the policy has no clause and no undecided term (no term
 	// for this peer in this family), so there are no per-route verdicts.
 	NoPolicy bool
+	// Unevaluable is, when peval could not evaluate the policy because it
+	// names AS-ANY or RS-ANY where rpsl cannot expand it (a
+	// *resolve.AnySetError, ruling R19), the error's text; empty otherwise.
+	// Such a report has an empty Policy, and each of its routes, if it has
+	// any, is Undecided with the one reason verdict.ReasonUnevaluable.
+	Unevaluable string
 	// Routes are the verdicts, in prefix order (then path ID, then peer
 	// address in session mode, then path in collector mode).
 	Routes []RouteVerdict
@@ -194,9 +200,10 @@ const ctxEvery = 4096
 // A policy peval cannot evaluate because it names AS-ANY or RS-ANY where
 // rpsl cannot expand it (a *resolve.AnySetError, such as an as-set whose
 // members are AS-ANY in an AS-path regexp) is not an error (ruling R19):
-// that one Report has an empty Policy and every one of its routes is
+// that one Report has an empty Policy, its Unevaluable holds the error's
+// text (whether or not it has routes), and every one of its routes is
 // Undecided with the single reason verdict.ReasonUnevaluable, whose Why is
-// the error's text.
+// that text.
 //
 // Check returns an error, and no Results, for options it cannot use, an
 // input observe cannot read (a truncated stream, observe.ErrRIBNotPrePolicy),
@@ -464,8 +471,8 @@ func (f *famRun) report(s peval.Session, export bool, idx []int) (Report, error)
 		// Ruling R19: the policy names AS-ANY or RS-ANY where rpsl cannot
 		// expand it; this report decides nothing, and says why, for each
 		// of its routes.
-		rep.Policy = peval.Policy{}
-		return f.unevaluable(rep, err.Error(), idx)
+		rep.Policy, rep.Unevaluable = peval.Policy{}, err.Error()
+		return f.unevaluable(rep, idx)
 	}
 	if len(p.Clauses) == 0 && len(p.Undecided) == 0 {
 		rep.NoPolicy = true
@@ -505,10 +512,11 @@ func (f *famRun) report(s peval.Session, export bool, idx []int) (Report, error)
 	return rep, nil
 }
 
-// unevaluable fills rep, whose policy peval could not evaluate (why), with
-// an Undecided verdict for each observation at idx (every one when idx is
-// nil), each with the one reason verdict.ReasonUnevaluable.
-func (f *famRun) unevaluable(rep Report, why string, idx []int) (Report, error) {
+// unevaluable fills rep, whose policy peval could not evaluate (its
+// Unevaluable says why), with an Undecided verdict for each observation at
+// idx (every one when idx is nil), each with the one reason
+// verdict.ReasonUnevaluable.
+func (f *famRun) unevaluable(rep Report, idx []int) (Report, error) {
 	n := len(f.obs)
 	if idx != nil {
 		n = len(idx)
@@ -527,7 +535,7 @@ func (f *famRun) unevaluable(rep Report, why string, idx []int) (Report, error) 
 			return Report{}, err
 		}
 		ob := &f.obs[i]
-		v := verdict.Verdict{Outcome: verdict.Undecided, Reasons: []verdict.Reason{{Kind: verdict.ReasonUnevaluable, Why: why, Clause: -1, Index: -1}}}
+		v := verdict.Verdict{Outcome: verdict.Undecided, Reasons: []verdict.Reason{{Kind: verdict.ReasonUnevaluable, Why: rep.Unevaluable, Clause: -1, Index: -1}}}
 		rep.Undecided++
 		rep.Routes = append(rep.Routes, RouteVerdict{Route: ob.Route, Evidence: ob.Evidence, Verdict: v, RPKI: h.rpki, RouteObj: h.obj})
 	}

@@ -33,6 +33,7 @@ type Report struct
 	Toward types.ASN
 	Policy peval.Policy
 	NoPolicy bool
+	Unevaluable string
 	Routes []RouteVerdict
 	Accepted int
 	Rejected int

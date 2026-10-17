@@ -23,6 +23,7 @@
     "Import": {
       "Toward": "AS64511",
       "NoPolicy": true,
+      "Unevaluable": "",
       "Accepted": 0,
       "Rejected": 0,
       "Undecided": 0,
@@ -36,6 +37,7 @@
       {
         "Toward": "AS64496",
         "NoPolicy": true,
+        "Unevaluable": "",
         "Accepted": 0,
         "Rejected": 0,
         "Undecided": 0,
@@ -71,6 +73,7 @@
     "Import": {
       "Toward": "AS64511",
       "NoPolicy": true,
+      "Unevaluable": "",
       "Accepted": 0,
       "Rejected": 0,
       "Undecided": 0,
@@ -84,6 +87,7 @@
       {
         "Toward": "AS64496",
         "NoPolicy": true,
+        "Unevaluable": "",
         "Accepted": 0,
         "Rejected": 0,
         "Undecided": 0,

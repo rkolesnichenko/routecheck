@@ -21,6 +21,7 @@
     "Import": {
       "Toward": "AS4766",
       "NoPolicy": false,
+      "Unevaluable": "",
       "Accepted": 19,
       "Rejected": 0,
       "Undecided": 0,
@@ -755,6 +756,7 @@
     "Import": {
       "Toward": "AS4766",
       "NoPolicy": true,
+      "Unevaluable": "",
       "Accepted": 0,
       "Rejected": 0,
       "Undecided": 0,

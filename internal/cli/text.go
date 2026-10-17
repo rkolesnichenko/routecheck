@@ -240,8 +240,8 @@ func (p *printer) report(dir string, rep routecheck.Report, label, owner string)
 	if m := rep.Policy.Missing(); len(m) > 0 {
 		p.line("    missing from the registry: %s", refs(m))
 	}
-	if why := unevaluable(rep); why != "" {
-		p.line("    policy not evaluable, no route decided: %s", why)
+	if rep.Unevaluable != "" {
+		p.line("    policy not evaluable, no route decided: %s", rep.Unevaluable)
 	}
 
 	multiPeer := false
@@ -308,20 +308,6 @@ func (p *printer) report(dir string, rep routecheck.Report, label, owner string)
 			p.line("      %s  %s%s", short(rv), outcome(dir, rv.Verdict), hygiene(rv))
 		}
 	}
-}
-
-// unevaluable returns the Why of a report whose policy peval could not
-// evaluate (Check gives each of its routes the one reason
-// verdict.ReasonUnevaluable), or "".
-func unevaluable(rep routecheck.Report) string {
-	for _, rv := range rep.Routes {
-		for _, r := range rv.Verdict.Reasons {
-			if r.Kind == verdict.ReasonUnevaluable {
-				return r.Why
-			}
-		}
-	}
-	return ""
 }
 
 // groups holds routes by key, keys in first-seen order.

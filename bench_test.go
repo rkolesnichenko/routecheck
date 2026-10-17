@@ -27,11 +27,15 @@ import (
 //	                        AS instead of X's (default X), when X has too few
 //	                        routes to exercise the filter
 //
-// Run them alone, under the memory guard (each loads RIPE or reads a full
-// RIB):
+// Run each alone, under a memory guard with an 8 GB cap (each loads RIPE or
+// reads a full RIB), as the published figures were:
 //
-//	GOWORK=off ROUTECHECK_REALDATA=$PWD/.data/realdata ROUTECHECK_BENCH_LOCAL=AS… ROUTECHECK_BENCH_PEER=AS… \
-//	  go test -run '^$' -bench 'Decide|Collector' -benchtime 3x -benchmem .
+//	GOMAXPROCS=4 memguard.sh 8 1800 env GOWORK=off GOMAXPROCS=4 GOMEMLIMIT=6GiB \
+//	  ROUTECHECK_REALDATA=$PWD/.data/realdata ROUTECHECK_BENCH_LOCAL=AS… ROUTECHECK_BENCH_PEER=AS… [ROUTECHECK_BENCH_ROUTES=AS…] \
+//	  go test -count=1 -timeout 30m -run '^$' -bench BenchmarkDecide -benchtime 5s -benchmem .
+//	GOMAXPROCS=4 memguard.sh 8 2400 env GOWORK=off GOMAXPROCS=4 GOMEMLIMIT=6GiB \
+//	  ROUTECHECK_REALDATA=$PWD/.data/realdata ROUTECHECK_BENCH_LOCAL=AS… ROUTECHECK_BENCH_PEER=AS… \
+//	  go test -count=1 -timeout 40m -run '^$' -bench BenchmarkCollector -benchtime 2x -benchmem .
 
 // benchSession reads the benchmark's session from the environment.
 func benchSession(b *testing.B) (local, peer types.ASN, af types.AddrFamily) {
@@ -75,8 +79,10 @@ var decideSetup struct {
 // BenchmarkDecide decides X's routes (or ROUTECHECK_BENCH_ROUTES's), read
 // from that AS's TestRealData filtered file, else from the RIBs, against
 // L's real import policy toward X, compiled once: ns/op is per route. The
-// path memo fills as it goes, as it does in a check, since routes share
-// paths.
+// routes are cycled over b.N, so from the second pass on every (path test,
+// path) answer is in the path memo: the figure is for a warm memo. A check
+// decides each route once, where the memo helps only routes sharing a path,
+// so its cost per route can be higher.
 func BenchmarkDecide(b *testing.B) {
 	rd := openRealData(b)
 	local, peer, af := benchSession(b)
@@ -165,7 +171,10 @@ func BenchmarkCollector(b *testing.B) {
 		b.StopTimer()
 		runtime.GC()
 		runtime.ReadMemStats(&m1)
-		retained = m1.HeapAlloc - m0.HeapAlloc
+		retained = 0
+		if m1.HeapAlloc > m0.HeapAlloc { // the heap may have shrunk
+			retained = m1.HeapAlloc - m0.HeapAlloc
+		}
 		peers = 0
 		for _, o := range obs {
 			peers += o.Evidence.CollectorPeers

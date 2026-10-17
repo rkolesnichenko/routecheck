@@ -31,9 +31,11 @@ import (
 //   - an outcome is "accepted", "rejected" or "undecided"; an RPKI state
 //     "valid", "invalid" or "not_found" (rpki.State's String);
 //   - communities are "hi:lo"; missing sets are their names;
-//   - a report whose policy peval could not evaluate (ruling R19) has an
-//     empty Policy, and each of its routes one reason of Kind "unevaluable"
-//     whose Why is the error and whose Clause and Index are -1.
+//   - a report whose policy peval could not evaluate (ruling R19, R21) has
+//     Unevaluable set to the error's text (also with no routes), an empty
+//     Policy, and each of its routes one reason of Kind "unevaluable" whose
+//     Why is that text and whose Clause and Index are -1; Unevaluable is
+//     "" for every other report.
 //
 // Every other field (AF, Coverage, Evidence, ASNs, prefixes, times, the
 // reasons) is Go's own encoding, which is text or numbers already.

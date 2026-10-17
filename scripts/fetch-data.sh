@@ -3,7 +3,11 @@
 # committed — RIPE NCC's terms forbid redistributing RIS files):
 #
 #   scripts/fetch-data.sh
-#   ROUTECHECK_REALDATA=$PWD/.data/realdata go test -count=1 -timeout 120m -run TestRealData -v .
+#   GOMAXPROCS=4 memguard.sh 8 6000 env GOWORK=off GOMAXPROCS=4 GOMEMLIMIT=6GiB \
+#     ROUTECHECK_REALDATA=$PWD/.data/realdata go test -count=1 -timeout 100m -run TestRealData -v .
+#
+# (TestRealData runs alone, under a memory guard with an 8 GB cap: about 15
+# minutes and 2.6 GB.)
 #
 # It fetches:
 #   - RIPE's split database dumps the policies need: aut-num, as-set,

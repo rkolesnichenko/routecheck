@@ -40,11 +40,14 @@ import (
 // TestRealData is the opt-in real-data run (spec §10): RIPE's database
 // dumps, the newest route-views2 RIB and RIS rrc00 bview, and NTT's VRPs when
 // scripts/fetch-data.sh could fetch them, all pinned in
-// $ROUTECHECK_REALDATA/MANIFEST. Run it alone, under the memory guard:
+// $ROUTECHECK_REALDATA/MANIFEST. Run it alone, under a memory guard (8 GB
+// cap), as the published figures were (memguard.sh LIMIT_GB TIMEOUT_S CMD,
+// rpsl's tool; it takes about 15 minutes and 2.6 GB):
 //
 //	scripts/fetch-data.sh
-//	GOWORK=off ROUTECHECK_REALDATA=$PWD/.data/realdata \
-//	  go test -count=1 -timeout 120m -run TestRealData -v .
+//	GOMAXPROCS=4 memguard.sh 8 6000 env GOWORK=off GOMAXPROCS=4 GOMEMLIMIT=6GiB \
+//	  ROUTECHECK_REALDATA=$PWD/.data/realdata \
+//	  go test -count=1 -timeout 100m -run TestRealData -v .
 //
 // It loads RIPE as the command does (a Corpus keeping policy, behind a
 // resolve.Cache), then reads the RIBs once to learn which ASes appear on a
@@ -62,7 +65,7 @@ import (
 // Each (L, X) is checked in collector mode, both directions, ipv4 and ipv6
 // unicast, under its own timeout (ROUTECHECK_CHECK_TIMEOUT, a Go duration,
 // default 600s, covering the read of X's file and the decisions: the
-// largest real check, AS9086 from AS6762, takes 64-68 s, so a 60 s default
+// largest real check, AS9086 from AS6762, took 61-69 s across the runs, so a 60 s default
 // would count it as a timeout and a default run would not reproduce the
 // published figures). A timeout or a *resolve.SetTooLargeError is counted;
 // any other error fails the test. A policy peval cannot evaluate because it
