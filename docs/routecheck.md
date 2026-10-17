@@ -68,7 +68,8 @@ state at the end of the capture, or at `-at`.
   says "session down at the end of the capture".
 - **A capture with no record of the session.** When no record in the capture
   is X's (or none is from `-peer-addr`), the run fails with exit 3: "no record
-  of a session with AS X in the capture". An empty result there would read as
+  of a session with AS X in the capture" (exit 2 without `-local`: the capture
+  then names no local AS either, and the message says it holds no record of X). An empty result there would read as
   "X announced nothing". A 2-byte BGP4MP capture shows a 4-byte X as AS23456,
   so it holds no record of X.
 - **Malformed UPDATEs** are handled as RFC 7606 says. Most become

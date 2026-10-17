@@ -54,7 +54,8 @@ First version, not yet released. It requires rpsl v0.29.0 (`rpsl`,
   - 2: a bad command line;
   - 3: could not complete, including a session-mode capture that holds no
     record of a session with X (`observe.SessionInfo.Selected` is 0), which
-    is not read as "X announced nothing".
+    is not read as "X announced nothing" (without `-local` such a capture
+    names no local AS either, and the run stops earlier with exit 2, saying so).
 
   A `-local` that is not the capture's local AS is checked as given, with a
   warning.

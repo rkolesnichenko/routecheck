@@ -188,7 +188,7 @@ Packages, imports strictly downward:
 
   Every other peval error (a limit, ctx, a Source error, a missing aut-num) still fails the run.
   routecheck gives AS-ANY no meaning of its own: that waits for rpsl's peval.
-- **R23. No session selected.** `SessionInfo.Selected` counts the records selected for X; when it is 0 the CLI exits 3 ("no record of a session with AS X [from ADDR] in the capture ..."), and Check still returns its Result. A `-local` that is not the capture's LocalAS is checked as given, with a warning on stderr and in the text; the exit status is unchanged.
+- **R23. No session selected.** `SessionInfo.Selected` counts the records selected for X; when it is 0 the CLI exits 3 ("no record of a session with AS X [from ADDR] in the capture ..."), and Check still returns its Result. Without `-local` such a capture names no local AS, so Check returns ErrOptions first and the CLI exits 2 with the same cause in the message (R26). A `-local` that is not the capture's LocalAS is checked as given, with a warning on stderr and in the text; the exit status is unchanged.
 - **Transparent route server.** When the announcements skipped as "not X first" outnumber the
   routes held at the end (all families), the text output says X looks like a transparent route
   server. It is not judged when a family is "no policy" in every direction checked.

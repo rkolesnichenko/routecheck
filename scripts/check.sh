@@ -50,9 +50,12 @@ step "no home-directory path in a committed file"
 # Tracked files and new ones not yet added (--untracked); ignored files, such
 # as .data/ and .superpowers/, are not searched. In the pattern a slash is
 # followed by a group, (Users|home), so the pattern's own text never matches.
-if git grep -n -I --untracked -E '/(Users|home)/'; then
-	bad "a file holds a home-directory path"
-fi
+git grep -n -I --untracked -E '/(Users|home)/'
+case $? in
+0) bad "a file holds a home-directory path" ;;
+1) ;;
+*) bad "git grep" ;;
+esac
 
 step "go.mod requires rpsl, rpsl/types, rpsl/resolve and mrt, and nothing else of ours"
 # Until a package imports them the four stay "// indirect", so this does not
