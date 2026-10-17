@@ -315,7 +315,8 @@ of its conjuncts. Then, over the policy's clauses in order:
   because it names `AS-ANY` or `RS-ANY` where rpsl cannot expand it (a
   `*resolve.AnySetError`, such as an as-set whose `members:` is `AS-ANY`
   inside an AS-path regexp; seen in RIPE: `AS1887:AS-Peerings:AS8501`), that
-  one report (that L/X, family and direction) has an empty `Policy` and
+  one report (that L/X, family and direction) has its `Unevaluable` set to
+  the error's text (also when it has no routes, R21), an empty `Policy`, and
   every one of its routes is Undecided with the single reason
   `ReasonUnevaluable` (`"unevaluable"`), whose `Why` is the error's text
   (it names the term and the set), `Clause` and `Index` -1. The other
@@ -465,6 +466,7 @@ type Report struct {
 	Toward   types.ASN // the session's Peer: X for import, the neighbour for export
 	Policy   peval.Policy
 	NoPolicy bool           // no clause and no undecided term: no per-route verdicts
+	Unevaluable string      // R19/R21: peval's *resolve.AnySetError text, routes or not; "" otherwise
 	Routes   []RouteVerdict // in prefix order
 	Accepted, Rejected, Undecided int
 }
