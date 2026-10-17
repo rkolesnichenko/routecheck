@@ -11,6 +11,7 @@ const ReasonPathTooExpensive = "path-too-expensive"
 const ReasonPathUnbound = "path-unbound"
 const ReasonPeval = "peval"
 const ReasonSameASRun = "same-as-run"
+const ReasonUnevaluable = "unevaluable"
 const Rejected Outcome
 const Undecided Outcome
 func Compile(p peval.Policy) *Compiled

@@ -311,6 +311,16 @@ of its conjuncts. Then, over the policy's clauses in order:
   repetition over a sequence, path regexp too expensive for the path, path
   regexp unbound — `ReasonPathUnbound`, a caller's bug, since peval always
   binds PeerAS) and each undecided term's `peval` `Why`.
+- **Unevaluable** (ruling R19): when `peval` cannot evaluate a policy
+  because it names `AS-ANY` or `RS-ANY` where rpsl cannot expand it (a
+  `*resolve.AnySetError`, such as an as-set whose `members:` is `AS-ANY`
+  inside an AS-path regexp; seen in RIPE: `AS1887:AS-Peerings:AS8501`), that
+  one report (that L/X, family and direction) has an empty `Policy` and
+  every one of its routes is Undecided with the single reason
+  `ReasonUnevaluable` (`"unevaluable"`), whose `Why` is the error's text
+  (it names the term and the set), `Clause` and `Index` -1. The other
+  reports of the run are decided as usual. routecheck gives such a set no
+  meaning of its own; that is rpsl's to do.
 
 A clause is identified by its position in `Policy.Clauses` (`Pos`) and
 shown with peval's `Clause.Index`, the attribute's position: one `import:`
@@ -322,8 +332,9 @@ A Rejected verdict carries, per clause, the first test that said no
 text), and the sets the clause's filter could not find (`Missing()`), so a
 reject caused by a missing set reads as such (D4).
 
-A policy that `peval` cannot evaluate at all (a limit, a context error, a
-Source error) is an error for the whole run, never a verdict.
+A policy that `peval` cannot evaluate at all for any other reason (a
+limit, a context error, a Source error, a missing aut-num) is an error for
+the whole run, never a verdict.
 
 ### 6.5 The AS-path matcher (`pathre`)
 
@@ -496,11 +507,13 @@ type Fail struct {
 type Reason struct {
 	Kind   string // ReasonPathNotSequence, ReasonCommsUnknown, ReasonCommInternet,
 	              // ReasonCommValue, ReasonSameASRun, ReasonPathTooExpensive,
-	              // ReasonPathUnbound, or ReasonPeval
+	              // ReasonPathUnbound, ReasonPeval, or ReasonUnevaluable
+	              // ("unevaluable", given by Check, never by Decide; R19)
 	Why    string // ReasonPeval: peval's Why text as given (a Why* constant,
-	              // possibly with a suffix: WhyProtocol and WhyInto add the protocol)
-	Clause int    // a filter reason: Pos in Policy.Clauses; ReasonPeval: -1
-	Index  int    // ReasonPeval: the Undecided term's attribute Index
+	              // possibly with a suffix: WhyProtocol and WhyInto add the protocol);
+	              // ReasonUnevaluable: the text of peval's error
+	Clause int    // a filter reason: Pos in Policy.Clauses; ReasonPeval and ReasonUnevaluable: -1
+	Index  int    // ReasonPeval: the Undecided term's attribute Index; ReasonUnevaluable: -1
 	Term   string
 }
 

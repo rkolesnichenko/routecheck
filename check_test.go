@@ -17,6 +17,7 @@ import (
 	"github.com/rkolesnichenko/routecheck/internal/mrtgen"
 	"github.com/rkolesnichenko/routecheck/observe"
 	"github.com/rkolesnichenko/routecheck/verdict"
+	"github.com/rkolesnichenko/rpsl/object"
 	"github.com/rkolesnichenko/rpsl/resolve"
 	"github.com/rkolesnichenko/rpsl/resolve/peval"
 	"github.com/rkolesnichenko/rpsl/resolve/rpki"
@@ -637,6 +638,86 @@ source: TEST
 	if !errors.Is(err, resolve.ErrNotFound) || errors.Is(err, routecheck.ErrOptions) || res != nil {
 		t.Errorf("missing aut-num: Check = %v, %v", res, err)
 	}
+}
+
+// TestCheckUnevaluable pins ruling R19: a policy peval cannot evaluate
+// because a set in it is AS-ANY (a *resolve.AnySetError) gives that one
+// report Undecided routes with the single reason "unevaluable", while the
+// other direction decides as usual; any other peval error still fails the
+// run.
+func TestCheckUnevaluable(t *testing.T) {
+	autLAny := `aut-num: AS64496
+as-name: L
+import: from AS64500 accept <^AS64500 AS-ANYSET$>
+source: TEST
+`
+	anySet := `as-set: AS-ANYSET
+members: AS-ANY
+source: TEST
+`
+	src := registry(t, autLAny, autX, anySet)
+	o := routecheck.Options{Local: types.ASN(asL), Peer: types.ASN(asX), AF: []types.AddrFamily{af(t, "ipv4.unicast")}}
+	res := run(t, checker(src), routecheck.ModeSession, capture(), o)
+	imp := res[0].Import
+	if imp.NoPolicy || len(imp.Policy.Clauses) != 0 || len(imp.Policy.Undecided) != 0 {
+		t.Errorf("import: NoPolicy %v, policy %+v; want a report with an empty policy", imp.NoPolicy, imp.Policy)
+	}
+	checkCounts(t, "import", *imp, 0, 0, 4)
+	for _, rv := range imp.Routes {
+		v := rv.Verdict
+		if v.Outcome != verdict.Undecided || len(v.Reasons) != 1 {
+			t.Errorf("import, %s: %+v; want Undecided with one reason", rv.Route.Prefix, v)
+			continue
+		}
+		r := v.Reasons[0]
+		if r.Kind != "unevaluable" || !strings.Contains(r.Why, "AS-ANYSET") ||
+			!strings.Contains(r.Why, "AS-ANY denotes") || r.Clause != -1 || r.Index != -1 || r.Term != "" {
+			t.Errorf("import, %s: reason %+v", rv.Route.Prefix, r)
+		}
+		if rv.RouteObj == nil && rv.Route.Prefix != pfx("10.0.0.0/8") {
+			t.Errorf("import, %s: hygiene not computed for an unevaluable report", rv.Route.Prefix)
+		}
+	}
+	// X's export toward L is evaluable and decides as usual.
+	want := []string{"10.0.0.0/8 rejected", "192.0.2.0/24 accepted:0", "198.51.100.0/24 rejected", "203.0.113.0/24 rejected"}
+	if got := summaries(res[0].Export[0]); !slices.Equal(got, want) {
+		t.Errorf("export: %v, want %v", got, want)
+	}
+
+	// Collector mode, export toward a neighbour: the same report shape.
+	autXAny := `aut-num: AS64500
+as-name: X
+export: to AS64510 announce <^AS64500 AS-ANYSET$>
+source: TEST
+`
+	recs := [][]byte{pitRec(at(0), cpeer(1, asN1)), ribRec(at(0), "192.0.2.0/24", ent(0, asN1, asX))}
+	res = run(t, checker(registry(t, autL, autXAny, anySet)), routecheck.ModeCollector, recs, routecheck.Options{
+		Local: types.ASN(asL), Peer: types.ASN(asX), AF: []types.AddrFamily{af(t, "ipv4.unicast")},
+	})
+	if got := summaries(*res[0].Import); !slices.Equal(got, []string{"192.0.2.0/24 accepted:0"}) {
+		t.Errorf("collector import: %v", got)
+	}
+	if len(res[0].Export) != 1 || len(res[0].Export[0].Routes) != 1 ||
+		res[0].Export[0].Routes[0].Verdict.Reasons[0].Kind != verdict.ReasonUnevaluable {
+		t.Errorf("collector export: %+v", res[0].Export)
+	}
+
+	// Any other error from peval's Source still fails the run: only an
+	// *AnySetError is narrowed to Undecided.
+	c := checker(src)
+	c.Eval.Src = failingSets{src}
+	res, err := c.Check(context.Background(), routecheck.ModeSession, records(capture()), o)
+	var anyErr *resolve.AnySetError
+	if !errors.Is(err, errSource) || errors.As(err, &anyErr) || res != nil {
+		t.Errorf("failing GetSet: Check = %v, %v; want nil and the Source's error", res, err)
+	}
+}
+
+// failingSets is a policy source whose GetSet fails.
+type failingSets struct{ *resolve.MemSource }
+
+func (failingSets) GetSet(context.Context, types.SetRef) (object.NamedSet, error) {
+	return nil, errSource
 }
 
 // failing is a Source whose OriginatedRoutes fails.

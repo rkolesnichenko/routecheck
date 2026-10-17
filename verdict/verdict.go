@@ -100,16 +100,19 @@ type Reason struct {
 	Kind string // one of the Reason* constants
 	// Why is, for ReasonPeval, peval's Undecided.Why as given (a peval Why*
 	// constant, possibly with a suffix: WhyProtocol and WhyInto add the
-	// protocol); empty otherwise.
+	// protocol); for ReasonUnevaluable, the text of the error peval
+	// returned; empty otherwise.
 	Why string
-	// Clause is a filter reason's Pos in Policy.Clauses; -1 for ReasonPeval.
+	// Clause is a filter reason's Pos in Policy.Clauses; -1 for ReasonPeval
+	// and ReasonUnevaluable.
 	Clause int
 	// Index is the attribute's position (peval's Clause.Index or
-	// Undecided.Index).
+	// Undecided.Index); -1 for ReasonUnevaluable.
 	Index int
 	// Term is, for a filter reason, the undecided test's text (as
 	// Fail.Test); for ReasonPeval, the undecided term (policy.Term.String),
-	// or empty for an attribute peval skipped whole.
+	// or empty for an attribute peval skipped whole; empty for
+	// ReasonUnevaluable.
 	Term string
 }
 
@@ -141,6 +144,13 @@ const (
 	// ReasonPeval: a term peval could not decide for the session
 	// (Policy.Undecided); Why says why.
 	ReasonPeval = "peval"
+	// ReasonUnevaluable: peval could not evaluate the policy at all because
+	// it names AS-ANY or RS-ANY where rpsl cannot expand it (a
+	// *resolve.AnySetError), so no route of that policy is decided. Decide
+	// never gives it: routecheck.Check gives it, as the only reason, to
+	// every route of such a report, with Why the error's text (it names the
+	// term and the set), Clause and Index -1.
+	ReasonUnevaluable = "unevaluable"
 )
 
 // tri is a test's three-valued answer.

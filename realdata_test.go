@@ -61,9 +61,14 @@ import (
 //
 // Each (L, X) is checked in collector mode, both directions, ipv4 and ipv6
 // unicast, under its own timeout (ROUTECHECK_CHECK_TIMEOUT, a Go duration,
-// default 60s, covering the read of X's file and the decisions). A timeout
-// or a *resolve.SetTooLargeError is counted; any other error fails the
-// test. It logs per pair the observations, the outcomes per direction, the
+// default 600s, covering the read of X's file and the decisions: the
+// largest real check, AS9086 from AS6762, takes 64-68 s, so a 60 s default
+// would count it as a timeout and a default run would not reproduce the
+// published figures). A timeout or a *resolve.SetTooLargeError is counted;
+// any other error fails the test. A policy peval cannot evaluate because it
+// names AS-ANY (ruling R19) is not an error: its report's routes are
+// Undecided with the reason "unevaluable", tallied with the others and
+// listed per pair. It logs per pair the observations, the outcomes per direction, the
 // Undecided reasons tallied, the Rejected routes whose failing clause names
 // a missing set, examples of Rejected routes, the hygiene reads and the wall
 // time; then the totals, the largest import prefix filter (the policy
@@ -76,7 +81,7 @@ import (
 // (default 1) choose the sample.
 func TestRealData(t *testing.T) {
 	rd := openRealData(t)
-	timeout := envDuration(t, "ROUTECHECK_CHECK_TIMEOUT", 60*time.Second)
+	timeout := envDuration(t, "ROUTECHECK_CHECK_TIMEOUT", 600*time.Second)
 	sample := envInt(t, "ROUTECHECK_REALDATA_SAMPLE", 50)
 	reSample := envInt(t, "ROUTECHECK_REALDATA_REGEXP_SAMPLE", 10)
 	seed := envInt(t, "ROUTECHECK_REALDATA_SEED", 1)
@@ -133,7 +138,7 @@ func TestRealData(t *testing.T) {
 		t.Logf("  AS%d: %d entries through it (%s); file %s", x, seen.all[x], strings.Join(per, ", "), sizeOf(files[x]))
 	}
 
-	tot := totals{reasons: [2]tally{{}, {}}, tooExp: tally{}}
+	tot := totals{reasons: [2]tally{{}, {}}, tooExp: tally{}, unevaluable: tally{}}
 	for i, p := range pairs {
 		r := checkPair(t, reg, vrps, p, files[bgp.ASN(p.X)], timeout)
 		r.log(t, i+1, len(pairs))
@@ -734,9 +739,12 @@ type pairResult struct {
 	rejMissing [2]int
 	examples   []string
 	tooExp     tally // ReasonPathTooExpensive terms
-	hygCalls   int
-	hygKeys    int
-	heap       string
+	// unevaluable counts the routes of each unevaluable report, by report
+	// and peval's error (ReasonUnevaluable).
+	unevaluable tally
+	hygCalls    int
+	hygKeys     int
+	heap        string
 
 	// The largest import prefix filter and the path-memo bound this pair saw.
 	maxFilter      int
@@ -749,7 +757,7 @@ type pairResult struct {
 // checkPair runs one collector-mode Check and summarizes it.
 func checkPair(tb testing.TB, reg *ripeRegistry, vrps *rpki.VRPs, p pair, file string, timeout time.Duration) pairResult {
 	tb.Helper()
-	r := pairResult{p: p, reasons: [2]tally{{}, {}}, tooExp: tally{}}
+	r := pairResult{p: p, reasons: [2]tally{{}, {}}, tooExp: tally{}, unevaluable: tally{}}
 	counter := &countingSource{Source: reg.src}
 	c := &routecheck.Checker{Eval: peval.Evaluator{Src: reg.src}, Routes: counter}
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
@@ -886,6 +894,9 @@ func (r *pairResult) report(rep *routecheck.Report, dir int, label string) {
 				if rs.Kind == verdict.ReasonPathTooExpensive {
 					r.tooExp[label+": "+rs.Term]++
 				}
+				if rs.Kind == verdict.ReasonUnevaluable {
+					r.unevaluable[label+": "+rs.Why]++
+				}
 			}
 		}
 		if rv.Verdict.Outcome == verdict.Rejected {
@@ -996,6 +1007,9 @@ func (r *pairResult) log(tb testing.TB, i, n int) {
 		tb.Logf("  %s", e)
 	}
 	tb.Logf("  hygiene: %d OriginatedRoutes reads, %d distinct (origin, family)", r.hygCalls, r.hygKeys)
+	if len(r.unevaluable) > 0 {
+		tb.Logf("  unevaluable reports (routes): %s", r.unevaluable)
+	}
 	if len(r.tooExp) > 0 {
 		tb.Logf("  path-too-expensive: %s", r.tooExp)
 	}
@@ -1010,6 +1024,7 @@ type totals struct {
 	reasons                             [2]tally
 	rejMissing                          [2]int
 	tooExp                              tally
+	unevaluable                         tally
 	hygCalls, hygKeys                   int
 	examples                            int
 	maxFilter                           int
@@ -1055,6 +1070,7 @@ func (t *totals) add(r *pairResult) {
 	t.reasons[0].addAll(r.reasons[0])
 	t.reasons[1].addAll(r.reasons[1])
 	t.tooExp.addAll(r.tooExp)
+	t.unevaluable.addAll(r.unevaluable)
 	t.hygCalls += r.hygCalls
 	t.hygKeys += r.hygKeys
 	t.examples += len(r.examples)
@@ -1077,6 +1093,10 @@ func (t *totals) log(tb testing.TB, wall time.Duration) {
 	tb.Logf("TOTALS: undecided reasons, import: %s", t.reasons[0])
 	tb.Logf("TOTALS: undecided reasons, export: %s", t.reasons[1])
 	tb.Logf("TOTALS: path-too-expensive verdicts: %d; routes decided under a policy with an AS-path test: %d", sumTally(t.tooExp), t.pathRoutes)
+	tb.Logf("TOTALS: unevaluable reports: %d, %d routes", len(t.unevaluable), sumTally(t.unevaluable))
+	if len(t.unevaluable) > 0 {
+		tb.Logf("TOTALS: unevaluable reports (routes): %s", t.unevaluable)
+	}
 	if len(t.tooExp) > 0 {
 		tb.Logf("TOTALS: path-too-expensive terms: %s", t.tooExp)
 	}

@@ -513,6 +513,46 @@ source: TEST
 	}
 }
 
+// TestUnevaluable: a report whose policy names a set that is AS-ANY
+// (ruling R19) reads as not evaluable in text, every route undecided with
+// that reason, and as the reason kind "unevaluable" in JSON; exit 0.
+func TestUnevaluable(t *testing.T) {
+	reg := write(t, "reg.txt", []byte(`aut-num: AS64496
+import: from AS64500 accept <^AS64500 AS-ANYSET$>
+source: TEST
+
+aut-num: AS64500
+export: to AS64496 announce AS64500
+source: TEST
+
+as-set: AS-ANYSET
+members: AS-ANY
+source: TEST
+
+route: 192.0.2.0/24
+origin: AS64500
+source: TEST
+`))
+	f := write(t, "one.mrt", gUpdate(gAt(1), gX, gL, "192.0.2.1", "192.0.2.2", nil, gNLRI("192.0.2.0/24"), gAttrs("192.0.2.1", gSeq(gX))))
+	args := []string{"-local", "AS64496", "-peer", "AS64500", "-session", f, "-dump", reg, "-af", "ipv4"}
+	code, out, stderr := run(t, append(slices.Clone(args), "-routes", "all")...)
+	if code != exitOK {
+		t.Fatalf("exit %d; stderr %s\n%s", code, stderr, out)
+	}
+	wantContains(t, "text", out,
+		"import, AS64496 from AS64500: 1 route: 0 accepted, 0 rejected, 1 undecided",
+		"policy not evaluable, no route decided: peval: ",
+		"AS-ANYSET",
+		"undecided, by reason (a route may have several):\n      unevaluable: peval: ",
+		"undecided: unevaluable: peval: ",
+		"export, AS64500 to AS64496: 1 route: 1 accepted, 0 rejected, 0 undecided")
+	code, out, stderr = run(t, append(slices.Clone(args), "-format", "json")...)
+	if code != exitOK {
+		t.Fatalf("json: exit %d; stderr %s\n%s", code, stderr, out)
+	}
+	wantContains(t, "json", compact(t, out), `"Kind":"unevaluable"`, `"Clause":-1,"Index":-1`, `AS-ANYSET`)
+}
+
 // TestPolicyOverIRRd: with -irrd, -policy's aut-num answers first and the
 // sets come from the server, never from the file.
 func TestPolicyOverIRRd(t *testing.T) {
