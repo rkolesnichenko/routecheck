@@ -580,6 +580,33 @@ source: TEST
 	}
 }
 
+// TestDumpPrecedence: with the same aut-num in two registries, each in its
+// own -dump file, the registry of the dump named first answers (load.go's
+// source order: the order in which each source: first appears).
+func TestDumpPrecedence(t *testing.T) {
+	accepts := write(t, "accepts.txt", []byte("aut-num: AS64496\nimport: from AS64500 accept {192.0.2.0/24}\nsource: AAA\n"))
+	rejects := write(t, "rejects.txt", []byte("aut-num: AS64496\nimport: from AS64500 accept {10.0.0.0/8}\nsource: BBB\n"))
+	f := write(t, "one.mrt", gUpdate(gAt(1), gX, gL, "192.0.2.1", "192.0.2.2", nil, gNLRI("192.0.2.0/24"), gAttrs("192.0.2.1", gSeq(gX))))
+	for _, tc := range []struct {
+		name        string
+		first, then string
+		exit        int
+		want        string
+	}{
+		{"AAA first", accepts, rejects, exitOK, "1 route: 1 accepted, 0 rejected"},
+		{"BBB first", rejects, accepts, exitRejected, "1 route: 0 accepted, 1 rejected"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			code, out, stderr := run(t, "-local", "AS64496", "-peer", "AS64500", "-session", f,
+				"-dump", tc.first, "-dump", tc.then, "-af", "ipv4", "-direction", "import")
+			if code != tc.exit {
+				t.Errorf("exit %d, want %d; stderr %s\n%s", code, tc.exit, stderr, out)
+			}
+			wantContains(t, "stdout", out, tc.want)
+		})
+	}
+}
+
 // TestUnevaluable: a report whose policy names a set that is AS-ANY
 // (ruling R19) reads as not evaluable in text, every route undecided with
 // that reason, and as the reason kind "unevaluable" in JSON; exit 0.
