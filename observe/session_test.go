@@ -647,6 +647,11 @@ func TestSessionSelects(t *testing.T) {
 	if got, want := prefixes(obs), []string{"10.0.0.0/24", "10.3.0.0/24", "10.4.0.0/24"}; !slices.Equal(got, want) {
 		t.Errorf("no PeerAddr: prefixes = %v, want %v", got, want)
 	}
+	// X's records: the state change, the UPDATEs on both addresses, the
+	// KEEPALIVE and the 2-byte UPDATE; not what L sent, not AS64501's.
+	if info.Selected != 5 {
+		t.Errorf("no PeerAddr: Selected = %d, want 5", info.Selected)
+	}
 	if info.LocalAS != types.ASN(asL) || info.LocalAddr != localAddr || info.PeerAddr != peerAddr {
 		t.Errorf("info = %+v", info)
 	}
@@ -658,13 +663,27 @@ func TestSessionSelects(t *testing.T) {
 	if got, want := prefixes(obs), []string{"10.0.0.0/24", "10.4.0.0/24"}; !slices.Equal(got, want) || info.MidSession {
 		t.Errorf("PeerAddr %v: prefixes = %v, want %v; MidSession %v", peerAddr, got, want, info.MidSession)
 	}
+	if info.Selected != 4 {
+		t.Errorf("PeerAddr %v: Selected = %d, want 4", peerAddr, info.Selected)
+	}
 	obs, info = mustRun(t, SessionSel{Peer: types.ASN(asX), PeerAddr: other}, recs...)
-	if got := prefixes(obs); !slices.Equal(got, []string{"10.3.0.0/24"}) || info.PeerAddr != other || !info.MidSession {
+	if got := prefixes(obs); !slices.Equal(got, []string{"10.3.0.0/24"}) || info.PeerAddr != other || !info.MidSession || info.Selected != 1 {
 		t.Errorf("PeerAddr %v: prefixes = %v, info %+v", other, got, info)
 	}
+	// No record of the session: an empty result that is not "X announced
+	// nothing" (ruling R23).
 	obs, info = mustRun(t, SessionSel{Peer: 64999}, recs...)
-	if len(obs) != 0 || info.LocalAS != 0 || info.PeerAddr.IsValid() {
+	if len(obs) != 0 || info.LocalAS != 0 || info.PeerAddr.IsValid() || info.Selected != 0 {
 		t.Errorf("an absent peer: %v, %+v", prefixes(obs), info)
+	}
+	obs, info = mustRun(t, SessionSel{Peer: types.ASN(asX), PeerAddr: netip.MustParseAddr("192.0.2.99")}, recs...)
+	if len(obs) != 0 || info.Selected != 0 {
+		t.Errorf("an absent peer address: %v, %+v", prefixes(obs), info)
+	}
+	// Records after At are selected too (NoRecordsBeforeAt tells them apart).
+	_, info = mustRun(t, SessionSel{Peer: types.ASN(asX), At: at(0).Add(-time.Second)}, recs...)
+	if info.Selected != 5 || !info.NoRecordsBeforeAt {
+		t.Errorf("all after At: Selected = %d, NoRecordsBeforeAt %v; want 5, true", info.Selected, info.NoRecordsBeforeAt)
 	}
 }
 
@@ -767,8 +786,14 @@ func TestSessionRIB(t *testing.T) {
 	if got, want := prefixes(obs), []string{"10.0.0.0/24", "10.0.1.0/24", "2001:db8:1::/48"}; !slices.Equal(got, want) {
 		t.Fatalf("PrePolicyRIB: prefixes = %v, want %v", got, want)
 	}
-	if info.NotFirstAS != 1 || info.Malformed != 1 || info.Skipped != 1 || info.MidSession {
+	// Selected: the PEER_INDEX_TABLE naming X, and X's five RIB entries.
+	if info.NotFirstAS != 1 || info.Malformed != 1 || info.Skipped != 1 || info.MidSession || info.Selected != 6 {
 		t.Errorf("info = %+v", info)
+	}
+	// A table naming X with no entry for it: X announced nothing, and the
+	// capture is about X's session.
+	if tobs, tinfo := mustRun(t, pre, pit); len(tobs) != 0 || tinfo.Selected != 1 {
+		t.Errorf("table only: %v, Selected %d, want 1", prefixes(tobs), tinfo.Selected)
 	}
 	if o := obs[0]; !slices.Equal(o.Route.Path, asns(asX, asZ)) || !o.Evidence.Time.Equal(at(-40)) || !o.Route.CommsKnown {
 		t.Errorf("RIB route = %+v", o)

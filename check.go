@@ -266,7 +266,15 @@ func (c *Checker) Check(ctx context.Context, mode Mode, records iter.Seq2[mrt.Re
 			local = sinfo.LocalAS
 		}
 		if local == 0 {
-			return nil, fmt.Errorf("%w: Options.Local is not set and the capture names no local AS", ErrOptions)
+			why := ""
+			if sinfo.Selected == 0 {
+				from := ""
+				if o.PeerAddr.IsValid() {
+					from = " from " + o.PeerAddr.String()
+				}
+				why = fmt.Sprintf(" (it holds no record of a session with %s%s)", o.Peer, from)
+			}
+			return nil, fmt.Errorf("%w: Options.Local is not set and the capture names no local AS%s", ErrOptions, why)
 		}
 		if local == o.Peer {
 			return nil, fmt.Errorf("%w: the capture's local AS is the peer, %s", ErrOptions, local)

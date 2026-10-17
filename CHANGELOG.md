@@ -52,7 +52,12 @@ First version, not yet released. It requires rpsl v0.29.0 (`rpsl`,
   - 0: nothing Rejected;
   - 1: some route Rejected;
   - 2: a bad command line;
-  - 3: could not complete.
+  - 3: could not complete, including a session-mode capture that holds no
+    record of a session with X (`observe.SessionInfo.Selected` is 0), which
+    is not read as "X announced nothing".
+
+  A `-local` that is not the capture's local AS is checked as given, with a
+  warning.
 
   See docs/routecheck.md, which also says which OpenBGPD, BIRD 2 and GoBGP MRT
   dumps qualify for `-session`.

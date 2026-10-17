@@ -29,6 +29,7 @@ type SessionInfo struct
 	MidSession bool
 	DownAtEnd bool
 	NoRecordsBeforeAt bool
+	Selected int
 	NotFirstAS int
 	Malformed int
 	MalformedResets int

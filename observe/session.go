@@ -44,6 +44,15 @@ type SessionInfo struct {
 	// NoRecordsBeforeAt: At is set and every selected record is after it.
 	NoRecordsBeforeAt bool
 
+	// Selected is the number of records Session selected for the peer,
+	// before or after At: BGP4MP state changes and messages X sent,
+	// PEER_INDEX_TABLEs naming X, and RIB entries for X (one per TABLE_DUMP
+	// record). 0 means the capture holds no record of the session, which is
+	// not "X announced nothing": the result is empty because the capture is
+	// not about this session (another AS or peer address, or a 2-byte
+	// BGP4MP capture, which shows a 4-byte X as AS23456).
+	Selected int
+
 	NotFirstAS      int // announcements whose path does not start with X: skipped, and the key's earlier route deleted
 	Malformed       int // announcements treated as withdrawals (RFC 7606 treat-as-withdraw; a RIB entry counts one)
 	MalformedResets int // UPDATEs RFC 7606 answers with a session reset: the session's state was cleared and it is down until X's next UPDATE
@@ -146,6 +155,7 @@ func (r *replay) selected(as bgp.ASN, addr netip.Addr) bool {
 
 // applies counts a selected record and reports whether it is at or before At.
 func (r *replay) applies(t time.Time) bool {
+	r.info.Selected++
 	if !r.sel.At.IsZero() && t.After(r.sel.At) {
 		r.after++
 		return false

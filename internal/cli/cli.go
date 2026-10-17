@@ -72,8 +72,9 @@ const exitStatus = `Exit status:
   0  nothing Rejected (Undecided routes and "no policy" alone exit 0)
   1  some route Rejected, in either direction
   2  a bad command line
-  3  could not complete: a file unreadable, an aut-num missing, the policy
-     not evaluable, the server unreachable, the run interrupted`
+  3  could not complete: a file unreadable or cut mid-record, no record of
+     the session in the capture, an aut-num missing, the policy not
+     evaluable, the server unreachable, the run interrupted`
 
 // listFlag is a repeatable flag: each use adds one value.
 type listFlag []string
@@ -154,6 +155,19 @@ func Run(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 	if err != nil {
 		return fail(err)
 	}
+	if s := sessionInfo(results); s != nil {
+		// Ruling R23: an empty selection is not "X announced nothing".
+		if s.Selected == 0 {
+			from := ""
+			if cfg.opts.PeerAddr.IsValid() {
+				from = " from " + cfg.opts.PeerAddr.String()
+			}
+			return fail(fmt.Errorf("no record of a session with %s%s in the capture (a 2-byte capture shows a 4-byte AS as AS23456)", cfg.opts.Peer, from))
+		}
+		if w := localMismatch(cfg, s); w != "" {
+			fmt.Fprintln(stderr, "routecheck: "+w)
+		}
+	}
 	if cfg.format == "json" {
 		err = writeJSON(stdout, results)
 	} else {
@@ -173,6 +187,25 @@ func Run(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 		}
 	}
 	return exitOK
+}
+
+// sessionInfo is the session-mode coverage, the same in every Result; nil in
+// collector mode.
+func sessionInfo(results []routecheck.Result) *observe.SessionInfo {
+	if len(results) == 0 {
+		return nil
+	}
+	return results[0].Coverage.Session
+}
+
+// localMismatch is the warning for a -local that is not the capture's local
+// AS, or "" when -local was not given, the capture names no local AS, or
+// they agree. -local is what is checked.
+func localMismatch(cfg *config, s *observe.SessionInfo) string {
+	if !cfg.localGiven || s.LocalAS == 0 || s.LocalAS == cfg.opts.Local {
+		return ""
+	}
+	return fmt.Sprintf("warning: -local %s is not the capture's local AS, %s: %s's policy is checked", cfg.opts.Local, s.LocalAS, cfg.opts.Local)
 }
 
 // message is err's text for stderr, starting "routecheck: " once (the

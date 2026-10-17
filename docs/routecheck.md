@@ -66,6 +66,11 @@ state at the end of the capture, or at `-at`.
   mid-session; routes announced earlier are not seen".
 - **A session that is down at the end.** The result is empty, and the output
   says "session down at the end of the capture".
+- **A capture with no record of the session.** When no record in the capture
+  is X's (or none is from `-peer-addr`), the run fails with exit 3: "no record
+  of a session with AS X in the capture". An empty result there would read as
+  "X announced nothing". A 2-byte BGP4MP capture shows a 4-byte X as AS23456,
+  so it holds no record of X.
 - **Malformed UPDATEs** are handled as RFC 7606 says. Most become
   treat-as-withdraw, and those prefixes never keep an earlier route. An UPDATE
   RFC 7606 answers with a session reset clears the state. Both are counted and
@@ -182,6 +187,9 @@ with a hint that offers the capture's addresses as candidates.
 The README shows a session example and a collector example.
 Coverage warnings include:
 
+- `-local` is not the capture's local AS (the AS given is the one checked; the
+  warning is also written to stderr, so JSON runs get it, and the exit status
+  is unchanged);
 - capture starts mid-session;
 - session down at the end;
 - no record at or before `-at`;
@@ -218,8 +226,8 @@ One attribute with REFINE or EXCEPT gives several clauses that share one `Index`
 |---|---|
 | 0 | Nothing was Rejected. Undecided routes and "no policy" alone exit 0: they are listed, not failures. |
 | 1 | Some route was Rejected, in either direction. |
-| 2 | A bad command line, including options the library refuses (`routecheck.ErrOptions`, such as a session mode run with no `-local` whose capture names no local AS). |
-| 3 | The run could not complete. Causes: an unreadable file, a missing aut-num, peval failing (a limit, a Source error; but not AS-ANY, which is "unevaluable"), an unreachable server, a RIB dump in session mode without `-pre-policy`, a broken `-policy` draft, or an interrupted run. |
+| 2 | A bad command line, including options the library refuses (`routecheck.ErrOptions`, such as a session mode run with no `-local` whose capture names no local AS; when the capture holds no record of the session at all, the message says so). |
+| 3 | The run could not complete. Causes: an unreadable file; a capture cut mid-record ("truncated record"), such as a file the daemon is still writing; in session mode, a capture with no record of a session with X (at `-peer-addr`, when given), which is not "X announced nothing" (ruling R23; a 2-byte BGP4MP capture shows a 4-byte X as AS23456, so it holds no record of X); a missing aut-num; peval failing (a limit, a Source error; but not AS-ANY, which is "unevaluable"); an unreachable server; a RIB dump in session mode without `-pre-policy`; a broken `-policy` draft; or an interrupted run. |
 
 ## Which captures qualify for -session
 

@@ -168,6 +168,69 @@ func TestLocalFromCapture(t *testing.T) {
 	wantContains(t, "stderr", stderr, "give -local")
 }
 
+// TestNoSession: a capture with no record of the session selected is not
+// "X announced nothing" (ruling R23): exit 3, naming the AS and the address,
+// and nothing on stdout.
+func TestNoSession(t *testing.T) {
+	const hint = " in the capture (a 2-byte capture shows a 4-byte AS as AS23456)"
+	for _, tc := range []struct {
+		name string
+		args []string
+		want string
+	}{
+		{"wrong -peer-addr", session("-peer-addr", "192.0.2.99"), "routecheck: no record of a session with AS64500 from 192.0.2.99" + hint},
+		{"wrong -peer-addr, json", session("-peer-addr", "192.0.2.99", "-format", "json"), "routecheck: no record of a session with AS64500 from 192.0.2.99" + hint},
+		{"wrong -peer-addr, import only", session("-peer-addr", "192.0.2.99", "-direction", "import", "-af", "ipv4"), "from 192.0.2.99" + hint},
+		{"a peer that never speaks", []string{"-local", "AS64496", "-peer", "AS64511", "-session", capture, "-dump", registry}, "routecheck: no record of a session with AS64511" + hint},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			code, stdout, stderr := run(t, tc.args...)
+			if code != exitFailed {
+				t.Errorf("exit %d, want %d; stderr %s", code, exitFailed, stderr)
+			}
+			if stdout != "" {
+				t.Errorf("stdout %q, want nothing", stdout)
+			}
+			wantContains(t, "stderr", stderr, tc.want)
+		})
+	}
+	// The right address is a session.
+	if code, _, stderr := run(t, session("-peer-addr", "192.0.2.1")...); code != exitRejected {
+		t.Errorf("-peer-addr 192.0.2.1: exit %d, want %d; stderr %s", code, exitRejected, stderr)
+	}
+	// Without -local the capture names no local AS either: a usage error
+	// that says why.
+	code, _, stderr := run(t, "-peer", "AS64500", "-session", capture, "-dump", registry, "-peer-addr", "192.0.2.99")
+	if code != exitUsage {
+		t.Errorf("no -local: exit %d, want %d; stderr %s", code, exitUsage, stderr)
+	}
+	wantContains(t, "stderr", stderr, "no record of a session with AS64500 from 192.0.2.99", "give -local")
+}
+
+// TestLocalMismatch: -local naming another AS than the capture's local AS is
+// checked as given, with a warning on stderr and in the text; the exit
+// status is unchanged.
+func TestLocalMismatch(t *testing.T) {
+	const warn = "warning: -local AS64511 is not the capture's local AS, AS64496: AS64511's policy is checked"
+	args := []string{"-local", "AS64511", "-peer", "AS64500", "-session", capture, "-dump", registry}
+	code, stdout, stderr := run(t, args...)
+	if code != exitOK {
+		t.Errorf("exit %d, want %d; stderr %s", code, exitOK, stderr)
+	}
+	wantContains(t, "stderr", stderr, "routecheck: "+warn)
+	wantContains(t, "stdout", stdout, "\n"+warn+"\n", "import, AS64511 from AS64500: no policy")
+	code, stdout, stderr = run(t, append(args, "-format", "json")...)
+	if code != exitOK || strings.Contains(stdout, "warning") {
+		t.Errorf("json: exit %d, stdout %s", code, stdout)
+	}
+	wantContains(t, "stderr", stderr, "routecheck: "+warn)
+	// The capture's own local AS: no warning.
+	_, stdout, stderr = run(t, session()...)
+	if strings.Contains(stdout+stderr, "is not the capture's local AS") {
+		t.Errorf("a warning for the capture's own local AS:\n%s%s", stdout, stderr)
+	}
+}
+
 func TestFailures(t *testing.T) {
 	missingAutNum := write(t, "reg.txt", []byte("aut-num: AS64500\nexport: to AS64496 announce AS64500\nsource: TEST\n"))
 	dead := closedPort(t)
@@ -297,8 +360,11 @@ func TestFlags(t *testing.T) {
 		wantContains(t, "-at before the capture", out, "no record of the session at or before -at")
 	})
 	t.Run("peer-addr", func(t *testing.T) {
-		_, out, _ := run(t, session("-af", "ipv4", "-direction", "import", "-peer-addr", "192.0.2.99")...)
-		wantContains(t, "-peer-addr", out, "0 routes")
+		// An address with no record is no session (TestNoSession), not 0 routes.
+		code, out, _ := run(t, session("-af", "ipv4", "-direction", "import", "-peer-addr", "192.0.2.99")...)
+		if code != exitFailed || out != "" {
+			t.Errorf("-peer-addr 192.0.2.99: exit %d, stdout %q", code, out)
+		}
 		_, out, _ = run(t, session("-af", "ipv4", "-direction", "import", "-peer-addr", "192.0.2.1")...)
 		wantContains(t, "-peer-addr", out, "5 routes")
 	})

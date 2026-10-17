@@ -299,7 +299,7 @@ func TestCheckSessionImport(t *testing.T) {
 	// Both post-drain Local errors are option errors (ErrOptions), not run
 	// failures.
 	_, err := c.Check(context.Background(), routecheck.ModeSession, records(nil), routecheck.Options{Peer: types.ASN(asX)})
-	if !errors.Is(err, routecheck.ErrOptions) || !strings.Contains(fmt.Sprint(err), "names no local AS") {
+	if !errors.Is(err, routecheck.ErrOptions) || !strings.Contains(fmt.Sprint(err), "names no local AS (it holds no record of a session with AS64500)") {
 		t.Errorf("no Local and no capture: %v, want ErrOptions", err)
 	}
 	// A capture whose local AS is X itself (an internal session).

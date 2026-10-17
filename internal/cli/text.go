@@ -114,6 +114,9 @@ func (p *printer) header() {
 func (p *printer) coverage(results []routecheck.Result, cov routecheck.Coverage) {
 	x := p.x.String()
 	if s := cov.Session; s != nil {
+		if w := localMismatch(p.cfg, s); w != "" {
+			p.line("%s", w)
+		}
 		if s.MidSession {
 			p.line("warning: capture starts mid-session; routes announced earlier are not seen")
 		}
