@@ -1,8 +1,8 @@
-# Dependabot keeps the actions in .github/workflows and the Go module's
-# requirements (rpsl, rpsl/types, rpsl/resolve, mrt) up to date, each in one
-# grouped pull request a month. scripts/check.sh pins the four requirements'
-# versions, so a Go bump fails CI until the same pull request updates that
-# list too: moving to a new rpsl or mrt is a decision, read its CHANGELOG.
+# Dependabot keeps the actions in .github/workflows up to date, in one
+# grouped pull request a month. It does not watch the Go module (ruling R24):
+# every requirement (rpsl, rpsl/types, rpsl/resolve, mrt) is the author's
+# own, and scripts/check.sh pins their versions, so moving to a new rpsl or
+# mrt is a release decision, made by hand with that list in the same change.
 version: 2
 updates:
   - package-ecosystem: "github-actions"
@@ -15,13 +15,3 @@ updates:
           - "*"
     commit-message:
       prefix: "ci"
-  - package-ecosystem: "gomod"
-    directory: "/"
-    schedule:
-      interval: "monthly"
-    groups:
-      go:
-        patterns:
-          - "*"
-    commit-message:
-      prefix: "deps"
