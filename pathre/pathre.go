@@ -29,7 +29,7 @@ var ErrUnbound = errors.New("pathre: PeerAS not bound")
 var ErrTooExpensive = errors.New("pathre: regexp too expensive for this path")
 
 // DefaultMaxWork is the work budget Match uses (see MatchOptions.MaxWork):
-// a few milliseconds of matching and some tens of megabytes allocated. It
+// tens of milliseconds of matching and some tens of megabytes allocated. It
 // is about 19 times the most any regexp needed among rpsl's routemodel
 // vectors, RFC 2622's examples and 40,000 regexps drawn by
 // internal/reoracle's generator over paths of up to 255 ASes
@@ -564,16 +564,12 @@ func (m *matcher) shift(s set) set {
 	return out
 }
 
-// upTo returns s without the positions past p.
+// upTo returns s without the positions past p (0 <= p).
 func (m *matcher) upTo(s set, p int) set {
 	if p >= m.n {
 		return s
 	}
 	out := m.clone(s)
-	if p < 0 {
-		clear(out)
-	} else {
-		out.keepTo(p)
-	}
+	out.keepTo(p)
 	return out
 }

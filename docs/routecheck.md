@@ -160,7 +160,7 @@ The file's parse and decode diagnostics go to stderr. The run fails with exit 3,
 naming the file and the object, in any of these cases:
 
 - an aut-num or inet-rtr with an error;
-- an aut-num or inet-rtr the registry refuses;
+- an aut-num or inet-rtr the registry refuses (its key does not parse);
 - a file with no aut-num and no inet-rtr.
 
 ## Router addresses

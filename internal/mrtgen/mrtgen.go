@@ -225,9 +225,13 @@ func AS4PathAttr(segs ...bgp.Segment) []byte {
 	return Raw(FlagOptional|FlagTransitive, 17, segments(true, segs))
 }
 
-// Seq, Set and ConfedSeq build AS_SEQUENCE, AS_SET and AS_CONFED_SEQUENCE segments.
+// Seq builds an AS_SEQUENCE segment.
 func Seq(asns ...bgp.ASN) bgp.Segment { return bgp.Segment{Type: bgp.ASSequence, ASNs: asns} }
+
+// Set builds an AS_SET segment.
 func Set(asns ...bgp.ASN) bgp.Segment { return bgp.Segment{Type: bgp.ASSet, ASNs: asns} }
+
+// ConfedSeq builds an AS_CONFED_SEQUENCE segment.
 func ConfedSeq(asns ...bgp.ASN) bgp.Segment {
 	return bgp.Segment{Type: bgp.ASConfedSequence, ASNs: asns}
 }

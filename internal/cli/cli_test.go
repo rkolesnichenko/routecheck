@@ -99,7 +99,8 @@ func TestHelp(t *testing.T) {
 	wantContains(t, "usage", stdout,
 		"routecheck -peer AS (-session FILE [-local AS] | -collector FILE -local AS)",
 		"-irrd", "-sources", "-policy", "-vrps", "-af", "-direction", "-peer-addr", "-at", "-pre-policy",
-		"-local-rtr", "-peer-rtr", "-format", "-routes", "repeatable", "Exit status")
+		"-local-rtr", "-peer-rtr", "-format", "-routes", "repeatable", "Exit status",
+		"a key that does not parse", "cut mid-record", "the session in the capture")
 }
 
 func TestBadCommandLines(t *testing.T) {

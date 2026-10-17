@@ -57,8 +57,9 @@ adds a local RPSL file, a draft not yet published: its aut-nums and
 inet-rtrs answer before the registry's, under any source. Sets and routes
 always come from the registry: a draft's sets, routes and objects of classes
 routecheck does not use (mntner, person, ...) are skipped with a warning.
-Its diagnostics are written to stderr; an aut-num or inet-rtr with an error,
-and a file with no aut-num and no inet-rtr, fail the run.
+Its diagnostics are written to stderr; an aut-num or inet-rtr with an error
+or a key that does not parse, and a file with no aut-num and no inet-rtr,
+fail the run.
 
 In session mode -local defaults to the capture's local AS. When most routes
 seen do not start with X - the announcements skipped for it outnumber the
