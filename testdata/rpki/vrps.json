@@ -1,0 +1,10 @@
+{
+  "metadata": {
+    "comment": "Synthetic VRPs over documentation prefixes, for the command's goldens (testdata/README.md)."
+  },
+  "roas": [
+    { "asn": "AS64500", "prefix": "192.0.2.0/24", "maxLength": 24, "ta": "test" },
+    { "asn": "AS64511", "prefix": "203.0.113.0/24", "maxLength": 25, "ta": "test" },
+    { "asn": "AS64500", "prefix": "2001:db8::/32", "maxLength": 48, "ta": "test" }
+  ]
+}

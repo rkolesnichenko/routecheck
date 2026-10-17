@@ -1,0 +1,51 @@
+package routecheck
+const DirBoth Direction = DirImport | DirExport
+const DirExport Direction = 2
+const DirImport Direction = 1
+const ModeCollector Mode
+const ModeSession Mode = iota + 1
+var ErrOptions = errors.New(…)
+type Checker struct
+	Eval peval.Evaluator
+	Routes resolve.Source
+func (*Checker) Check(ctx context.Context, mode Mode, records iter.Seq2[mrt.Record, error], o Options) ([]Result, error)
+type Coverage struct
+	Session *observe.SessionInfo
+	Collector *observe.CollectorInfo
+	OtherFamilies int
+	DirectNotChecked int
+	HintLocalAddr netip.Addr
+	HintPeerAddr netip.Addr
+type Direction uint8
+type Mode uint8
+type Options struct
+	Local types.ASN
+	Peer types.ASN
+	AF []types.AddrFamily
+	LocalRtr netip.Addr
+	PeerRtr netip.Addr
+	PeerAddr netip.Addr
+	At time.Time
+	PrePolicyRIB bool
+	Directions Direction
+	VRPs *rpki.VRPs
+type Report struct
+	Toward types.ASN
+	Policy peval.Policy
+	NoPolicy bool
+	Unevaluable string
+	Routes []RouteVerdict
+	Accepted int
+	Rejected int
+	Undecided int
+type Result struct
+	AF types.AddrFamily
+	Import *Report
+	Export []Report
+	Coverage Coverage
+type RouteVerdict struct
+	Route verdict.Route
+	Evidence observe.Evidence
+	Verdict verdict.Verdict
+	RPKI *rpki.State
+	RouteObj *bool

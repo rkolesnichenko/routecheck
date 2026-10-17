@@ -1,0 +1,9 @@
+package pathre
+const DefaultMaxWork = 10_000_000
+var ErrNotSingleAS = errors.New(…)
+var ErrTooExpensive = errors.New(…)
+var ErrUnbound = errors.New(…)
+func Match(re *policy.ASPathRE, sets map[types.SetName]resolve.ASNSet, path []types.ASN) (bool, error)
+func MatchWith(re *policy.ASPathRE, sets map[types.SetName]resolve.ASNSet, path []types.ASN, o MatchOptions) (bool, error)
+type MatchOptions struct
+	MaxWork int

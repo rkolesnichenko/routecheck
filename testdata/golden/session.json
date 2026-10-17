@@ -1,0 +1,607 @@
+[
+  {
+    "AF": "ipv4.unicast",
+    "Coverage": {
+      "Session": {
+        "LocalAS": "AS64496",
+        "LocalAddr": "192.0.2.2",
+        "PeerAddr": "192.0.2.1",
+        "MidSession": true,
+        "DownAtEnd": false,
+        "NoRecordsBeforeAt": false,
+        "Selected": 9,
+        "NotFirstAS": 1,
+        "Malformed": 0,
+        "MalformedResets": 0,
+        "Skipped": 0
+      },
+      "Collector": null,
+      "OtherFamilies": 0,
+      "DirectNotChecked": 0,
+      "HintLocalAddr": "192.0.2.2",
+      "HintPeerAddr": "192.0.2.1"
+    },
+    "Import": {
+      "Toward": "AS64500",
+      "NoPolicy": false,
+      "Unevaluable": "",
+      "Accepted": 2,
+      "Rejected": 2,
+      "Undecided": 1,
+      "Policy": {
+        "Clauses": [
+          {
+            "Index": 3,
+            "Term": "from AS64500 accept AS64500",
+            "Filter": "{192.0.2.0/24}"
+          },
+          {
+            "Index": 4,
+            "Term": "from AS64500 accept <^AS64500 AS64501$>",
+            "Filter": "<^ AS64500 AS64501 $>"
+          }
+        ],
+        "Undecided": null
+      },
+      "Routes": [
+        {
+          "Evidence": {
+            "Neighbours": null,
+            "Direct": false,
+            "CollectorPeers": 0,
+            "Time": "2026-10-16T12:00:04Z",
+            "PeerAddr": "192.0.2.1"
+          },
+          "RouteObj": null,
+          "Route": {
+            "Prefix": "10.0.0.0/8",
+            "Path": [
+              "AS64500"
+            ],
+            "PathKnown": false,
+            "OriginSet": true,
+            "CommsKnown": true,
+            "Communities": null
+          },
+          "Verdict": {
+            "Clause": 0,
+            "EarlierUndecided": null,
+            "Reasons": [
+              {
+                "Kind": "path-not-sequence",
+                "Why": "",
+                "Clause": 1,
+                "Index": 4,
+                "Term": "<^ AS64500 AS64501 $>"
+              }
+            ],
+            "Outcome": "undecided",
+            "Fails": null
+          },
+          "RPKI": "not_found"
+        },
+        {
+          "Evidence": {
+            "Neighbours": null,
+            "Direct": false,
+            "CollectorPeers": 0,
+            "Time": "2026-10-16T12:00:01Z",
+            "PeerAddr": "192.0.2.1"
+          },
+          "RouteObj": true,
+          "Route": {
+            "Prefix": "192.0.2.0/24",
+            "Path": [
+              "AS64500"
+            ],
+            "PathKnown": true,
+            "OriginSet": false,
+            "CommsKnown": true,
+            "Communities": [
+              "64500:100"
+            ]
+          },
+          "Verdict": {
+            "Clause": 0,
+            "EarlierUndecided": null,
+            "Reasons": null,
+            "Outcome": "accepted",
+            "Fails": null
+          },
+          "RPKI": "valid"
+        },
+        {
+          "Evidence": {
+            "Neighbours": null,
+            "Direct": false,
+            "CollectorPeers": 0,
+            "Time": "2026-10-16T12:00:02Z",
+            "PeerAddr": "192.0.2.1"
+          },
+          "RouteObj": true,
+          "Route": {
+            "Prefix": "198.51.100.0/24",
+            "Path": [
+              "AS64500",
+              "AS64501"
+            ],
+            "PathKnown": true,
+            "OriginSet": false,
+            "CommsKnown": true,
+            "Communities": null
+          },
+          "Verdict": {
+            "Clause": 1,
+            "EarlierUndecided": null,
+            "Reasons": null,
+            "Outcome": "accepted",
+            "Fails": null
+          },
+          "RPKI": "not_found"
+        },
+        {
+          "Evidence": {
+            "Neighbours": null,
+            "Direct": false,
+            "CollectorPeers": 0,
+            "Time": "2026-10-16T12:00:03Z",
+            "PeerAddr": "192.0.2.1"
+          },
+          "RouteObj": false,
+          "Route": {
+            "Prefix": "203.0.113.0/24",
+            "Path": [
+              "AS64500",
+              "AS64502"
+            ],
+            "PathKnown": true,
+            "OriginSet": false,
+            "CommsKnown": true,
+            "Communities": null
+          },
+          "Verdict": {
+            "Clause": 0,
+            "EarlierUndecided": null,
+            "Reasons": null,
+            "Outcome": "rejected",
+            "Fails": [
+              {
+                "Clause": 0,
+                "Test": "prefix not in filter",
+                "Missing": null
+              },
+              {
+                "Clause": 1,
+                "Test": "<^ AS64500 AS64501 $>",
+                "Missing": null
+              }
+            ]
+          },
+          "RPKI": "invalid"
+        },
+        {
+          "Evidence": {
+            "Neighbours": null,
+            "Direct": false,
+            "CollectorPeers": 0,
+            "Time": "2026-10-16T12:00:03Z",
+            "PeerAddr": "192.0.2.1"
+          },
+          "RouteObj": false,
+          "Route": {
+            "Prefix": "203.0.113.128/25",
+            "Path": [
+              "AS64500",
+              "AS64502"
+            ],
+            "PathKnown": true,
+            "OriginSet": false,
+            "CommsKnown": true,
+            "Communities": null
+          },
+          "Verdict": {
+            "Clause": 0,
+            "EarlierUndecided": null,
+            "Reasons": null,
+            "Outcome": "rejected",
+            "Fails": [
+              {
+                "Clause": 0,
+                "Test": "prefix not in filter",
+                "Missing": null
+              },
+              {
+                "Clause": 1,
+                "Test": "<^ AS64500 AS64501 $>",
+                "Missing": null
+              }
+            ]
+          },
+          "RPKI": "invalid"
+        }
+      ]
+    },
+    "Export": [
+      {
+        "Toward": "AS64496",
+        "NoPolicy": false,
+        "Unevaluable": "",
+        "Accepted": 1,
+        "Rejected": 4,
+        "Undecided": 0,
+        "Policy": {
+          "Clauses": [
+            {
+              "Index": 0,
+              "Term": "to AS64496 announce AS64500",
+              "Filter": "{192.0.2.0/24}"
+            }
+          ],
+          "Undecided": null
+        },
+        "Routes": [
+          {
+            "Evidence": {
+              "Neighbours": null,
+              "Direct": false,
+              "CollectorPeers": 0,
+              "Time": "2026-10-16T12:00:04Z",
+              "PeerAddr": "192.0.2.1"
+            },
+            "RouteObj": null,
+            "Route": {
+              "Prefix": "10.0.0.0/8",
+              "Path": [
+                "AS64500"
+              ],
+              "PathKnown": false,
+              "OriginSet": true,
+              "CommsKnown": true,
+              "Communities": null
+            },
+            "Verdict": {
+              "Clause": 0,
+              "EarlierUndecided": null,
+              "Reasons": null,
+              "Outcome": "rejected",
+              "Fails": [
+                {
+                  "Clause": 0,
+                  "Test": "prefix not in filter",
+                  "Missing": null
+                }
+              ]
+            },
+            "RPKI": "not_found"
+          },
+          {
+            "Evidence": {
+              "Neighbours": null,
+              "Direct": false,
+              "CollectorPeers": 0,
+              "Time": "2026-10-16T12:00:01Z",
+              "PeerAddr": "192.0.2.1"
+            },
+            "RouteObj": true,
+            "Route": {
+              "Prefix": "192.0.2.0/24",
+              "Path": [
+                "AS64500"
+              ],
+              "PathKnown": true,
+              "OriginSet": false,
+              "CommsKnown": true,
+              "Communities": [
+                "64500:100"
+              ]
+            },
+            "Verdict": {
+              "Clause": 0,
+              "EarlierUndecided": null,
+              "Reasons": null,
+              "Outcome": "accepted",
+              "Fails": null
+            },
+            "RPKI": "valid"
+          },
+          {
+            "Evidence": {
+              "Neighbours": null,
+              "Direct": false,
+              "CollectorPeers": 0,
+              "Time": "2026-10-16T12:00:02Z",
+              "PeerAddr": "192.0.2.1"
+            },
+            "RouteObj": true,
+            "Route": {
+              "Prefix": "198.51.100.0/24",
+              "Path": [
+                "AS64500",
+                "AS64501"
+              ],
+              "PathKnown": true,
+              "OriginSet": false,
+              "CommsKnown": true,
+              "Communities": null
+            },
+            "Verdict": {
+              "Clause": 0,
+              "EarlierUndecided": null,
+              "Reasons": null,
+              "Outcome": "rejected",
+              "Fails": [
+                {
+                  "Clause": 0,
+                  "Test": "prefix not in filter",
+                  "Missing": null
+                }
+              ]
+            },
+            "RPKI": "not_found"
+          },
+          {
+            "Evidence": {
+              "Neighbours": null,
+              "Direct": false,
+              "CollectorPeers": 0,
+              "Time": "2026-10-16T12:00:03Z",
+              "PeerAddr": "192.0.2.1"
+            },
+            "RouteObj": false,
+            "Route": {
+              "Prefix": "203.0.113.0/24",
+              "Path": [
+                "AS64500",
+                "AS64502"
+              ],
+              "PathKnown": true,
+              "OriginSet": false,
+              "CommsKnown": true,
+              "Communities": null
+            },
+            "Verdict": {
+              "Clause": 0,
+              "EarlierUndecided": null,
+              "Reasons": null,
+              "Outcome": "rejected",
+              "Fails": [
+                {
+                  "Clause": 0,
+                  "Test": "prefix not in filter",
+                  "Missing": null
+                }
+              ]
+            },
+            "RPKI": "invalid"
+          },
+          {
+            "Evidence": {
+              "Neighbours": null,
+              "Direct": false,
+              "CollectorPeers": 0,
+              "Time": "2026-10-16T12:00:03Z",
+              "PeerAddr": "192.0.2.1"
+            },
+            "RouteObj": false,
+            "Route": {
+              "Prefix": "203.0.113.128/25",
+              "Path": [
+                "AS64500",
+                "AS64502"
+              ],
+              "PathKnown": true,
+              "OriginSet": false,
+              "CommsKnown": true,
+              "Communities": null
+            },
+            "Verdict": {
+              "Clause": 0,
+              "EarlierUndecided": null,
+              "Reasons": null,
+              "Outcome": "rejected",
+              "Fails": [
+                {
+                  "Clause": 0,
+                  "Test": "prefix not in filter",
+                  "Missing": null
+                }
+              ]
+            },
+            "RPKI": "invalid"
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "AF": "ipv6.unicast",
+    "Coverage": {
+      "Session": {
+        "LocalAS": "AS64496",
+        "LocalAddr": "192.0.2.2",
+        "PeerAddr": "192.0.2.1",
+        "MidSession": true,
+        "DownAtEnd": false,
+        "NoRecordsBeforeAt": false,
+        "Selected": 9,
+        "NotFirstAS": 1,
+        "Malformed": 0,
+        "MalformedResets": 0,
+        "Skipped": 0
+      },
+      "Collector": null,
+      "OtherFamilies": 0,
+      "DirectNotChecked": 0,
+      "HintLocalAddr": "192.0.2.2",
+      "HintPeerAddr": "192.0.2.1"
+    },
+    "Import": {
+      "Toward": "AS64500",
+      "NoPolicy": false,
+      "Unevaluable": "",
+      "Accepted": 1,
+      "Rejected": 1,
+      "Undecided": 0,
+      "Policy": {
+        "Clauses": [
+          {
+            "Index": 5,
+            "Term": "from AS64500 accept AS64500",
+            "Filter": "{2001:db8:1::/48}"
+          }
+        ],
+        "Undecided": null
+      },
+      "Routes": [
+        {
+          "Evidence": {
+            "Neighbours": null,
+            "Direct": false,
+            "CollectorPeers": 0,
+            "Time": "2026-10-16T12:00:08Z",
+            "PeerAddr": "192.0.2.1"
+          },
+          "RouteObj": true,
+          "Route": {
+            "Prefix": "2001:db8:1::/48",
+            "Path": [
+              "AS64500"
+            ],
+            "PathKnown": true,
+            "OriginSet": false,
+            "CommsKnown": true,
+            "Communities": null
+          },
+          "Verdict": {
+            "Clause": 0,
+            "EarlierUndecided": null,
+            "Reasons": null,
+            "Outcome": "accepted",
+            "Fails": null
+          },
+          "RPKI": "valid"
+        },
+        {
+          "Evidence": {
+            "Neighbours": null,
+            "Direct": false,
+            "CollectorPeers": 0,
+            "Time": "2026-10-16T12:00:09Z",
+            "PeerAddr": "192.0.2.1"
+          },
+          "RouteObj": false,
+          "Route": {
+            "Prefix": "2001:db8:dead::/48",
+            "Path": [
+              "AS64500",
+              "AS64502"
+            ],
+            "PathKnown": true,
+            "OriginSet": false,
+            "CommsKnown": true,
+            "Communities": null
+          },
+          "Verdict": {
+            "Clause": 0,
+            "EarlierUndecided": null,
+            "Reasons": null,
+            "Outcome": "rejected",
+            "Fails": [
+              {
+                "Clause": 0,
+                "Test": "prefix not in filter",
+                "Missing": null
+              }
+            ]
+          },
+          "RPKI": "invalid"
+        }
+      ]
+    },
+    "Export": [
+      {
+        "Toward": "AS64496",
+        "NoPolicy": false,
+        "Unevaluable": "",
+        "Accepted": 1,
+        "Rejected": 1,
+        "Undecided": 0,
+        "Policy": {
+          "Clauses": [
+            {
+              "Index": 1,
+              "Term": "to AS64496 announce AS64500",
+              "Filter": "{2001:db8:1::/48}"
+            }
+          ],
+          "Undecided": null
+        },
+        "Routes": [
+          {
+            "Evidence": {
+              "Neighbours": null,
+              "Direct": false,
+              "CollectorPeers": 0,
+              "Time": "2026-10-16T12:00:08Z",
+              "PeerAddr": "192.0.2.1"
+            },
+            "RouteObj": true,
+            "Route": {
+              "Prefix": "2001:db8:1::/48",
+              "Path": [
+                "AS64500"
+              ],
+              "PathKnown": true,
+              "OriginSet": false,
+              "CommsKnown": true,
+              "Communities": null
+            },
+            "Verdict": {
+              "Clause": 0,
+              "EarlierUndecided": null,
+              "Reasons": null,
+              "Outcome": "accepted",
+              "Fails": null
+            },
+            "RPKI": "valid"
+          },
+          {
+            "Evidence": {
+              "Neighbours": null,
+              "Direct": false,
+              "CollectorPeers": 0,
+              "Time": "2026-10-16T12:00:09Z",
+              "PeerAddr": "192.0.2.1"
+            },
+            "RouteObj": false,
+            "Route": {
+              "Prefix": "2001:db8:dead::/48",
+              "Path": [
+                "AS64500",
+                "AS64502"
+              ],
+              "PathKnown": true,
+              "OriginSet": false,
+              "CommsKnown": true,
+              "Communities": null
+            },
+            "Verdict": {
+              "Clause": 0,
+              "EarlierUndecided": null,
+              "Reasons": null,
+              "Outcome": "rejected",
+              "Fails": [
+                {
+                  "Clause": 0,
+                  "Test": "prefix not in filter",
+                  "Missing": null
+                }
+              ]
+            },
+            "RPKI": "invalid"
+          }
+        ]
+      }
+    ]
+  }
+]

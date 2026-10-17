@@ -1,0 +1,24 @@
+route-set: RS-EXAMPLE
+members:   192.0.2.0/24
+members:   AS64501
+source:    TEST
+
+route-set:  RS-RANGES
+members:    192.0.2.0/30^+, 198.51.100.0/28^29-30, 203.0.113.0/31^-
+mp-members: 2001:db8:1::/126^127-128, 2001:db8:2::/48
+source:     TEST
+
+route-set:  RS-V6
+mp-members: 2001:db8:3::/48, AS64502
+source:     TEST
+
+route-set:  RS-NESTED
+members:    RS-RANGES, AS-EXAMPLE, RS-MISSING
+mp-members: RS-V6
+remarks:    RS-MISSING does not exist: it expands to nothing
+source:     TEST
+
+route-set:   RS-CLAIMED
+members:     192.0.2.128/25
+mbrs-by-ref: MNT-OK
+source:      TEST

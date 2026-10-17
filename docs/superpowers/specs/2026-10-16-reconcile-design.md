@@ -66,8 +66,11 @@ where it appears):
   a router configured from the registry rejects it too (§6.4).
 - D5. A same-AS repetition (`~*`, `~+`, `~{m,n}`) whose operand is not a
   single-AS atom is undecided, as rpsl's test oracle declines it (§6.5).
-- D6. The matcher has no repetition-count limit: its cost does not grow
-  with the counts (§6.5).
+- D6. The matcher has no repetition-count limit; a work budget instead
+  (`MatchWith`/`MaxWork`), and exceeding it is Undecided
+  (`ReasonPathTooExpensive`, §6.5). (Amended in Task 3's review: the
+  first wording claimed a cost that does not grow with the counts; it grows
+  with them up to L+1.)
 - D8. ASPA path verification is not in the first version (§12).
 - D9. Same Go floor (1.23), conventions (C1–C3), API golden, check script,
   CI shape and repository security settings as rpsl and mrt.
@@ -150,11 +153,23 @@ routecheck/
   source precedence in the order given), or a live IRRd (`resolve/irrd`).
   Optionally a local RPSL file (`-policy`) for an aut-num not yet
   published (a draft import policy) — my call. Its objects keep their
-  `source:` as written. With dumps they are `Put` into the Corpus after the
-  dumps, replacing an object of the same class, key and source. With
-  `-irrd` the CLI wraps the server's `PolicySource` so that `AutNum` and
-  `InetRtr` answer from the file first; sets always come from the
-  registry.
+  `source:` as written. Its aut-nums and inet-rtrs answer before the
+  registry's under any `source:`, with dumps and with `-irrd` alike: the
+  CLI wraps the registry's `PolicySource` so that `AutNum` and `InetRtr`
+  answer from the file first (ruling R15; a draft written with another
+  `source:` than the registry's would otherwise lose to the registry's
+  object). With dumps its aut-nums and inet-rtrs are also `Put` into the
+  Corpus after the dumps, replacing an object of the same class, key and
+  source. Only aut-nums and inet-rtrs ever come from the file: sets and
+  routes always come from the registry, so a set object (as-set,
+  route-set, filter-set, peering-set, rtr-set), a route or route6 (it would
+  change set expansions and route-object answers) and an object of a class
+  routecheck does not use (mntner, person, role, …) are skipped with a
+  warning, broken or not, with dumps and with `-irrd` alike (rulings R16,
+  R17, R18). The file is checked: its parse and decode diagnostics are written
+  to stderr, and an aut-num or inet-rtr with an error or one the Corpus
+  keeps nothing of, or a file with no aut-num and no inet-rtr, fails the
+  run, naming the file and the object.
 - **Routes.** Session mode: one or more MRT files of BGP4MP messages
   (§6.2). Collector mode: one or more MRT RIB dumps (§6.3). Compressed
   files through `mrt.Decompress`.
@@ -259,22 +274,30 @@ Every test is three-valued: **yes**, **no**, **undecided**.
   test: ANY is `0.0.0.0/0^0-32` / `::/0^0-128` (`AnyPrefix()`), and an
   empty `Prefixes` matches nothing.
 - Path (`PathMatch`): `pathre.Match`'s answer, flipped when `Negated`;
-  undecided when `PathKnown` is false or the matcher declines (D5).
+  undecided when `PathKnown` is false, when the matcher declines (D5), or
+  when it exceeds its work budget (D6).
 - Community (`CommunityMatch`): undecided when `CommsKnown` is false, when a
   value is `internet` (no defined value, §3) or does not parse; otherwise
   `contains`: every listed value present; `==`: the sets equal. Values
   compare numerically (`hi:lo` = hi<<16|lo; `no_export` 0xFFFFFF01,
-  `no_advertise` 0xFFFFFF02, `local_as` 0xFFFFFF03 — the last is my call,
-  following RFC 1997's NO_EXPORT_SUBCONFED; the builder confirms the
-  mapping against IRRToolSet's), flipped when `Negated`.
+  `no_advertise` 0xFFFFFF02, `local_as` and `no_export_subconfed`
+  0xFFFFFF03 — RFC 1997's NO_EXPORT_SUBCONFED, which rpsl's dictionary
+  spells `local_as` and IRRToolSet 5.1.3 and rpsl's rtconfig spell
+  `no_export_subconfed`; both are read, case-insensitively), flipped when
+  `Negated`.
 
 A conjunct is the three-valued AND of its tests (any no → no; else any
 undecided → undecided; else yes). A clause's filter is the three-valued OR
 of its conjuncts. Then, over the policy's clauses in order:
 
 - **Accepted** if some clause's filter is yes. The verdict names the first
-  such clause; if an earlier clause was undecided, it says so (the route
-  may take that clause, and so its actions, instead).
+  such clause; if an earlier clause or undecided term was undecided, it
+  says so (the route may take that clause or term, and so its actions,
+  instead): the undecided clauses before it in `EarlierUndecided`, and in
+  `Reasons` the `ReasonPeval` entries of the `Policy.Undecided` terms whose
+  `Index` is at most the clause's `Index` (within one attribute peval does
+  not record which flattened term came first, so an equal `Index` is
+  listed).
 - **Rejected** if every clause is no and `Policy.Undecided` is empty, and
   the policy has at least one clause or undecided term.
 - **No policy**: when `Policy.Clauses` and `Policy.Undecided` are both
@@ -285,7 +308,20 @@ of its conjuncts. Then, over the policy's clauses in order:
 
 - **Undecided** otherwise, with every reason: the undecided tests' kinds
   (path not a plain sequence, communities not known, `internet`, same-AS
-  repetition over a sequence) and each undecided term's `peval` `Why`.
+  repetition over a sequence, path regexp too expensive for the path, path
+  regexp unbound — `ReasonPathUnbound`, a caller's bug, since peval always
+  binds PeerAS) and each undecided term's `peval` `Why`.
+- **Unevaluable** (ruling R19): when `peval` cannot evaluate a policy
+  because it names `AS-ANY` or `RS-ANY` where rpsl cannot expand it (a
+  `*resolve.AnySetError`, such as an as-set whose `members:` is `AS-ANY`
+  inside an AS-path regexp; seen in RIPE: `AS1887:AS-Peerings:AS8501`), that
+  one report (that L/X, family and direction) has its `Unevaluable` set to
+  the error's text (also when it has no routes, R21), an empty `Policy`, and
+  every one of its routes is Undecided with the single reason
+  `ReasonUnevaluable` (`"unevaluable"`), whose `Why` is the error's text
+  (it names the term and the set), `Clause` and `Index` -1. The other
+  reports of the run are decided as usual. routecheck gives such a set no
+  meaning of its own; that is rpsl's to do.
 
 A clause is identified by its position in `Policy.Clauses` (`Pos`) and
 shown with peval's `Clause.Index`, the attribute's position: one `import:`
@@ -297,8 +333,9 @@ A Rejected verdict carries, per clause, the first test that said no
 text), and the sets the clause's filter could not find (`Missing()`), so a
 reject caused by a missing set reads as such (D4).
 
-A policy that `peval` cannot evaluate at all (a limit, a context error, a
-Source error) is an error for the whole run, never a verdict.
+A policy that `peval` cannot evaluate at all for any other reason (a
+limit, a context error, a Source error, a missing aut-num) is an error for
+the whole run, never a verdict.
 
 ### 6.5 The AS-path matcher (`pathre`)
 
@@ -308,8 +345,18 @@ Source error) is an error for the whole run, never a verdict.
 // absent and matches any AS). re's PeerAS must already be bound.
 func Match(re *policy.ASPathRE, sets map[types.SetName]resolve.ASNSet, path []types.ASN) (bool, error)
 
+// MatchWith is Match with options; Match is MatchWith with the zero ones.
+func MatchWith(re *policy.ASPathRE, sets map[types.SetName]resolve.ASNSet, path []types.ASN, o MatchOptions) (bool, error)
+
+type MatchOptions struct {
+	MaxWork int // steps; 0 means DefaultMaxWork
+}
+
+const DefaultMaxWork = 10_000_000
+
 var ErrNotSingleAS = errors.New("pathre: same-AS repetition over more than one AS")
 var ErrUnbound = errors.New("pathre: PeerAS not bound")
+var ErrTooExpensive = errors.New("pathre: regexp too expensive for this path")
 ```
 
 - Semantics as §3 quotes: alphabet = AS numbers; unanchored = any
@@ -320,13 +367,30 @@ var ErrUnbound = errors.New("pathre: PeerAS not bound")
 - `~` repetitions: the operand must be a single-AS atom (an AS, `.`, a
   class, a set); k repetitions match a run of k copies of one AS the atom
   accepts. Any other operand → `ErrNotSingleAS` (D5), which `verdict`
-  turns into undecided.
-- Algorithm (my call): position sets — for each sub-expression, the set of
-  end positions reachable from a start position, memoized on
-  (node, start). Cost is O(nodes × L²) for a path of L ASes, independent
-  of repetition counts (D6): a `{m,n}` with n > L+1 behaves as `{m,L+1}`
-  once the operand cannot match the empty path, and the builder handles
-  operands that can (a fixed point over end-position sets).
+  turns into undecided. The empty path holds no AS to make a run of, so
+  there every `~` repetition, of any operand, matches zero repetitions
+  only (or nothing when its minimum is above 0), and `ErrNotSingleAS` is
+  returned only on a non-empty path — as rpsl's routemodel does.
+- Algorithm (my call): position sets, evaluated on a set of starts at
+  once — for each sub-expression, the set of end positions reachable from
+  any position of a given start set; the unanchored search is one
+  evaluation of the regexp from every position. A repetition count is
+  clamped at L+1 for a path of L ASes, which keeps the answer (spec §10's
+  argument), and a repetition's layers stop as soon as one is empty or
+  equals the one before, so an operand matching the empty path is settled
+  in one step. Cost is O(size × ⌈(L+1)/64⌉) for a regexp without
+  repetitions; each repetition multiplies the cost of its operand by the
+  layers it runs, at most L+2, so nested repetitions whose layers keep
+  changing grow as L to the power of their nesting depth. It is not
+  independent of the counts below L+1.
+- Work budget: `MatchWith` counts steps (a 64-bit word of a position set
+  allocated, read or written; an AS tested against an atom item; a node
+  compiled), so time and allocation are both bounded, and stops with
+  `ErrTooExpensive` past `MaxWork` (`DefaultMaxWork` = 10,000,000 for
+  `Match`), which `verdict` turns into undecided
+  (`ReasonPathTooExpensive`). The default is about 19 times the most any
+  regexp needs among the routemodel vectors, the RFC examples and 40,000
+  generator regexps over paths of up to 255 ASes.
 - No `regexp` package, no backtracking; must never panic (fuzzed).
 
 ### 6.6 Hygiene
@@ -402,6 +466,7 @@ type Report struct {
 	Toward   types.ASN // the session's Peer: X for import, the neighbour for export
 	Policy   peval.Policy
 	NoPolicy bool           // no clause and no undecided term: no per-route verdicts
+	Unevaluable string      // R19/R21: peval's *resolve.AnySetError text, routes or not; "" otherwise
 	Routes   []RouteVerdict // in prefix order
 	Accepted, Rejected, Undecided int
 }
@@ -430,7 +495,9 @@ type Verdict struct {
 	Clause           int      // Accepted: Pos of the first clause that said yes
 	EarlierUndecided []int    // Accepted: Pos of undecided clauses before it
 	Fails            []Fail   // Rejected: one per clause
-	Reasons          []Reason // Undecided: every reason, deduplicated
+	Reasons          []Reason // Undecided: every reason, deduplicated;
+	                          // Accepted: the ReasonPeval reasons of undecided
+	                          // terms with Index at most the clause's Index
 }
 
 type Fail struct {
@@ -441,11 +508,14 @@ type Fail struct {
 
 type Reason struct {
 	Kind   string // ReasonPathNotSequence, ReasonCommsUnknown, ReasonCommInternet,
-	              // ReasonCommValue, ReasonSameASRun, or ReasonPeval
+	              // ReasonCommValue, ReasonSameASRun, ReasonPathTooExpensive,
+	              // ReasonPathUnbound, ReasonPeval, or ReasonUnevaluable
+	              // ("unevaluable", given by Check, never by Decide; R19)
 	Why    string // ReasonPeval: peval's Why text as given (a Why* constant,
-	              // possibly with a suffix: WhyProtocol and WhyInto add the protocol)
-	Clause int    // a filter reason: Pos in Policy.Clauses; ReasonPeval: -1
-	Index  int    // ReasonPeval: the Undecided term's attribute Index
+	              // possibly with a suffix: WhyProtocol and WhyInto add the protocol);
+	              // ReasonUnevaluable: the text of peval's error
+	Clause int    // a filter reason: Pos in Policy.Clauses; ReasonPeval and ReasonUnevaluable: -1
+	Index  int    // ReasonPeval: the Undecided term's attribute Index; ReasonUnevaluable: -1
 	Term   string
 }
 
@@ -565,7 +635,12 @@ alerts, required SHA pinning). Releases with a `release.sh` like mrt's.
   for OpenBGPD, BIRD 2 and GoBGP from their manuals, write it in the docs,
   and add one real capture from at least one of them to the fixtures if
   it can be made locally.
-- `local_as`'s value (§6.4): confirm against IRRToolSet's community code.
+- `local_as`'s value (§6.4): checked in Task 4 — IRRToolSet 5.1.3's
+  binaries know the keyword `no_export_subconfed` and not `local_as`
+  (`strings` on its rtconfig); rpsl's rtconfig maps `no_export_subconfed`
+  to 65535:65283 (0xFFFFFF03), RFC 1997's NO_EXPORT_SUBCONFED. IRRToolSet's
+  own numeric mapping was not read (no source at hand). Both spellings are
+  read as 0xFFFFFF03.
 - Whether mrt's `Routes` exposes everything session replay needs; it skips
   state changes, so `observe` reads `mrt.Records` itself for them. If an
   mrt change is needed, it is a separate mrt release, not a fork.

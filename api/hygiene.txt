@@ -1,0 +1,7 @@
+package hygiene
+var ErrAFIMismatch = errors.New(…)
+type Checker struct
+	VRPs *rpki.VRPs
+	Src resolve.Source
+func (*Checker) RPKI(r verdict.Route) *rpki.State
+func (*Checker) RouteObject(ctx context.Context, r verdict.Route, afi types.AFI) (*bool, error)

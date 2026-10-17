@@ -1,0 +1,11 @@
+routecheck: session mode: local AS64496, peer AS64511
+routes: testdata/session/nopolicy.mrt
+policy: -dump testdata/irr/golden-policy.txt
+
+ipv4.unicast
+  import, AS64496 from AS64511: no policy: AS64496 has no import term toward AS64511 in this family; its routes are not decided
+  export, AS64511 to AS64496: no policy: AS64511 has no export term toward AS64496 in this family; its routes are not decided
+
+ipv6.unicast
+  import, AS64496 from AS64511: no policy: AS64496 has no import term toward AS64511 in this family; its routes are not decided
+  export, AS64511 to AS64496: no policy: AS64511 has no export term toward AS64496 in this family; its routes are not decided

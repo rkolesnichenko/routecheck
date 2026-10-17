@@ -1,0 +1,17 @@
+# Dependabot keeps the actions in .github/workflows up to date, in one
+# grouped pull request a month. It does not watch the Go module (ruling R24):
+# every requirement (rpsl, rpsl/types, rpsl/resolve, mrt) is the author's
+# own, and scripts/check.sh pins their versions, so moving to a new rpsl or
+# mrt is a release decision, made by hand with that list in the same change.
+version: 2
+updates:
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "monthly"
+    groups:
+      actions:
+        patterns:
+          - "*"
+    commit-message:
+      prefix: "ci"

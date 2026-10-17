@@ -1,0 +1,90 @@
+name: ci
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+env:
+  # The 1.23.x job must not silently fetch a newer toolchain.
+  GOTOOLCHAIN: local
+
+jobs:
+  check:
+    name: check (go ${{ matrix.go }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        go: ["1.23.x", "stable"] # the go.mod floor and the latest release
+    steps:
+      # Actions are pinned by commit, which a moved tag cannot change.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
+        with:
+          go-version: ${{ matrix.go }}
+          cache-dependency-path: "**/go.sum"
+      - name: Install staticcheck and govulncheck
+        if: matrix.go == 'stable'
+        run: |
+          go install honnef.co/go/tools/cmd/staticcheck@v0.8.2   # 2026.2.2
+          go install golang.org/x/vuln/cmd/govulncheck@v1.8.0
+      # bgpq4 is the differential oracle for the set-expansion tests; with
+      # ROUTECHECK_ORACLES_REQUIRED a missing one fails them instead of skipping.
+      - name: Install bgpq4
+        run: sudo apt-get update && sudo apt-get install -y bgpq4
+      - name: scripts/check.sh
+        run: scripts/check.sh
+        env:
+          # A missing bgpq4 fails its differential tests here instead of
+          # skipping them.
+          ROUTECHECK_ORACLES_REQUIRED: "1"
+
+  # Every fuzz target for 30s, beside the check jobs rather than after them.
+  fuzz:
+    name: fuzz (shard ${{ matrix.shard }}/2)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
+        with:
+          go-version: stable
+          # fuzz.sh in the key gives this job a cache of its own: fuzz-
+          # instrumented builds are of no use to the race and coverage builds.
+          cache-dependency-path: |
+            **/go.sum
+            scripts/fuzz.sh
+      - name: scripts/fuzz.sh
+        run: scripts/fuzz.sh
+        env:
+          FUZZTIME: 30s
+          FUZZ_SHARD: ${{ matrix.shard }}/2
+
+  # The one context branch protection requires: it fails unless every job
+  # above succeeded. always() runs it when a needed job failed, which a plain
+  # needs: would skip (a skipped required check counts as passed).
+  ci-ok:
+    name: ci ok
+    needs: [check, fuzz]
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Every check and fuzz job succeeded
+        env:
+          RESULTS: ${{ join(needs.*.result, ' ') }}
+        run: |
+          echo "results: $RESULTS"
+          for r in $RESULTS; do [ "$r" = success ] || exit 1; done
