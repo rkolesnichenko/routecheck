@@ -202,6 +202,74 @@ pairs, not 50, so they are not comparable with the figures above.
     missing sets; it does not say a missing set caused the rejection.
   - Peak RSS: 1,356 MB with RIPE's dumps, 3,585 MB with all 32.
 
+### Measured, set limits
+
+These figures come from the run of 2026-10-18 at the commit that made a set over a limit an unevaluable
+report, on the same pinned files as the Measured block above, every registry loaded in precedence order,
+under the memory guard (8 GB cap, normal priority, `GOMAXPROCS=4`, `GOMEMLIMIT=6GiB`, `GOWORK=off`). The
+logs are kept by the maintainer and are not committed.
+
+#### `TestRealData`, 60 pairs, every registry (`.data/realdata-set-limits.log`)
+
+- 60 of 60 pairs checked: 0 timed out, 0 set too large, 0 other errors. In the previous every-registry run,
+  10 pairs stopped at the `MaxPrefixes` limit.
+- Wall time 3m45s, of which the checks took 38 s; the slowest pair, AS9086 from AS6762, took 10.593 s.
+- Peak RSS 6,482 MB, against 6,215 MB in the previous every-registry run
+  (`.data/realdata-every-registry.log`), where 10 pairs stopped early. The guard's 8 GB cap was not reached.
+- Over the 60 pairs: 4,540,048 observations. Import 3,787,990 accepted, 146 rejected, 2 undecided. Export
+  4,401,731 accepted, 47,317 rejected, 550,071 undecided (549,845 `unevaluable`, 226 `peval: peer router not
+  given`).
+- Unevaluable reports: 81, holding 549,847 routes (549,845 export + 2 import). All 81 are `MaxPrefixes`;
+  none hit MaxVisited, MaxDepth or MaxConjuncts. 79 are X's export reports (AS6762 `AS-SEABONE` 34, AS31133
+  19, AS9050 10, AS20485 8, AS8953 3, AS20771 2, AS15645 2, AS34984 1) and 2 are L's imports, one route each
+  (AS44032 from AS15645, `accept AS-UAIX`; AS42861 from AS6695, `accept AS-DECIX AND NOT <...>`). The test
+  counts a report once by its label and error text, so a report met in two pairs counts once while its routes
+  are summed over both (pairs 10 and 33 share X = AS34984).
+
+#### The 50 pairs checked before did not move (`.data/set-limits-same-pairs.log`)
+
+Over the 50 pairs both every-registry runs checked, every figure is identical and no pair differs: 2,640,901
+observations; import 2,108,348 accepted, 146 rejected, 0 undecided; export 1,249 reports (964 no policy),
+2,592,840 accepted, 47,317 rejected, 225 undecided; 3 import and 47,131 export rejections with a missing set;
+1,568,538 route-object answers of 2,108,128.
+
+#### The 10 pairs checked for the first time
+
+These are the 60-pair totals minus the 50-pair figures, both from the run above. 1,899,147 observations.
+Import 1,679,642 accepted, 0 rejected, 2 undecided (both `unevaluable`). Export 338 reports (212 no policy),
+1,808,891 accepted, 0 rejected, 549,846 undecided (549,845 `unevaluable`, 1 `peer router not given`). With
+every registry, these 10 pairs reject no export route: their export routes are accepted or unevaluable. The
+same 10 pairs with RIPE alone had 341,891 export rejections (389,413 - 47,522). How many of those 341,891
+became accepted and how many unevaluable was not measured route by route.
+
+#### RIPE alone against every registry, all 60 pairs (`.data/realdata-ripe-only.log`, `.data/realdata-set-limits.log`, `.data/set-limits-same-pairs.log`)
+
+| | RIPE only | every registry |
+|---|---|---|
+| export rejected | 389,413 | 47,317 |
+| export undecided | 226 | 550,071 |
+| export accepted | 4,608,749 | 4,401,731 |
+| export reports with a policy (of 1,587) | 405 | 411 |
+| import accepted / rejected / undecided | 3,787,992 / 146 / 0 | 3,787,990 / 146 / 2 |
+| L's observations with a route-object answer (of 3,787,507) | 918,363 | 2,820,473 |
+
+Peak RSS of the RIPE-only run: 4,741 MB.
+
+#### Hand checks (`.data/set-limits-checks.log`, `.data/set-limits-cli.log`)
+
+- Pair 2, AS9086 from AS6762, in the test log: AS6762's export reports naming `AS-SEABONE` (and its v6 set)
+  are unevaluable and its other export reports are decided. ipv4: 978,368 observations, import 978,368
+  accepted, export 44 neighbours (7 no policy), 1,160,277 accepted, 0 rejected, 400,748 undecided. ipv6:
+  216,236 observations, import no policy, export 31 neighbours (13 no policy), 20,767 accepted, 0 rejected,
+  47,597 undecided. The pair's export undecided are 448,345 `unevaluable`.
+- The command on that pair (`routecheck -local AS9086 -peer AS6762 -collector <AS6762's filtered RIB> -af
+  ipv4 -dump <the 32 dumps in precedence order>`, peak RSS 5,445 MB) exits 0; before this change it exited 3
+  (`.data/maxprefixes-cli-both.log`). It prints `import, AS9086 from AS6762: 978368 routes: 978368 accepted,
+  0 rejected, 0 undecided` and 44 export reports, 21 of them with `policy not evaluable, no route decided:
+  ... expansion exceeds MaxPrefixes (1048576): reached 1048960`, for example `export, AS6762 to AS174:
+  25622 routes: 0 accepted, 0 rejected, 25622 undecided`. Summed over its 44 export reports: 1,160,277
+  accepted, 0 rejected, 400,748 undecided, equal to the test's pair-2 ipv4 export.
+
 ## [0.2.1] - 2026-10-18
 
 ### Changed

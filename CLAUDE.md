@@ -311,15 +311,17 @@ in `.data/`, which is never committed.
   AS-TELFORT: 46,052 routes each, all one pair's: AS200184 from AS1136). The "missing set" tag names a clause's missing sets; it does
   not say a missing set caused the rejection. 341,891 of 0.2.0's 389,413 export rejections were
   in the 10 pairs that could not be checked with every registry (389,413 - 47,522), see
-  MaxPrefixes: 389k to 47k is not the registries' effect. Only the five regional registries
+  MaxPrefixes: 389k to 47k is not the registries' effect. With all 60 pairs checked, every registry
+  gives 47,317 export rejections; the 10 pairs reject nothing on export (accepted or unevaluable,
+  549,845 export routes unevaluable). Only the five regional registries
   check resource holders; RADB and the mirrors do not (1,843,733 of the 4,866,879 objects
   loaded, `.data/load-all.log`), so an answer resting on an object found only there rests on
   unchecked data. Which registry supplied each newly resolved object was not measured.
 - **MaxPrefixes.** With every registry loaded, 10 of 60 pairs have at least one filter over rpsl's default
   1,048,576 prefixes: 8 in X's export toward a large neighbour (AS174, AS1299, AS1273, AS9121), 2 in L's import
-  (`.data/over-limit-terms.log`). The command exits 3 when a checked direction holds the
-  over-limit filter; check the other direction (`.data/maxprefixes-cli-export.log`,
-  `.data/maxprefixes-cli.log`).
+  (`.data/over-limit-terms.log`). That report is unevaluable (R27) and the run goes on; no workaround is
+  needed and no flag raises the limit. All 60 pairs are checked: 81 unevaluable reports, 549,847 routes
+  (`.data/realdata-set-limits.log`).
 
 ## Process
 
