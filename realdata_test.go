@@ -80,8 +80,10 @@ import (
 // default 600s, covering the read of X's file and the decisions: the
 // largest real check, AS9086 from AS6762, took 61-69 s across the 0.1.0
 // runs, so a 60 s default would count it as a timeout and a default run
-// would not reproduce the published figures; 8.7 s in 0.2's). A timeout or a *resolve.SetTooLargeError is counted;
-// any other error fails the test. A policy peval cannot evaluate because it
+// would not reproduce the published figures; 8.7 s in 0.2's). A timeout is counted; any other error fails the test,
+// a *resolve.SetTooLargeError from Check included (ruling R27: a set over one of
+// rpsl's limits makes only its report unevaluable, tallied with the others
+// below; the error is still counted so the totals show it). A policy peval cannot evaluate because it
 // names AS-ANY or RS-ANY in filter position (ruling R19) is not an error:
 // its report's routes are Undecided with the reason "unevaluable", tallied
 // with the others and listed per pair. A set reaching AS-ANY named in an
@@ -924,6 +926,7 @@ func checkPair(tb testing.TB, reg *irrRegistry, vrps *rpki.VRPs, p pair, file st
 		return r
 	case errors.As(err, &tooLarge):
 		r.err, r.tooLarge = err, true
+		tb.Errorf("AS%d from AS%d: Check returned a SetTooLargeError, which R27 makes a report's: %v", p.L, p.X, err)
 		return r
 	default:
 		r.err = err
