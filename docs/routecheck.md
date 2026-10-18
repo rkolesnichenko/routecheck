@@ -192,8 +192,10 @@ with a hint that offers the capture's addresses as candidates.
    - the counts and the policy's clauses;
    - the sets missing from the registry ("missing from the registry: ...");
    - when some accepted routes passed a test through a set reaching AS-ANY, one
-     line naming those sets and counting those routes, whatever `-routes` asks
-     for: `accepted through a set reaching AS-ANY (any AS): AS1887:AS-PEERINGS:AS8501, 2 routes`;
+     line naming those sets and, in parentheses, the number of those routes
+     (each route counted once, however many of the sets it names), whatever
+     `-routes` asks for:
+     `accepted through a set reaching AS-ANY (any AS): AS1887:AS-PEERINGS:AS8501 (2 routes)`;
    - the Rejected routes, grouped by their first failing test, with up to 5
      examples per group;
    - the Undecided routes, grouped by reason;
@@ -332,8 +334,9 @@ Both spellings of 0xFFFFFF03 are read, in any case:
   denotes the whole IRR, which rpsl does not expand. That report's
   `Unevaluable` holds peval's error, and each of its routes is Undecided with
   the reason `unevaluable`. Other reports of the run are decided as usual.
-  routecheck gives the set no meaning of its own. The same set inside an AS-path regexp is not a limitation: it matches
-  any one AS, and an accepted route names it (see Verdicts). RIPE's
+  routecheck gives the set no meaning of its own. The same set inside an
+  AS-path regexp is not a limitation: it matches any one AS, and an accepted
+  route names it (see Verdicts). RIPE's
   `AS1887:AS-Peerings:AS8501` is such a set, named in AS8308's
   `import: from AS1887 ... accept <AS1887:AS-Peerings:AS8501$>`. On the data of
   2026-10-18 that clause accepted 2 of the 39 ipv4 routes seen from AS1887; the

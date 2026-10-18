@@ -8,6 +8,14 @@ a minor version may change the API.
 
 ## [Unreleased]
 
+### Changed
+
+- The text output's report-block line for routes accepted through a set
+  reaching AS-ANY gives the count in parentheses:
+  `accepted through a set reaching AS-ANY (any AS): AS1887:AS-PEERINGS:AS8501 (2 routes)`,
+  where 0.2.0 wrote `..., 2 routes`. The count is of routes, each once however
+  many of the sets it names. The JSON output is unchanged.
+
 ## [0.2.0] - 2026-10-18
 
 ### Changed

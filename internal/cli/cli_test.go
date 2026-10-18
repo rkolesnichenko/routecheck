@@ -744,8 +744,8 @@ source: TEST
 		file, counts, line string
 		exit               int
 	}{
-		{f, "1 route: 1 accepted, 0 rejected, 0 undecided", "AS-ANYSET, 1 route", exitOK},
-		{two, "3 routes: 2 accepted, 1 rejected, 0 undecided", "AS-ANYSET, 2 routes", exitRejected},
+		{f, "1 route: 1 accepted, 0 rejected, 0 undecided", "AS-ANYSET (1 route)", exitOK},
+		{two, "3 routes: 2 accepted, 1 rejected, 0 undecided", "AS-ANYSET (2 routes)", exitRejected},
 	} {
 		dflt := []string{"-local", "AS64496", "-peer", "AS64500", "-session", c.file, "-dump", reg, "-af", "ipv4", "-direction", "import"}
 		code, out, stderr = run(t, dflt...)
