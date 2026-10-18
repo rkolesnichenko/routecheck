@@ -89,6 +89,37 @@ func TestMatch(t *testing.T) {
 	}
 }
 
+// TestOracleAnySet holds the oracle to a set that reaches AS-ANY (Any is
+// true, List empty): any AS, whatever the case its name is written in.
+func TestOracleAnySet(t *testing.T) {
+	sets := Sets()
+	for _, c := range []struct {
+		re   string
+		path []types.ASN
+		want bool
+	}{
+		{"AS-ALL", p(64501), true},
+		{"AS-ALL", p(4200000000), true},
+		{"as-all", p(4200000000), true},
+		{"AS-ALL", nil, false},
+		{"^AS-ALL AS-ALL$", p(1, 2), true},
+		{"^AS-ALL AS-ALL$", p(1), false},
+		{"[^AS-ALL]", p(64501), false},
+		{"[AS-ALL]", p(7), true},
+		{"^AS-ALL~+$", p(7, 7, 7), true},
+		{"^AS-ALL~+$", p(7, 7, 8), false},
+	} {
+		re, err := policy.ParseASPathRegexp(c.re)
+		if err != nil {
+			t.Fatalf("parse %q: %v", c.re, err)
+		}
+		got, err := Match(re, sets, c.path)
+		if err != nil || got != c.want {
+			t.Errorf("Match(<%s>, %v) = %v, %v; want %v", c.re, c.path, got, err, c.want)
+		}
+	}
+}
+
 // TestCountsAreClamped shows that the translation never asks Go for more
 // repetitions than the path has ASes, plus one.
 func TestCountsAreClamped(t *testing.T) {
@@ -172,7 +203,7 @@ func TestGenParses(t *testing.T) {
 		}
 	}
 	for _, k := range []string{"same over an atom", "same over a wider operand", "count over 1000",
-		"AS-A", "AS-EMPTY", "AS-ANY", "AS-MISSING", "negated class", "alternation",
+		"AS-A", "AS-EMPTY", "AS-ALL", "AS-ANY", "AS-MISSING", "negated class", "alternation",
 		"anchor inside a group or branch"} {
 		if seen[k] < 50 {
 			t.Errorf("%s: %d of 20000 regexps, want at least 50", k, seen[k])
@@ -234,6 +265,9 @@ func TestSets(t *testing.T) {
 	a, _ := types.ParseSetName(SetA)
 	if !s[a].Has(64501) || !s[a].Has(64502) || s[a].Has(64500) {
 		t.Errorf("AS-A = %v", s[a])
+	}
+	if all := s[mustSet(SetAll)]; !all.Any() || !all.Has(4200000000) || all.Len() != 0 {
+		t.Errorf("AS-ALL = %v, want a set reaching AS-ANY", all)
 	}
 	if _, ok := s[mustSet(SetMissing)]; ok {
 		t.Error("AS-MISSING is in Sets")

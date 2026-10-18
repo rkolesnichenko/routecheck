@@ -49,9 +49,10 @@ func TestDefaultMaxWorkCovers(t *testing.T) {
 	sc.Scan() // the header
 	for sc.Scan() {
 		var v struct {
-			RE   string                 `json:"re"`
-			Sets map[string][]types.ASN `json:"sets"`
-			Path []types.ASN            `json:"path"`
+			RE      string                 `json:"re"`
+			Sets    map[string][]types.ASN `json:"sets"`
+			AnySets []string               `json:"any_sets"`
+			Path    []types.ASN            `json:"path"`
 		}
 		if err := json.Unmarshal(sc.Bytes(), &v); err != nil {
 			t.Fatal(err)
@@ -67,6 +68,13 @@ func TestDefaultMaxWorkCovers(t *testing.T) {
 				t.Fatal(err)
 			}
 			sets[n] = resolve.NewASNSet(members...)
+		}
+		for _, name := range v.AnySets {
+			n, err := types.ParseSetName(name)
+			if err != nil {
+				t.Fatal(err)
+			}
+			sets[n] = resolve.NewAnyASNSet()
 		}
 		try("routemodel", re, sets, v.Path)
 	}

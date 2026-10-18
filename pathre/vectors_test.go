@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"testing"
 
@@ -14,11 +15,60 @@ import (
 
 // vector is one line of testdata/routemodel-vectors.jsonl (see its README).
 type vector struct {
-	RE    string                 `json:"re"`
-	Sets  map[string][]types.ASN `json:"sets"`
-	Path  []types.ASN            `json:"path"`
-	Match *bool                  `json:"match"`
-	Err   string                 `json:"err"`
+	RE      string                 `json:"re"`
+	Sets    map[string][]types.ASN `json:"sets"`
+	AnySets []string               `json:"any_sets"` // sets that reach AS-ANY
+	Path    []types.ASN            `json:"path"`
+	Match   *bool                  `json:"match"`
+	Err     string                 `json:"err"`
+}
+
+// vectorsVersion is the format this reader knows: 2 added "any_sets".
+const vectorsVersion = 2
+
+// readHeader reads the vectors file's first line and returns the rpsl commit
+// it names. It refuses any format but vectorsVersion: an older file has no
+// "any_sets", and a set it leaves out would be read as matching nothing.
+func readHeader(line []byte) (commit string, err error) {
+	var header struct {
+		Version int    `json:"version"`
+		Commit  string `json:"rpsl_commit"`
+	}
+	if err := json.Unmarshal(line, &header); err != nil {
+		return "", err
+	}
+	if header.Version != vectorsVersion {
+		return "", fmt.Errorf("format version %d, want %d", header.Version, vectorsVersion)
+	}
+	if len(header.Commit) != 40 {
+		return "", fmt.Errorf("rpsl_commit %q is not a 40-digit commit", header.Commit)
+	}
+	return header.Commit, nil
+}
+
+// TestVectorsHeaderVersion holds readHeader to the format version: a file
+// without one, or of version 1, predates "any_sets", and reading it would
+// take a set that reaches AS-ANY for a set that matches nothing.
+func TestVectorsHeaderVersion(t *testing.T) {
+	const commit = "0123456789abcdef0123456789abcdef01234567"
+	for _, c := range []struct {
+		line string
+		ok   bool
+	}{
+		{`{"rpsl_commit":"` + commit + `"}`, false},
+		{`{"rpsl_commit":"` + commit + `","version":1}`, false},
+		{`{"rpsl_commit":"` + commit + `","version":3}`, false},
+		{`{"rpsl_commit":"0123","version":2}`, false},
+		{`{"version":2,"generator":"g","rpsl_commit":"` + commit + `","seed":1}`, true},
+	} {
+		got, err := readHeader([]byte(c.line))
+		switch {
+		case c.ok && (err != nil || got != commit):
+			t.Errorf("readHeader(%s) = %q, %v; want %q", c.line, got, err, commit)
+		case !c.ok && err == nil:
+			t.Errorf("readHeader(%s) = %q, nil; want an error", c.line, got)
+		}
+	}
 }
 
 // TestMatchesRoutemodel holds Match to oracle 1, rpsl's routemodel, on every
@@ -36,14 +86,12 @@ func TestMatchesRoutemodel(t *testing.T) {
 	if !sc.Scan() {
 		t.Fatal("no header line")
 	}
-	var header struct {
-		Commit string `json:"rpsl_commit"`
-	}
-	if err := json.Unmarshal(sc.Bytes(), &header); err != nil || len(header.Commit) != 40 {
+	commit, err := readHeader(sc.Bytes())
+	if err != nil {
 		t.Fatalf("header %q: %v", sc.Text(), err)
 	}
 	counts := map[string]int{}
-	n := 0
+	n, withAny := 0, 0
 	for line := 2; sc.Scan(); line++ {
 		n++
 		var v vector
@@ -54,6 +102,12 @@ func TestMatchesRoutemodel(t *testing.T) {
 		sets := map[types.SetName]resolve.ASNSet{}
 		for name, members := range v.Sets {
 			sets[setName(t, name)] = resolve.NewASNSet(members...)
+		}
+		for _, name := range v.AnySets {
+			sets[setName(t, name)] = resolve.NewAnyASNSet()
+		}
+		if len(v.AnySets) > 0 {
+			withAny++
 		}
 		got, err := pathre.Match(re, sets, v.Path)
 		switch {
@@ -87,5 +141,5 @@ func TestMatchesRoutemodel(t *testing.T) {
 	if n < 20000 {
 		t.Fatalf("%d vectors, want at least 20,000", n)
 	}
-	t.Logf("%d vectors (rpsl %s): %v", n, header.Commit[:12], counts)
+	t.Logf("%d vectors (rpsl %s), %d with any_sets: %v", n, commit[:12], withAny, counts)
 }

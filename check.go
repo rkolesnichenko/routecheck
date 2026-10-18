@@ -143,10 +143,12 @@ type Report struct {
 	// for this peer in this family), so there are no per-route verdicts.
 	NoPolicy bool
 	// Unevaluable is, when peval could not evaluate the policy because it
-	// names AS-ANY or RS-ANY where rpsl cannot expand it (a
-	// *resolve.AnySetError, ruling R19), the error's text; empty otherwise.
-	// Such a report has an empty Policy, and each of its routes, if it has
-	// any, is Undecided with the one reason verdict.ReasonUnevaluable.
+	// names AS-ANY or RS-ANY in filter position, where rpsl cannot expand
+	// it (a *resolve.AnySetError, ruling R19), the error's text; empty
+	// otherwise. Such a report has an empty Policy, and each of its routes,
+	// if it has any, is Undecided with the one reason
+	// verdict.ReasonUnevaluable. A set reaching AS-ANY in an AS-path regexp
+	// is evaluated instead (verdict.Verdict.AnySets).
 	Unevaluable string
 	// Routes are the verdicts, in prefix order (then path ID, then peer
 	// address in session mode, then path in collector mode).
@@ -197,13 +199,15 @@ const ctxEvery = 4096
 // and a given but mismatched router would make a term not apply where an
 // unset one leaves it Undecided.
 //
-// A policy peval cannot evaluate because it names AS-ANY or RS-ANY where
-// rpsl cannot expand it (a *resolve.AnySetError, such as an as-set whose
-// members are AS-ANY in an AS-path regexp) is not an error (ruling R19):
-// that one Report has an empty Policy, its Unevaluable holds the error's
-// text (whether or not it has routes), and every one of its routes is
-// Undecided with the single reason verdict.ReasonUnevaluable, whose Why is
-// that text.
+// A policy peval cannot evaluate because it names AS-ANY or RS-ANY in filter
+// position, where rpsl cannot expand it (a *resolve.AnySetError, such as
+// "accept AS-X" or "NOT AS-X" for an as-set whose members are AS-ANY), is
+// not an error (ruling R19): that one Report has an empty Policy, its
+// Unevaluable holds the error's text (whether or not it has routes), and
+// every one of its routes is Undecided with the single reason
+// verdict.ReasonUnevaluable, whose Why is that text. The same set in an
+// AS-path regexp is evaluated, as any one AS, and an Accepted verdict names
+// it in AnySets.
 //
 // Check returns an error, and no Results, for options it cannot use, an
 // input observe cannot read (a truncated stream, observe.ErrRIBNotPrePolicy),
@@ -476,9 +480,9 @@ func (f *famRun) report(s peval.Session, export bool, idx []int) (Report, error)
 	}
 	rep := Report{Toward: s.Peer, Policy: p}
 	if unevaluable {
-		// Ruling R19: the policy names AS-ANY or RS-ANY where rpsl cannot
-		// expand it; this report decides nothing, and says why, for each
-		// of its routes.
+		// Ruling R19: the policy names AS-ANY or RS-ANY in filter position,
+		// where rpsl cannot expand it; this report decides nothing, and
+		// says why, for each of its routes.
 		rep.Policy, rep.Unevaluable = peval.Policy{}, err.Error()
 		return f.unevaluable(rep, idx)
 	}

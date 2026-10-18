@@ -49,7 +49,9 @@ type MatchOptions struct {
 
 // Match reports whether re matches some contiguous part of path, under RFC
 // 2622 §5.4. sets gives the members of every as-set re names (AS-ANY is
-// absent and matches any AS). re's PeerAS must already be bound.
+// absent and matches any AS). A set whose ASNSet.Any is true, one that
+// reaches AS-ANY, matches any AS: Match asks only its Has, true for every
+// AS. re's PeerAS must already be bound.
 //
 // An as-set re names that is not in sets matches no AS (its absence is
 // already among the expansion's missing sets). Match returns ErrUnbound for

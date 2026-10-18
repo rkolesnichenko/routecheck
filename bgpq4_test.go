@@ -27,7 +27,7 @@ import (
 
 // The bgpq4 differential (spec §10): for a prefix-only policy, "from AS64500
 // accept S", verdict accepts a route exactly when its prefix is in bgpq4's
-// expansion of S. The registry is rpsl v0.29.0's bgpq4 snapshot
+// expansion of S. The registry is rpsl v0.30.0's bgpq4 snapshot
 // (testdata/irr/snapshot, synthetic), served to bgpq4 by rpsl's IRRd-compatible
 // server (resolve/irrdq, resolve/irrdserver) on a localhost port; the
 // policy, testdata/irr/policies.txt, is evaluated by peval over the same

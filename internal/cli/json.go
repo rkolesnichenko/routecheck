@@ -30,7 +30,9 @@ import (
 //     Index;
 //   - an outcome is "accepted", "rejected" or "undecided"; an RPKI state
 //     "valid", "invalid" or "not_found" (rpki.State's String);
-//   - communities are "hi:lo"; missing sets are their names;
+//   - communities are "hi:lo"; missing sets are their names; a verdict's
+//     AnySets is the names of the sets reaching AS-ANY that let the route
+//     through (Verdict.AnySets), null when none;
 //   - a report whose policy peval could not evaluate (ruling R19, R21) has
 //     Unevaluable set to the error's text (also with no routes), an empty
 //     Policy, and each of its routes one reason of Kind "unevaluable" whose

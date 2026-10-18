@@ -2,6 +2,8 @@ package pathre_test
 
 import (
 	"errors"
+	"slices"
+	"strings"
 	"testing"
 
 	"github.com/rkolesnichenko/routecheck/internal/reoracle"
@@ -59,18 +61,27 @@ func agree(t testing.TB, re *policy.ASPathRE, sets map[types.SetName]resolve.ASN
 
 // TestMatchesOracle holds Match to oracle 2 on 20,000 seeded random regexps,
 // each against three random paths. One regexp in about fifty has a count
-// over 1000, which only the clamped oracle can answer.
+// over 1000, which only the clamped oracle can answer. Some name AS-ALL, a
+// set reaching AS-ANY, some of those written "as-all": the same set.
 func TestMatchesOracle(t *testing.T) {
 	const regexps, paths = 20000, 3
 	g := reoracle.NewGen(20261016)
 	g.BigCounts = true
 	sets := reoracle.Sets()
+	all := setName(t, reoracle.SetAll)
 	counts := map[string]int{}
+	namingAll, namingLower := 0, 0 // regexps naming AS-ALL; those writing it "as-all"
 	for i := 0; i < regexps; i++ {
 		body := g.Regexp()
 		re, err := policy.ParseASPathRegexp(body)
 		if err != nil {
 			t.Fatalf("generated <%s> does not parse: %v", body, err)
+		}
+		if slices.Contains(re.SetNames(), all) { // SetNames are canonical: any case
+			namingAll++
+			if strings.Contains(body, strings.ToLower(reoracle.SetAll)) {
+				namingLower++
+			}
 		}
 		for j := 0; j < paths; j++ {
 			counts[agree(t, re, sets, g.Path(), pathre.MatchOptions{})]++
@@ -79,8 +90,13 @@ func TestMatchesOracle(t *testing.T) {
 			t.FailNow()
 		}
 	}
-	t.Logf("%d regexp × path pairs: %v", regexps*paths, counts)
+	t.Logf("%d regexp × path pairs: %v; %d regexps name AS-ALL, %d of them as \"as-all\"", regexps*paths, counts, namingAll, namingLower)
 	if counts["true"] < 10000 || counts["false"] < 10000 {
 		t.Errorf("answers %v: want at least 10,000 of each", counts)
+	}
+	// Seed 20261016 draws 3,021 regexps naming AS-ALL, 1,612 of them as
+	// "as-all"; the floors are about half.
+	if namingAll < 1500 || namingLower < 800 {
+		t.Errorf("%d regexps name AS-ALL, %d as \"as-all\": want at least 1,500 and 800", namingAll, namingLower)
 	}
 }

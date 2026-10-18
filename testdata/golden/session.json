@@ -66,6 +66,7 @@
           "Verdict": {
             "Clause": 0,
             "EarlierUndecided": null,
+            "AnySets": null,
             "Reasons": [
               {
                 "Kind": "path-not-sequence",
@@ -104,6 +105,7 @@
           "Verdict": {
             "Clause": 0,
             "EarlierUndecided": null,
+            "AnySets": null,
             "Reasons": null,
             "Outcome": "accepted",
             "Fails": null
@@ -133,6 +135,7 @@
           "Verdict": {
             "Clause": 1,
             "EarlierUndecided": null,
+            "AnySets": null,
             "Reasons": null,
             "Outcome": "accepted",
             "Fails": null
@@ -162,6 +165,7 @@
           "Verdict": {
             "Clause": 0,
             "EarlierUndecided": null,
+            "AnySets": null,
             "Reasons": null,
             "Outcome": "rejected",
             "Fails": [
@@ -202,6 +206,7 @@
           "Verdict": {
             "Clause": 0,
             "EarlierUndecided": null,
+            "AnySets": null,
             "Reasons": null,
             "Outcome": "rejected",
             "Fails": [
@@ -262,6 +267,7 @@
             "Verdict": {
               "Clause": 0,
               "EarlierUndecided": null,
+              "AnySets": null,
               "Reasons": null,
               "Outcome": "rejected",
               "Fails": [
@@ -298,6 +304,7 @@
             "Verdict": {
               "Clause": 0,
               "EarlierUndecided": null,
+              "AnySets": null,
               "Reasons": null,
               "Outcome": "accepted",
               "Fails": null
@@ -327,6 +334,7 @@
             "Verdict": {
               "Clause": 0,
               "EarlierUndecided": null,
+              "AnySets": null,
               "Reasons": null,
               "Outcome": "rejected",
               "Fails": [
@@ -362,6 +370,7 @@
             "Verdict": {
               "Clause": 0,
               "EarlierUndecided": null,
+              "AnySets": null,
               "Reasons": null,
               "Outcome": "rejected",
               "Fails": [
@@ -397,6 +406,7 @@
             "Verdict": {
               "Clause": 0,
               "EarlierUndecided": null,
+              "AnySets": null,
               "Reasons": null,
               "Outcome": "rejected",
               "Fails": [
@@ -475,6 +485,7 @@
           "Verdict": {
             "Clause": 0,
             "EarlierUndecided": null,
+            "AnySets": null,
             "Reasons": null,
             "Outcome": "accepted",
             "Fails": null
@@ -504,6 +515,7 @@
           "Verdict": {
             "Clause": 0,
             "EarlierUndecided": null,
+            "AnySets": null,
             "Reasons": null,
             "Outcome": "rejected",
             "Fails": [
@@ -559,6 +571,7 @@
             "Verdict": {
               "Clause": 0,
               "EarlierUndecided": null,
+              "AnySets": null,
               "Reasons": null,
               "Outcome": "accepted",
               "Fails": null
@@ -588,6 +601,7 @@
             "Verdict": {
               "Clause": 0,
               "EarlierUndecided": null,
+              "AnySets": null,
               "Reasons": null,
               "Outcome": "rejected",
               "Fails": [

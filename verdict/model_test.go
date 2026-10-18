@@ -39,12 +39,24 @@ import (
 // when the route's communities are not known, or a value that is internet or
 // does not read. The one thing it cannot do, a translation too large for Go's
 // regexp package, is not a §6.4 case: such a route is skipped and counted.
+//
+// The registry's AS-ALL reaches AS-ANY; oracle 2's generator names it in
+// regexps (any one AS there), never in filter position. Verdict.AnySets
+// names the sets of the accepting conjunct, a notion of the normal form, so
+// for an Accepted route the model finds the first conjunct of the accepting
+// clause's normal form that says yes by its own reading of each test, and
+// expects exactly the sets reaching AS-ANY its regexps name; each must also
+// be one the clause's regexps name as written. Any other outcome must have
+// nil AnySets.
 
 const (
 	modelPolicies = 2000 // seeds; a quarter under -race
 	modelRoutes   = 50   // routes per policy and family
 	modelLocal    = types.ASN(64496)
 	modelPeer     = reoracle.FirstAS
+	// modelAnySetsFloor is the fewest Accepted verdicts with AnySets over
+	// modelPolicies seeds (scaled down with the seeds drawn).
+	modelAnySetsFloor = 1250
 )
 
 // modelSeeds returns how many seeds the model test draws from n: a quarter
@@ -84,6 +96,8 @@ type modelStats struct {
 	reasons                                map[string]int // Undecided verdicts' reason kinds
 	earlier, pevalOnAccept                 int            // Accepted verdicts with EarlierUndecided, with Reasons
 	sameIndex                              int            // Accepted verdicts naming an undecided term of the clause's own Index
+	anySets                                int            // Accepted verdicts with AnySets
+	allSets                                int            // AS-ALL entries of the normal forms' PathMatch.Sets
 }
 
 func TestDecideModel(t *testing.T) {
@@ -117,6 +131,25 @@ func TestDecideModel(t *testing.T) {
 			if len(p.Clauses) == 0 && len(p.Undecided) == 0 {
 				st.noPolicy++
 			}
+			// Every AS-ALL the normal form's path tests carry reaches
+			// AS-ANY. Outcomes alone would not show a lost Any() where an
+			// optional atom (AS-ALL?) lets the path match without it.
+			for _, c := range p.Clauses {
+				for _, cj := range c.Filter.Conjuncts {
+					for _, m := range cj.Paths {
+						for name, s := range m.Sets {
+							if name.String() != reoracle.SetAll {
+								continue
+							}
+							st.allSets++
+							if !s.Any() {
+								t.Fatalf("seed %d, %s: %s in <%s> has Any() false\nclauses (normal form):\n%s\naut-num:\n%s",
+									seed, fam.name, name, m.RE, clauseTexts(p), aut)
+							}
+						}
+					}
+				}
+			}
 			nv := &naive{t: t, ctx: ctx, exp: resolve.Expander{Src: src}, routes: g.routes, memo: map[string]tri{}}
 			clauses := make([]*nnode, len(p.Clauses))
 			for i, c := range p.Clauses {
@@ -141,6 +174,9 @@ func TestDecideModel(t *testing.T) {
 					if len(got.Reasons) > 0 {
 						st.pevalOnAccept++
 					}
+					if got.AnySets != nil {
+						st.anySets++
+					}
 					for _, rs := range got.Reasons {
 						if rs.Index == p.Clauses[got.Clause].Index {
 							st.sameIndex++
@@ -163,8 +199,8 @@ func TestDecideModel(t *testing.T) {
 	}
 	t.Logf("%d seeds (%d policies, both families), %d decisions compared, %d skipped (oracle 2 too complex), %d (policy, family) pairs with no policy",
 		seeds, st.policies, st.decisions, st.skipped, st.noPolicy)
-	t.Logf("outcomes: Accepted %d (%d with EarlierUndecided, %d with peval Reasons, %d of them at the clause's own Index), Rejected %d, Undecided %d",
-		st.outcomes[verdict.Accepted], st.earlier, st.pevalOnAccept, st.sameIndex, st.outcomes[verdict.Rejected], st.outcomes[verdict.Undecided])
+	t.Logf("outcomes: Accepted %d (%d with EarlierUndecided, %d with peval Reasons, %d of them at the clause's own Index, %d with AnySets), Rejected %d, Undecided %d",
+		st.outcomes[verdict.Accepted], st.earlier, st.pevalOnAccept, st.sameIndex, st.anySets, st.outcomes[verdict.Rejected], st.outcomes[verdict.Undecided])
 	kinds := make([]string, 0, len(st.reasons))
 	for k := range st.reasons {
 		kinds = append(kinds, k)
@@ -191,6 +227,17 @@ func TestDecideModel(t *testing.T) {
 		if st.reasons[k] == 0 {
 			t.Errorf("no Undecided verdict gave reason %s", k)
 		}
+	}
+	// AnySets (a set reaching AS-ANY, AS-ALL, named in an accepting
+	// conjunct's regexps): 2,564 of 2,000 seeds' Accepted verdicts when
+	// calibrated, 668 of 500 seeds' under -race; the floor is about half,
+	// scaled to the seeds drawn.
+	if floor := modelAnySetsFloor * seeds / modelPolicies; st.anySets < floor {
+		t.Errorf("Accepted with AnySets %d times, under the floor of %d", st.anySets, floor)
+	}
+	t.Logf("%s entries checked for Any() in the normal forms' path tests: %d", reoracle.SetAll, st.allSets)
+	if st.allSets == 0 {
+		t.Errorf("no %s entry in any normal form's path tests: the Any() check above checked nothing", reoracle.SetAll)
 	}
 	if st.earlier == 0 || st.pevalOnAccept == 0 || st.sameIndex == 0 {
 		t.Errorf("Accepted with EarlierUndecided %d times, with peval Reasons %d times, at the clause's own Index %d times; want all three",
@@ -318,9 +365,15 @@ func (n *naive) compile(f policy.Filter) *nnode {
 				continue // the oracle reads AS-ANY itself
 			}
 			s, err := n.exp.ExpandAS(n.ctx, types.Ref(name))
+			var anySet *resolve.AnySetError
 			switch {
 			case errors.Is(err, resolve.ErrNotFound):
 				continue // a missing set matches no AS
+			case errors.As(err, &anySet):
+				// A set reaching AS-ANY, which ExpandAS refuses to list: in
+				// an AS-path regexp it is any one AS (rpsl's path-position
+				// meaning).
+				s = resolve.NewAnyASNSet()
 			case err != nil:
 				n.t.Fatalf("ExpandAS(%s): %v", name, err)
 			}
@@ -512,6 +565,10 @@ type naiveVerdict struct {
 	pevalUp  int   // Accepted: undecided terms at or before the clause's Index
 	noPolicy bool  // no clause and no undecided term
 	answers  []tri // per clause
+	// Accepted: the AnySets expected, of the first conjunct of the clause's
+	// normal form that the model itself finds says yes (conjAnySets), and
+	// every set reaching AS-ANY the clause's regexps name as written.
+	anySets, written []string
 }
 
 // decide applies §6.4's rules over the clauses' answers. skip reports a
@@ -539,6 +596,17 @@ func (n *naive) decide(p peval.Policy, clauses []*nnode, r verdict.Route) (v nai
 					v.pevalUp++
 				}
 			}
+			v.written = writtenAnySets(clauses[pos], nil)
+			slices.Sort(v.written)
+			v.written = slices.Compact(v.written)
+			var found bool
+			v.anySets, found = n.conjAnySets(p.Clauses[pos].Filter, r)
+			if n.skip {
+				return v, true
+			}
+			if !found {
+				v.anySets = []string{"(the model found no conjunct of the normal form that says yes)"}
+			}
 			return v, false
 		case tUnd:
 			v.earlier = append(v.earlier, pos)
@@ -560,6 +628,9 @@ func (v naiveVerdict) differs(got verdict.Verdict, p peval.Policy) string {
 	if got.Outcome != v.outcome {
 		return fmt.Sprintf("outcome: naive %d, verdict %d", v.outcome, got.Outcome)
 	}
+	if v.outcome != verdict.Accepted && got.AnySets != nil {
+		return fmt.Sprintf("%s with AnySets %q", got.Outcome, got.AnySets)
+	}
 	switch v.outcome {
 	case verdict.Accepted:
 		if got.Clause != v.clause {
@@ -574,6 +645,14 @@ func (v naiveVerdict) differs(got verdict.Verdict, p peval.Policy) string {
 		for _, r := range got.Reasons {
 			if r.Kind != verdict.ReasonPeval {
 				return fmt.Sprintf("Accepted with a %s reason", r.Kind)
+			}
+		}
+		if !slices.Equal(got.AnySets, v.anySets) || (got.AnySets == nil) != (v.anySets == nil) {
+			return fmt.Sprintf("AnySets: model %q, verdict %q", v.anySets, got.AnySets)
+		}
+		for _, name := range got.AnySets {
+			if _, ok := slices.BinarySearch(v.written, name); !ok {
+				return fmt.Sprintf("AnySets %q names %s, which no regexp of the clause as written names as a set reaching AS-ANY (%q)", got.AnySets, name, v.written)
 			}
 		}
 	case verdict.Rejected:
@@ -591,6 +670,94 @@ func (v naiveVerdict) differs(got verdict.Verdict, p peval.Policy) string {
 		}
 	}
 	return ""
+}
+
+// writtenAnySets appends the names of the sets reaching AS-ANY that the
+// regexps under nd name, canonical, unsorted.
+func writtenAnySets(nd *nnode, out []string) []string {
+	if nd.kind == nPath {
+		for _, name := range nd.re.SetNames() {
+			if s, ok := nd.sets[name]; ok && s.Any() {
+				out = append(out, name.String())
+			}
+		}
+	}
+	for _, k := range nd.kids {
+		out = writtenAnySets(k, out)
+	}
+	return out
+}
+
+// conjAnySets finds the first conjunct of f, peval's normal form of the
+// accepting clause, that says yes for r, by the model's own reading of each
+// test (a range's Contains, oracle 2, commTest), and returns the names of
+// the sets reaching AS-ANY its AS-path tests name, sorted, deduplicated,
+// nil when none. found is false when no conjunct says yes.
+func (n *naive) conjAnySets(f resolve.NormalFilter, r verdict.Route) (names []string, found bool) {
+	for _, cj := range f.Conjuncts {
+		ans := tNo
+		for _, rg := range cj.Prefixes.List() {
+			if rg.Contains(r.Prefix) {
+				ans = tYes
+				break
+			}
+		}
+		for _, rg := range cj.NotPrefixes.List() {
+			if rg.Contains(r.Prefix) {
+				ans = tNo
+			}
+		}
+		for _, m := range cj.Paths {
+			t := n.pathNF(m, r)
+			if m.Negated {
+				t = not3(t)
+			}
+			ans = and3(ans, t)
+		}
+		for _, m := range cj.Communities {
+			t := commTest(m.Test, r)
+			if m.Negated {
+				t = not3(t)
+			}
+			ans = and3(ans, t)
+		}
+		if ans != tYes {
+			continue
+		}
+		for _, m := range cj.Paths {
+			for _, name := range m.RE.SetNames() {
+				if s, ok := m.Sets[name]; ok && s.Any() {
+					names = append(names, name.String())
+				}
+			}
+		}
+		slices.Sort(names)
+		return slices.Compact(names), true
+	}
+	return nil, false
+}
+
+// pathNF is oracle 2's answer to a normal-form AS-path test, unflipped,
+// read over the test's own Sets and not memoized, so the normal form's sets
+// are not taken for the written filter's.
+func (n *naive) pathNF(m resolve.PathMatch, r verdict.Route) tri {
+	if !r.PathKnown {
+		return tUnd
+	}
+	ok, err := reoracle.Match(m.RE, m.Sets, r.Path)
+	switch {
+	case err == nil && ok:
+		return tYes
+	case err == nil:
+		return tNo
+	case errors.Is(err, reoracle.ErrNotSingleAS):
+		return tUnd
+	case errors.Is(err, reoracle.ErrTooComplex):
+		n.skip = true
+		return tUnd
+	}
+	n.t.Fatalf("oracle 2 on <%s>, path %v: %v", m.RE, r.Path, err)
+	return tUnd
 }
 
 // modelGen draws one seed's registry, aut-num and routes.
@@ -698,7 +865,8 @@ func (g *modelGen) setOp() string {
 func (g *modelGen) as() types.ASN { return reoracle.FirstAS + types.ASN(g.r.IntN(reoracle.NumASes)) }
 
 // world writes the registry: routes of the generator's ASes, AS-A and AS-B
-// (each may name the other, and a missing set), AS-EMPTY, RS-A and RS-B.
+// (each may name the other, and a missing set), AS-EMPTY, AS-ALL (members:
+// AS-ANY), RS-A and RS-B.
 // AS-MISSING and RS-MISSING are never written.
 func (g *modelGen) world() string {
 	var b strings.Builder
@@ -737,6 +905,9 @@ func (g *modelGen) world() string {
 	set("as-set", reoracle.SetA, asMembers(3, "AS-B", "AS-NOWHERE")...)
 	set("as-set", "AS-B", asMembers(2, reoracle.SetA)...)
 	set("as-set", reoracle.SetEmpty)
+	// AS-ALL reaches AS-ANY. The generator's regexps name it; filter
+	// position never does (peval would refuse the policy: R19).
+	set("as-set", reoracle.SetAll, [2]string{"members", reoracle.SetAny})
 	var rsA [][2]string
 	for range g.r.IntN(3) {
 		rsA = append(rsA, [2]string{"members", g.literal(false)})

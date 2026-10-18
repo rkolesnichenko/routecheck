@@ -432,6 +432,85 @@ func TestDecideConcurrent(t *testing.T) {
 	}
 }
 
+// TestDecideAnySetsPerConjunct: an Accepted verdict names the sets reaching
+// AS-ANY that the AS-path tests of the conjunct that accepted the route
+// name, either polarity, sorted and deduplicated; a set of another conjunct
+// of the clause is not named, and Rejected and Undecided name none.
+func TestDecideAnySetsPerConjunct(t *testing.T) {
+	v4 := types.AFIv4
+	all, a, zzz := setName(t, "AS-ALL"), setName(t, "AS-A"), setName(t, "AS-ZZZ")
+	sets := map[types.SetName]resolve.ASNSet{
+		all: resolve.NewAnyASNSet(),
+		a:   resolve.NewASNSet(64501),
+		zzz: resolve.NewAnyASNSet(),
+	}
+	path := func(negated bool, body string) resolve.PathMatch {
+		return resolve.PathMatch{Negated: negated, RE: parseRE(t, body), Sets: sets}
+	}
+	conj := func(prefixes string, paths ...resolve.PathMatch) resolve.Conjunct {
+		return resolve.Conjunct{Prefixes: normal(t, v4, prefixes).Conjuncts[0].Prefixes, Paths: paths}
+	}
+	filter := func(cs ...resolve.Conjunct) peval.Policy {
+		return pol(pclause(0, resolve.NormalFilter{Conjuncts: cs}))
+	}
+	twoConj := filter(conj("{10.0.0.0/8}", path(false, "AS-ALL$")), conj("{192.0.2.0/24}", path(false, "^AS64501")))
+	negated := filter(conj("ANY", path(true, "AS-ALL")))
+	withA := filter(conj("ANY", path(false, "AS-ALL"), path(false, "AS-A")))
+	several := filter(conj("ANY", path(false, "AS-ZZZ"), path(true, "AS-ALL AS-A AS-ALL"), path(false, "AS-ALL")))
+	lower := filter(conj("ANY", path(false, "as-all")))
+	withAnySets := func(v Verdict, names ...string) Verdict { v.AnySets = names; return v }
+	for _, c := range []struct {
+		name string
+		p    peval.Policy
+		r    Route
+		want Verdict
+	}{
+		{"conjunct naming the set", twoConj, route("10.0.0.0/8", 64501), withAnySets(accepted(0), "AS-ALL")},
+		{"other conjunct of the clause", twoConj, route("192.0.2.0/24", 64501), accepted(0)},
+		{"negated, empty path", negated, route("192.0.2.0/24"), withAnySets(accepted(0), "AS-ALL")},
+		{"beside a set not reaching AS-ANY", withA, route("192.0.2.0/24", 64501), withAnySets(accepted(0), "AS-ALL")},
+		{"canonical name, written in lower case", lower, route("192.0.2.0/24", 64501), withAnySets(accepted(0), "AS-ALL")},
+		{"sorted and deduplicated", several, route("192.0.2.0/24", 64501), withAnySets(accepted(0), "AS-ALL", "AS-ZZZ")},
+		{"negated, one-AS path: rejected", negated, route("192.0.2.0/24", 64501),
+			rejected(Fail{Clause: 0, Test: "NOT <AS-ALL>"})},
+		{"rejected", withA, route("192.0.2.0/24", 64502),
+			rejected(Fail{Clause: 0, Test: "<AS-A>"})},
+		{"rejected by both conjuncts", twoConj, route("198.51.100.0/24", 64501),
+			rejected(Fail{Clause: 0, Test: FailPrefixNotIn})},
+		{"undecided", withA, route("192.0.2.0/24", 64501).pathUnknown(),
+			undecided(Reason{Kind: ReasonPathNotSequence, Clause: 0, Term: "<AS-ALL>"},
+				Reason{Kind: ReasonPathNotSequence, Clause: 0, Term: "<AS-A>"})},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			cp := Compile(c.p)
+			got := cp.Decide(c.r)
+			if !sameVerdict(got, c.want) {
+				t.Fatalf("Decide =\n  %+v\nwant\n  %+v", got, c.want)
+			}
+			if got.AnySets != nil && len(got.AnySets) == 0 {
+				t.Errorf("AnySets is an empty slice, want nil")
+			}
+			// Each verdict's AnySets is its own: changing it changes no
+			// later verdict.
+			for i := range got.AnySets {
+				got.AnySets[i] = "AS-CHANGED"
+			}
+			if again := cp.Decide(c.r); !sameVerdict(again, c.want) {
+				t.Errorf("after changing the first verdict's AnySets, Decide =\n  %+v", again)
+			}
+		})
+	}
+}
+
+func setName(t testing.TB, s string) types.SetName {
+	t.Helper()
+	n, err := types.ParseSetName(s)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return n
+}
+
 // TestCompileBuildsIndexOnce is review focus 4: one clause of 100,000
 // ranges decided for 100,000 routes builds its prefix index once.
 func TestCompileBuildsIndexOnce(t *testing.T) {

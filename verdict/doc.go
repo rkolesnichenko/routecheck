@@ -23,9 +23,16 @@
 // so it indicates a bug in the caller; it is reported rather than taken as
 // a no.
 //
+// A set reaching AS-ANY named in an AS-path regexp (rpsl's resolve.ASNSet
+// with Any true) is any one AS there. An Accepted verdict names, in AnySets,
+// those sets that the AS-path tests of the conjunct that accepted the route
+// name, either polarity, so a reader sees that the path test let any AS
+// through.
+//
 // ReasonUnevaluable is never given by Decide: routecheck.Check gives it to
 // every route of a report whose policy peval could not evaluate because it
-// names AS-ANY or RS-ANY where rpsl cannot expand it (ruling R19).
+// names AS-ANY or RS-ANY in filter position, where rpsl cannot expand it
+// (ruling R19).
 //
 // Compile prepares a policy once for many routes: an index of each
 // conjunct's prefix ranges (a path-compressed binary trie per family), the

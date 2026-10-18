@@ -607,12 +607,13 @@ func TestDumpPrecedence(t *testing.T) {
 	}
 }
 
-// TestUnevaluable: a report whose policy names a set that is AS-ANY
-// (ruling R19) reads as not evaluable in text, every route undecided with
-// that reason, and as the reason kind "unevaluable" in JSON; exit 0.
+// TestUnevaluable: a report whose policy names, in filter position, a set
+// that reaches AS-ANY (ruling R19) reads as not evaluable in text, every
+// route undecided with that reason, and as the reason kind "unevaluable" in
+// JSON; exit 0.
 func TestUnevaluable(t *testing.T) {
 	reg := write(t, "reg.txt", []byte(`aut-num: AS64496
-import: from AS64500 accept <^AS64500 AS-ANYSET$>
+import: from AS64500 accept AS-ANYSET
 source: TEST
 
 aut-num: AS64500
@@ -650,7 +651,7 @@ source: TEST
 	// capture has none) still says so, in text and in JSON.
 	reg6 := write(t, "reg6.txt", []byte(`aut-num: AS64496
 import: from AS64500 accept AS64500
-mp-import: afi ipv6.unicast from AS64500 accept <^AS64500 AS-ANYSET$>
+mp-import: afi ipv6.unicast from AS64500 accept AS-ANYSET
 source: TEST
 
 aut-num: AS64500
@@ -680,6 +681,102 @@ source: TEST
 	wantContains(t, "no routes, json", compact(t, out), `"Unevaluable":"peval: `, `"Unevaluable":""`)
 	if !strings.Contains(out, "AS-ANYSET") {
 		t.Errorf("no routes, json: the set is not named:\n%s", out)
+	}
+}
+
+// TestAnySetPath: a set reaching AS-ANY named in an AS-path regexp is
+// evaluated; the accepted route says which set let any AS through, in text
+// and in JSON (Verdict.AnySets).
+func TestAnySetPath(t *testing.T) {
+	reg := write(t, "reg.txt", []byte(`aut-num: AS64496
+import: from AS64500 accept <^AS64500 AS-ANYSET$>
+source: TEST
+
+aut-num: AS64500
+export: to AS64496 announce AS64500
+source: TEST
+
+as-set: AS-ANYSET
+members: AS-ANY
+source: TEST
+
+route: 198.51.100.0/24
+origin: AS64501
+source: TEST
+`))
+	f := write(t, "one.mrt", gUpdate(gAt(1), gX, gL, "192.0.2.1", "192.0.2.2", nil, gNLRI("198.51.100.0/24"), gAttrs("192.0.2.1", gSeq(gX, gY))))
+	args := []string{"-local", "AS64496", "-peer", "AS64500", "-session", f, "-dump", reg, "-af", "ipv4", "-direction", "import"}
+	code, out, stderr := run(t, append(slices.Clone(args), "-routes", "all")...)
+	if code != exitOK {
+		t.Fatalf("exit %d; stderr %s\n%s", code, stderr, out)
+	}
+	wantContains(t, "text", out,
+		"import, AS64496 from AS64500: 1 route: 1 accepted, 0 rejected, 0 undecided",
+		"accepted by clause 1 (AS-ANYSET reaches AS-ANY: any AS)")
+	code, out, stderr = run(t, append(slices.Clone(args), "-format", "json")...)
+	if code != exitOK {
+		t.Fatalf("json: exit %d; stderr %s\n%s", code, stderr, out)
+	}
+	dec := json.NewDecoder(strings.NewReader(out))
+	dec.DisallowUnknownFields()
+	var view []jsonResult
+	if err := dec.Decode(&view); err != nil {
+		t.Fatalf("does not decode into the view: %v", err)
+	}
+	if len(view) != 1 || view[0].Import == nil || len(view[0].Import.Routes) != 1 {
+		t.Fatalf("view: %+v", view)
+	}
+	if got := view[0].Import.Routes[0].Verdict.AnySets; !slices.Equal(got, []string{"AS-ANYSET"}) {
+		t.Errorf("decoded AnySets %q, want [AS-ANYSET]", got)
+	}
+	wantContains(t, "json", compact(t, out), `"AnySets":["AS-ANYSET"]`)
+	if strings.Contains(out, "accepted through a set") {
+		t.Errorf("json: holds the text summary line:\n%s", out)
+	}
+
+	// With the default -routes (none), no route line is printed, and the
+	// report block says how many routes a set reaching AS-ANY let through:
+	// two of three here (the third, X alone, is rejected).
+	two := write(t, "two.mrt", slices.Concat(
+		gUpdate(gAt(1), gX, gL, "192.0.2.1", "192.0.2.2", nil, gNLRI("198.51.100.0/24", "198.51.101.0/24"), gAttrs("192.0.2.1", gSeq(gX, gY))),
+		gUpdate(gAt(2), gX, gL, "192.0.2.1", "192.0.2.2", nil, gNLRI("192.0.2.0/24"), gAttrs("192.0.2.1", gSeq(gX)))))
+	for _, c := range []struct {
+		file, counts, line string
+		exit               int
+	}{
+		{f, "1 route: 1 accepted, 0 rejected, 0 undecided", "AS-ANYSET, 1 route", exitOK},
+		{two, "3 routes: 2 accepted, 1 rejected, 0 undecided", "AS-ANYSET, 2 routes", exitRejected},
+	} {
+		dflt := []string{"-local", "AS64496", "-peer", "AS64500", "-session", c.file, "-dump", reg, "-af", "ipv4", "-direction", "import"}
+		code, out, stderr = run(t, dflt...)
+		if code != c.exit {
+			t.Fatalf("default -routes: exit %d, want %d; stderr %s\n%s", code, c.exit, stderr, out)
+		}
+		wantContains(t, "default -routes", out,
+			"import, AS64496 from AS64500: "+c.counts+"\n    clause 1 (import attribute 1): ",
+			"\n    accepted through a set reaching AS-ANY (any AS): "+c.line+"\n")
+		if strings.Contains(out, "accepted by clause") || strings.Contains(out, "routes (") {
+			t.Errorf("default -routes: a route line is printed:\n%s", out)
+		}
+	}
+}
+
+// TestOutcomeAnySets: one set reaches, several reach, and the sets come
+// before any "after undecided" part.
+func TestOutcomeAnySets(t *testing.T) {
+	for _, c := range []struct {
+		v    verdict.Verdict
+		want string
+	}{
+		{verdict.Verdict{Outcome: verdict.Accepted, Clause: 1, AnySets: []string{"AS-X"}},
+			"accepted by clause 2 (AS-X reaches AS-ANY: any AS)"},
+		{verdict.Verdict{Outcome: verdict.Accepted, Clause: 1, AnySets: []string{"AS-X", "AS-Y"}, EarlierUndecided: []int{0}},
+			"accepted by clause 2 (AS-X, AS-Y reach AS-ANY: any AS), after undecided clause 1"},
+		{verdict.Verdict{Outcome: verdict.Accepted}, "accepted by clause 1"},
+	} {
+		if got := outcome("import", c.v); got != c.want {
+			t.Errorf("outcome(%+v) = %q, want %q", c.v, got, c.want)
+		}
 	}
 }
 
