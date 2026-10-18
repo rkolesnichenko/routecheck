@@ -326,13 +326,13 @@ in `.data/`, which is never committed.
   needed; `-max-prefixes N` lifts it and the default stays rpsl's. All 60 pairs are checked at rpsl's default limit: 82 report instances, 81 distinct reports
   (AS34984's export to AS9121 appears in pairs 10 and 33): 80 export, in 9 pairs; 2 import, in 2 pairs (one pair, AS44032 from AS15645, has both, so 9 + 2 - 1 = 10);
   549,847 routes (`.data/realdata-set-limits.log`, `.data/set-limits-pairs-unevaluable.log`).
-  Cost of `-max-prefixes` (this machine, peak RSS under the 8 GB guard, 2026-10-18): AS9086 from AS6762
+  Cost of `-max-prefixes` (Apple M3 Max, 36 GiB, peak RSS under the 8 GB guard, 2026-10-18): AS9086 from AS6762
   completes at 2,097,152 (6,511 MB, vs 5,848 MB at the default); 4,194,304 was stopped by the guard at
   8,411 MB; 8M and 16M not tried; AS6762's ipv4 export (`AS-SEABONE`) is still over at 2,097,152.
   Every-registry run at 2,097,152 (`.data/realdata-max-prefixes.log`): 24 unevaluable reports (from 81), 3 pairs,
   400,751 routes (from 549,847); of the 149,096 decided, 89,701 accepted and 59,395 rejected, all 59,395 "with a
   missing set in a failing clause" (rejections against incomplete filters, not proven violations); the 50
-  other pairs are identical (`.data/max-prefixes-same-pairs.log`); 6,565 MB, 4m38s (6,482 MB, 3m45s).
+  other pairs are identical but for the timing header (`.data/max-prefixes-same-pairs.log`); 6,565 MB, 4m38s (6,482 MB, 3m45s).
   Unmeasured: limits between 2,097,152 and 4,194,304, above 4,194,304, AS-SEABONE's full size.
 
 ## Process

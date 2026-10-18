@@ -36,7 +36,7 @@ const synopsis = `routecheck -peer AS (-session FILE [-local AS] | -collector FI
            (-dump FILE | -irrd HOST:PORT [-sources LIST]) [-policy FILE]
            [-vrps FILE] [-af ipv4|ipv6|both] [-direction import|export|both]
            [-peer-addr IP] [-at TIME] [-pre-policy]
-           [-local-rtr IP] [-peer-rtr IP] [-format text|json]
+           [-local-rtr IP] [-peer-rtr IP] [-max-prefixes N] [-format text|json]
            [-routes all|rejected|undecided|none]`
 
 const about = `Checks the routes a BGP neighbour X (-peer) really announces against the

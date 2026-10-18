@@ -19,7 +19,7 @@ a minor version may change the API.
 
 These figures come from the runs of 2026-10-18 on the branch that adds `-max-prefixes`, on the same pinned
 files as v0.3.0's measurements, every registry loaded in precedence order, under the memory guard (8 GB cap,
-normal priority, `GOMAXPROCS=4`, `GOMEMLIMIT=6GiB`, one run at a time). Memory is this machine's peak RSS.
+normal priority, `GOMAXPROCS=4`, `GOMEMLIMIT=6GiB`, one run at a time). Memory is peak RSS on an Apple M3 Max (darwin/arm64) with 36 GiB of memory (`.data/max-prefixes-machine.log`).
 The default stays rpsl's 1,048,576. The logs are kept by the maintainer and are not committed.
 
 #### The command on AS9086 from AS6762, `-af both`, no `-vrps`
@@ -27,7 +27,7 @@ The default stays rpsl's 1,048,576. The logs are kept by the maintainer and are 
 | `-max-prefixes` | result | peak RSS | time | reports over MaxPrefixes | AS6762's export, both families (75 reports) | log |
 |---|---|---|---|---|---|---|
 | absent (1,048,576) | exit 0 | 5,848 MB | 47 s | 34 | 1,181,044 accepted / 0 rejected / 448,345 undecided | `.data/max-prefixes-cli-default.log` |
-| 2,097,152 | exit 1 | 6,511 MB | 63 s | 21 | 1,194,673 accepted / 33,968 rejected / 400,748 undecided | `.data/max-prefixes-cli-2097152.log` |
+| 2,097,152 | exit 1 (routes rejected) | 6,511 MB | 63 s | 21 | 1,194,673 accepted / 33,968 rejected / 400,748 undecided | `.data/max-prefixes-cli-2097152.log` |
 | 4,194,304 | stopped by the guard (over 8 GB) | 8,411 MB when stopped | 82 s | not known | not known | `.data/max-prefixes-cli-4194304.log` |
 
 - 8,388,608 and 16,777,216 were not tried, after the guard stopped 4,194,304.

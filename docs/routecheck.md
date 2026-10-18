@@ -24,7 +24,7 @@ routecheck -peer AS (-session FILE [-local AS] | -collector FILE -local AS)
            (-dump FILE | -irrd HOST:PORT [-sources LIST]) [-policy FILE]
            [-vrps FILE] [-af ipv4|ipv6|both] [-direction import|export|both]
            [-peer-addr IP] [-at TIME] [-pre-policy]
-           [-local-rtr IP] [-peer-rtr IP] [-format text|json]
+           [-local-rtr IP] [-peer-rtr IP] [-max-prefixes N] [-format text|json]
            [-routes all|rejected|undecided|none]
 ```
 
@@ -46,7 +46,7 @@ before any other argument. A stray argument is refused with exit status 2.
 | `-vrps FILE` | A VRP JSON file in rpki-client or Routinator format. With it, each route gets an RPKI origin-validation state. |
 | `-af` | `ipv4`, `ipv6` or `both` (the default): the unicast families checked. Routes of any other family are dropped and counted. |
 | `-direction` | `import` (L's policy), `export` (X's policy) or `both` (the default). |
-| `-max-prefixes N` | The most prefixes one set's expansion may reach (rpsl's `MaxPrefixes`). The default is rpsl's limit. A report over it is unevaluable (R27); raising N lets it be decided at the memory cost given under "Known limitations". N must be a positive integer. |
+| `-max-prefixes N` | The most prefixes one set's expansion may reach (rpsl's `MaxPrefixes`). The default is rpsl's limit (1,048,576 in rpsl v0.30.0). A report over it is unevaluable (R27); raising N lets it be decided at the memory cost given under "Known limitations". N must be a positive integer. |
 | `-peer-addr IP` | Session mode only. Read only the capture's records that have this peer address. |
 | `-at TIME` | Session mode only. Report the state at this RFC 3339 time, such as `2026-10-16T12:00:00Z`. Records at that time are included. The default is the end of the capture. |
 | `-pre-policy` | Session mode only. States that the RIB dumps in the input are X's Adj-RIB-In before import policy (see D2 below). |
@@ -439,13 +439,13 @@ Both spellings of 0xFFFFFF03 are read, in any case:
   - **`-max-prefixes N` raises the limit, and memory pays for it.** Absent, the
     limit is rpsl's 1,048,576 (the user's decision: the default stays). The cost
     is measured on one pair, AS9086 from AS6762, every registry, the command
-    with `-af both` and without `-vrps`. Memory is this machine's peak RSS under
+    with `-af both` and without `-vrps`. Memory is peak RSS on an Apple M3 Max (darwin/arm64) with 36 GiB of memory (`.data/max-prefixes-machine.log`), under
     the memory guard's 8 GB cap, measured 2026-10-18:
 
     | `-max-prefixes` | result | peak RSS | time | reports over MaxPrefixes | AS6762's export, both families (75 reports) | log |
     |---|---|---|---|---|---|---|
     | absent (1,048,576) | exit 0 | 5,848 MB | 47 s | 34 | 1,181,044 accepted / 0 rejected / 448,345 undecided | `.data/max-prefixes-cli-default.log` |
-    | 2,097,152 | exit 1 | 6,511 MB | 63 s | 21 | 1,194,673 accepted / 33,968 rejected / 400,748 undecided | `.data/max-prefixes-cli-2097152.log` |
+    | 2,097,152 | exit 1 (routes rejected) | 6,511 MB | 63 s | 21 | 1,194,673 accepted / 33,968 rejected / 400,748 undecided | `.data/max-prefixes-cli-2097152.log` |
     | 4,194,304 | stopped by the guard (over 8 GB) | 8,411 MB when stopped | 82 s | not known | not known | `.data/max-prefixes-cli-4194304.log` |
 
     The import line is the same in both completed runs (978,368 accepted, 0
@@ -458,9 +458,10 @@ Both spellings of 0xFFFFFF03 are read, in any case:
     ipv6 as a whole (31 reports, 68,364 routes) is 34,396 accepted (20,767 +
     13,629), 33,968 rejected and 0 undecided (34,396 + 33,968 = 68,364). The
     reports over the limit: 34 = 21 + 13 (ipv4 + ipv6); reports: 75 = 44 + 31. The 21 ipv4
-    reports, all naming `AS-SEABONE`, stay over ("reached 2,097,154"). Nothing up
-    to 4,194,304 decided AS6762's ipv4 export on this machine; 4,194,304 needs
-    more than 8 GB. 8,388,608 and 16,777,216 were not tried.
+    reports, all naming `AS-SEABONE`, stay over ("reached 2,097,154"). At 4,194,304
+    the memory guard stopped the run (over 8 GB), so that export was not decided
+    there either; values between 2,097,152 and 4,194,304 were not tried, nor
+    8,388,608 and 16,777,216.
   - **The every-registry run at 2,097,152** (`.data/realdata-max-prefixes.log`,
     `ROUTECHECK_REALDATA_MAX_PREFIXES`): PASS, 60 of 60 pairs checked, 0 set too
     large. Wall time 4m38s (3m45s at the default), peak RSS 6,565 MB (6,482 MB).
