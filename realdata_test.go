@@ -105,6 +105,10 @@ import (
 // selectable, the load time and the heap in use after a GC) and returns before
 // reading VRPs or RIBs.
 //
+// ROUTECHECK_REALDATA_MAX_PREFIXES (a positive integer; unset means rpsl's
+// default) sets Expander.MaxPrefixes, as the command's -max-prefixes does; the
+// value is logged in a limits: line before the pairs.
+//
 // ROUTECHECK_REALDATA_SAMPLE (default 50), ROUTECHECK_REALDATA_REGEXP_SAMPLE
 // (default 10: the pairs added whose import term has an AS-path regexp,
 // which the plain sample may not draw at all) and ROUTECHECK_REALDATA_SEED
@@ -115,6 +119,10 @@ func TestRealData(t *testing.T) {
 	sample := envInt(t, "ROUTECHECK_REALDATA_SAMPLE", 50)
 	reSample := envInt(t, "ROUTECHECK_REALDATA_REGEXP_SAMPLE", 10)
 	seed := envInt(t, "ROUTECHECK_REALDATA_SEED", 1)
+	maxPrefixes, err := parseMaxPrefixes(os.Getenv("ROUTECHECK_REALDATA_MAX_PREFIXES"))
+	if err != nil {
+		t.Fatal(err)
+	}
 	start := time.Now()
 
 	t0 := time.Now()
@@ -126,6 +134,11 @@ func TestRealData(t *testing.T) {
 	}
 	t.Logf("registry: %d objects from %d dumps of %d registries (%s), sources in precedence order %s, objects per source %s; %d RIPE aut-nums, %d naming a literal import peer (%d with an AS-path regexp toward one), in %s (heap in use %s)",
 		reg.objects, len(rd.dumps), len(reg.registries), strings.Join(reg.registries, ","), strings.Join(reg.sources, ","), strings.Join(per, ", "), len(reg.autnums), len(reg.imports), len(reg.reImports), loadTime, heapInUse())
+	if maxPrefixes == 0 {
+		t.Logf("limits: MaxPrefixes rpsl's default")
+	} else {
+		t.Logf("limits: MaxPrefixes %d", maxPrefixes)
+	}
 	if os.Getenv("ROUTECHECK_REALDATA_LOAD_ONLY") == "1" {
 		runtime.GC()
 		t.Logf("LOAD: registries %s; sources %s; objects per source %s; %d RIPE aut-nums selectable; loaded in %s; heap in use after GC %s",
@@ -187,7 +200,7 @@ func TestRealData(t *testing.T) {
 	tot := totals{reasons: [2]tally{{}, {}}, tooExp: tally{}, unevaluable: tally{}, anySets: tally{},
 		missingSets: [2]tally{{}, {}}, routeObj: [2]tally{{}, {}}}
 	for i, p := range pairs {
-		r := checkPair(t, reg, vrps, p, files[bgp.ASN(p.X)], timeout)
+		r := checkPair(t, reg, vrps, p, files[bgp.ASN(p.X)], timeout, resolve.Expander{MaxPrefixes: maxPrefixes})
 		r.log(t, i+1, len(pairs))
 		if r.err == nil && seen.unclean == 0 && r.through != seen.all[bgp.ASN(p.X)] {
 			t.Errorf("AS%d from AS%d: Through %d, but pass 1 counted %d entries through AS%d", p.L, p.X, r.through, seen.all[bgp.ASN(p.X)], p.X)
@@ -906,12 +919,12 @@ type pairResult struct {
 }
 
 // checkPair runs one collector-mode Check and summarizes it.
-func checkPair(tb testing.TB, reg *irrRegistry, vrps *rpki.VRPs, p pair, file string, timeout time.Duration) pairResult {
+func checkPair(tb testing.TB, reg *irrRegistry, vrps *rpki.VRPs, p pair, file string, timeout time.Duration, exp resolve.Expander) pairResult {
 	tb.Helper()
 	r := pairResult{p: p, reasons: [2]tally{{}, {}}, tooExp: tally{}, unevaluable: tally{}, anySets: tally{},
 		missingSets: [2]tally{{}, {}}, routeObj: [2]tally{{}, {}}}
 	counter := &countingSource{Source: reg.src}
-	c := &routecheck.Checker{Eval: peval.Evaluator{Src: reg.src}, Routes: counter}
+	c := &routecheck.Checker{Eval: peval.Evaluator{Src: reg.src, Expander: exp}, Routes: counter}
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	start := time.Now()
 	res, err := c.Check(ctx, routecheck.ModeCollector, readMRT(file), routecheck.Options{Local: p.L, Peer: p.X, VRPs: vrps})
@@ -1344,6 +1357,20 @@ func sizeOf(name string) string {
 	return fmt.Sprintf("%d MB", st.Size()>>20)
 }
 
+// parseMaxPrefixes reads ROUTECHECK_REALDATA_MAX_PREFIXES: "" is 0 (rpsl's
+// default), otherwise a positive integer (rpsl treats a negative limit as
+// unlimited, so none is accepted).
+func parseMaxPrefixes(s string) (int, error) {
+	if s == "" {
+		return 0, nil
+	}
+	n, err := strconv.Atoi(s)
+	if err != nil || n <= 0 {
+		return 0, fmt.Errorf("ROUTECHECK_REALDATA_MAX_PREFIXES=%q is not a positive number of prefixes", s)
+	}
+	return n, nil
+}
+
 func envInt(tb testing.TB, name string, def int) int {
 	tb.Helper()
 	s := os.Getenv(name)
@@ -1368,4 +1395,31 @@ func envDuration(tb testing.TB, name string, def time.Duration) time.Duration {
 		tb.Fatalf("%s=%q is not a duration such as 60s", name, s)
 	}
 	return d
+}
+
+func TestParseMaxPrefixes(t *testing.T) {
+	for _, tc := range []struct {
+		in   string
+		want int
+		bad  bool
+	}{
+		{"", 0, false},
+		{"2097152", 2097152, false},
+		{"1099511627776", 1099511627776, false},
+		{"0", 0, true},
+		{"-1", 0, true},
+		{"x", 0, true},
+		{"1.5", 0, true},
+	} {
+		got, err := parseMaxPrefixes(tc.in)
+		if tc.bad {
+			if err == nil || !strings.Contains(err.Error(), "ROUTECHECK_REALDATA_MAX_PREFIXES") {
+				t.Errorf("parseMaxPrefixes(%q) = %d, %v; want an error naming the variable", tc.in, got, err)
+			}
+			continue
+		}
+		if err != nil || got != tc.want {
+			t.Errorf("parseMaxPrefixes(%q) = %d, %v; want %d, nil", tc.in, got, err, tc.want)
+		}
+	}
 }

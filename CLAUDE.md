@@ -279,6 +279,8 @@ Packages, imports strictly downward:
     4,741 MB (`.data/realdata-ripe-only.log`).
   - `ROUTECHECK_REALDATA_REGISTRIES` (comma-separated registry names, case-insensitive; empty means
     every pinned registry) loads only those. `ripe` is 0.2.0's load.
+  - `ROUTECHECK_REALDATA_MAX_PREFIXES` (a positive integer; unset means rpsl's default) sets
+    `Expander.MaxPrefixes` as `-max-prefixes` does; the test logs a `limits:` line.
   - `ROUTECHECK_REALDATA_LOAD_ONLY=1` loads the registries, logs a `LOAD:` line and stops before
     the RIBs (all 16: 35.871 s, peak RSS 3,534 MB, `.data/load-all.log`).
   - `ROUTECHECK_REALDATA_SAMPLE`, `_REGEXP_SAMPLE` and `_SEED` choose the sample.
