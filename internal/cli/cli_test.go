@@ -761,6 +761,49 @@ source: TEST
 	}
 }
 
+// TestAnySetSummaryCountsRoutes: the report block's line names each set once,
+// sorted, and counts routes, not sets: one route is accepted through two sets
+// and one through one of them, so the line says two sets and 2 routes. The
+// single-set route comes first, so the sets are gathered out of order.
+func TestAnySetSummaryCountsRoutes(t *testing.T) {
+	reg := write(t, "reg.txt", []byte(`aut-num: AS64496
+import: from AS64500 accept <^AS64500 AS-ANYB AS-ANYA$> OR <^AS64500 AS-ANYB$>
+source: TEST
+
+aut-num: AS64500
+export: to AS64496 announce AS64500
+source: TEST
+
+as-set: AS-ANYA
+members: AS-ANY
+source: TEST
+
+as-set: AS-ANYB
+members: AS-ANY
+source: TEST
+`))
+	f := write(t, "two-sets.mrt", slices.Concat(
+		gUpdate(gAt(1), gX, gL, "192.0.2.1", "192.0.2.2", nil, gNLRI("198.51.100.0/24"), gAttrs("192.0.2.1", gSeq(gX, gY))),
+		gUpdate(gAt(2), gX, gL, "192.0.2.1", "192.0.2.2", nil, gNLRI("198.51.101.0/24"), gAttrs("192.0.2.1", gSeq(gX, gY, gZ)))))
+	args := []string{"-local", "AS64496", "-peer", "AS64500", "-session", f, "-dump", reg, "-af", "ipv4", "-direction", "import"}
+
+	code, out, stderr := run(t, append(slices.Clone(args), "-routes", "all")...)
+	if code != exitOK {
+		t.Fatalf("-routes all: exit %d; stderr %s\n%s", code, stderr, out)
+	}
+	wantContains(t, "-routes all", out,
+		"accepted by clause 1 (AS-ANYB reaches AS-ANY: any AS)",
+		"accepted by clause 1 (AS-ANYA, AS-ANYB reach AS-ANY: any AS)")
+
+	code, out, stderr = run(t, args...)
+	if code != exitOK {
+		t.Fatalf("default -routes: exit %d; stderr %s\n%s", code, stderr, out)
+	}
+	wantContains(t, "default -routes", out,
+		"import, AS64496 from AS64500: 2 routes: 2 accepted, 0 rejected, 0 undecided",
+		"\n    accepted through a set reaching AS-ANY (any AS): AS-ANYA, AS-ANYB (2 routes)\n")
+}
+
 // TestOutcomeAnySets: one set reaches, several reach, and the sets come
 // before any "after undecided" part.
 func TestOutcomeAnySets(t *testing.T) {
