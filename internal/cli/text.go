@@ -401,6 +401,13 @@ func outcome(dir string, v verdict.Verdict) string {
 	switch v.Outcome {
 	case verdict.Accepted:
 		s := fmt.Sprintf("accepted by clause %d", v.Clause+1)
+		switch len(v.AnySets) {
+		case 0:
+		case 1:
+			s += " (" + v.AnySets[0] + " reaches AS-ANY: any AS)"
+		default:
+			s += " (" + strings.Join(v.AnySets, ", ") + " reach AS-ANY: any AS)"
+		}
 		if len(v.EarlierUndecided) > 0 {
 			ns := make([]string, len(v.EarlierUndecided))
 			for i, c := range v.EarlierUndecided {

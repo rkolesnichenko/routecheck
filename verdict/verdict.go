@@ -5,6 +5,7 @@ import (
 	"errors"
 	"net/netip"
 	"reflect"
+	"slices"
 	"strconv"
 	"sync"
 
@@ -58,9 +59,15 @@ func (o Outcome) MarshalText() ([]byte, error) { return []byte(o.String()), nil 
 // clauses of one Index.
 type Verdict struct {
 	Outcome          Outcome
-	Clause           int    // Accepted: Pos of the first clause that said yes
-	EarlierUndecided []int  // Accepted: Pos of undecided clauses before it
-	Fails            []Fail // Rejected: one per clause, in order
+	Clause           int   // Accepted: Pos of the first clause that said yes
+	EarlierUndecided []int // Accepted: Pos of undecided clauses before it
+	// AnySets is, for Accepted, the canonical names (types.SetName.String),
+	// sorted and deduplicated, of the sets reaching AS-ANY (in an AS-path
+	// regexp: any one AS) that the AS-path tests, either polarity, of the
+	// conjunct that accepted the route name; nil when there are none, and
+	// for Rejected and Undecided.
+	AnySets []string
+	Fails   []Fail // Rejected: one per clause, in order
 	// Reasons is, for Undecided, every reason, deduplicated. For Accepted it
 	// is the ReasonPeval reasons of the undecided terms at or before the
 	// accepting clause (Index at most its Index: within one attribute peval
@@ -183,6 +190,7 @@ type conj struct {
 	prefixes, not *prefixIndex
 	paths         []pathTest
 	comms         []commTest
+	anySets       []string // Verdict.AnySets when this conjunct accepts
 }
 
 // pathTest is a compiled PathMatch.
@@ -228,7 +236,16 @@ func Compile(p peval.Policy) *Compiled {
 					t.text = "NOT " + t.text
 				}
 				cj.paths = append(cj.paths, t)
+				if m.RE != nil {
+					for _, name := range m.RE.SetNames() {
+						if set, ok := m.Sets[name]; ok && set.Any() {
+							cj.anySets = append(cj.anySets, name.String())
+						}
+					}
+				}
 			}
+			slices.Sort(cj.anySets)
+			cj.anySets = slices.Compact(cj.anySets)
 			for _, m := range pj.Communities {
 				cj.comms = append(cj.comms, compileComm(m))
 			}
@@ -263,8 +280,9 @@ func Decide(p peval.Policy, r Route) Verdict { return Compile(p).Decide(r) }
 // Every test is three-valued. A conjunct is the AND of its tests (any no:
 // no; else any undecided: undecided; else yes); a clause the OR of its
 // conjuncts. Over the clauses in order, the route is Accepted by the first
-// that says yes, naming the undecided clauses before it and the undecided
-// terms at or before its Index (in Reasons); Rejected when every
+// that says yes, naming the undecided clauses before it, the undecided
+// terms at or before its Index (in Reasons) and the sets reaching AS-ANY
+// of its first conjunct that says yes (AnySets); Rejected when every
 // clause says no and the policy has no undecided term; otherwise Undecided,
 // with the reasons of every undecided test of every undecided clause and
 // each undecided term. A policy with no clause and no undecided term (the
@@ -277,9 +295,13 @@ func (c *Compiled) Decide(r Route) Verdict {
 	s := state{r: &r, prefix: r.Prefix.Masked()}
 	var undecided []int
 	for pos := range c.clauses {
-		switch t, _ := c.clause(pos, &s, nil); t {
+		switch t, _, i := c.clause(pos, &s, nil); t {
 		case yes:
-			return Verdict{Outcome: Accepted, Clause: pos, EarlierUndecided: undecided, Reasons: c.pevalUpTo(c.clauses[pos].index)}
+			cl := &c.clauses[pos]
+			// A copy: the verdict is the caller's, the compiled names are
+			// shared by every route.
+			return Verdict{Outcome: Accepted, Clause: pos, EarlierUndecided: undecided,
+				AnySets: slices.Clone(cl.conj[i].anySets), Reasons: c.pevalUpTo(cl.index)}
 		case undecidedT:
 			undecided = append(undecided, pos)
 		}
@@ -287,7 +309,7 @@ func (c *Compiled) Decide(r Route) Verdict {
 	if len(undecided) == 0 && len(c.peval) == 0 {
 		fails := make([]Fail, len(c.clauses))
 		for pos := range c.clauses {
-			_, test := c.clause(pos, &s, nil)
+			_, test, _ := c.clause(pos, &s, nil)
 			fails[pos] = Fail{Clause: pos, Test: test, Missing: c.clauses[pos].missing}
 		}
 		return Verdict{Outcome: Rejected, Fails: fails}
@@ -321,12 +343,13 @@ type state struct {
 }
 
 // clause decides clause pos. It returns the first failing test's text when
-// the answer is no, and appends to reasons, when given, every undecided test
-// of the clause's undecided conjuncts.
-func (c *Compiled) clause(pos int, s *state, reasons *[]Reason) (tri, string) {
+// the answer is no, the position of the first conjunct that said yes when
+// the answer is yes, and appends to reasons, when given, every undecided
+// test of the clause's undecided conjuncts.
+func (c *Compiled) clause(pos int, s *state, reasons *[]Reason) (tri, string, int) {
 	cl := &c.clauses[pos]
 	if len(cl.conj) == 0 {
-		return no, FailNoConjunct
+		return no, FailNoConjunct, -1
 	}
 	answer, fail := no, ""
 	for i := range cl.conj {
@@ -337,7 +360,7 @@ func (c *Compiled) clause(pos int, s *state, reasons *[]Reason) (tri, string) {
 		t, test := c.conjunct(&cl.conj[i], s, reasons, pos, cl.index)
 		switch t {
 		case yes:
-			return yes, ""
+			return yes, "", i
 		case no:
 			if reasons != nil {
 				*reasons = (*reasons)[:mark]
@@ -350,9 +373,9 @@ func (c *Compiled) clause(pos int, s *state, reasons *[]Reason) (tri, string) {
 		}
 	}
 	if answer == undecidedT {
-		return undecidedT, ""
+		return undecidedT, "", -1
 	}
-	return no, fail
+	return no, fail, -1
 }
 
 // conjunct decides one conjunct: no at its first failing test, with that

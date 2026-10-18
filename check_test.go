@@ -748,6 +748,50 @@ source: TEST
 	}
 }
 
+// TestCheckAnySetPath: an as-set reaching AS-ANY named in an AS-path regexp
+// evaluates (rpsl v0.30.0: any one AS there), so the report is not
+// unevaluable; a route the clause accepts names the set in AnySets, and
+// every other verdict names none.
+func TestCheckAnySetPath(t *testing.T) {
+	autLAny := `aut-num: AS64496
+as-name: L
+import: from AS64500 accept <^AS64500 AS-ANYSET$>
+source: TEST
+`
+	anySet := `as-set: AS-ANYSET
+members: AS-ANY
+source: TEST
+`
+	res := run(t, checker(registry(t, autLAny, autX, anySet)), routecheck.ModeSession, capture(), routecheck.Options{
+		Local: types.ASN(asL), Peer: types.ASN(asX), AF: []types.AddrFamily{af(t, "ipv4.unicast")}, Directions: routecheck.DirImport,
+	})
+	imp := res[0].Import
+	if imp.Unevaluable != "" || len(imp.Policy.Clauses) != 1 {
+		t.Fatalf("Unevaluable %q, %d clauses; want an evaluated policy of one clause", imp.Unevaluable, len(imp.Policy.Clauses))
+	}
+	// capture()'s paths: X alone (no second AS), X then Y, X then Z, and X
+	// then an AS_SET (not a plain sequence: undecided).
+	want := []string{
+		"10.0.0.0/8 undecided:" + verdict.ReasonPathNotSequence,
+		"192.0.2.0/24 rejected",
+		"198.51.100.0/24 accepted:0",
+		"203.0.113.0/24 accepted:0",
+	}
+	if got := summaries(*imp); !slices.Equal(got, want) {
+		t.Errorf("routes:\n got %q\nwant %q", got, want)
+	}
+	for _, rv := range imp.Routes {
+		v := rv.Verdict
+		if v.Outcome == verdict.Accepted {
+			if !slices.Equal(v.AnySets, []string{"AS-ANYSET"}) {
+				t.Errorf("%s: AnySets %q, want [AS-ANYSET]", rv.Route.Prefix, v.AnySets)
+			}
+		} else if v.AnySets != nil {
+			t.Errorf("%s: %s with AnySets %q, want nil", rv.Route.Prefix, v.Outcome, v.AnySets)
+		}
+	}
+}
+
 // failingSets is a policy source whose GetSet fails.
 type failingSets struct{ *resolve.MemSource }
 

@@ -683,6 +683,73 @@ source: TEST
 	}
 }
 
+// TestAnySetPath: a set reaching AS-ANY named in an AS-path regexp is
+// evaluated; the accepted route says which set let any AS through, in text
+// and in JSON (Verdict.AnySets).
+func TestAnySetPath(t *testing.T) {
+	reg := write(t, "reg.txt", []byte(`aut-num: AS64496
+import: from AS64500 accept <^AS64500 AS-ANYSET$>
+source: TEST
+
+aut-num: AS64500
+export: to AS64496 announce AS64500
+source: TEST
+
+as-set: AS-ANYSET
+members: AS-ANY
+source: TEST
+
+route: 198.51.100.0/24
+origin: AS64501
+source: TEST
+`))
+	f := write(t, "one.mrt", gUpdate(gAt(1), gX, gL, "192.0.2.1", "192.0.2.2", nil, gNLRI("198.51.100.0/24"), gAttrs("192.0.2.1", gSeq(gX, gY))))
+	args := []string{"-local", "AS64496", "-peer", "AS64500", "-session", f, "-dump", reg, "-af", "ipv4", "-direction", "import"}
+	code, out, stderr := run(t, append(slices.Clone(args), "-routes", "all")...)
+	if code != exitOK {
+		t.Fatalf("exit %d; stderr %s\n%s", code, stderr, out)
+	}
+	wantContains(t, "text", out,
+		"import, AS64496 from AS64500: 1 route: 1 accepted, 0 rejected, 0 undecided",
+		"accepted by clause 1 (AS-ANYSET reaches AS-ANY: any AS)")
+	code, out, stderr = run(t, append(slices.Clone(args), "-format", "json")...)
+	if code != exitOK {
+		t.Fatalf("json: exit %d; stderr %s\n%s", code, stderr, out)
+	}
+	dec := json.NewDecoder(strings.NewReader(out))
+	dec.DisallowUnknownFields()
+	var view []jsonResult
+	if err := dec.Decode(&view); err != nil {
+		t.Fatalf("does not decode into the view: %v", err)
+	}
+	if len(view) != 1 || view[0].Import == nil || len(view[0].Import.Routes) != 1 {
+		t.Fatalf("view: %+v", view)
+	}
+	if got := view[0].Import.Routes[0].Verdict.AnySets; !slices.Equal(got, []string{"AS-ANYSET"}) {
+		t.Errorf("decoded AnySets %q, want [AS-ANYSET]", got)
+	}
+	wantContains(t, "json", compact(t, out), `"AnySets":["AS-ANYSET"]`)
+}
+
+// TestOutcomeAnySets: one set reaches, several reach, and the sets come
+// before any "after undecided" part.
+func TestOutcomeAnySets(t *testing.T) {
+	for _, c := range []struct {
+		v    verdict.Verdict
+		want string
+	}{
+		{verdict.Verdict{Outcome: verdict.Accepted, Clause: 1, AnySets: []string{"AS-X"}},
+			"accepted by clause 2 (AS-X reaches AS-ANY: any AS)"},
+		{verdict.Verdict{Outcome: verdict.Accepted, Clause: 1, AnySets: []string{"AS-X", "AS-Y"}, EarlierUndecided: []int{0}},
+			"accepted by clause 2 (AS-X, AS-Y reach AS-ANY: any AS), after undecided clause 1"},
+		{verdict.Verdict{Outcome: verdict.Accepted}, "accepted by clause 1"},
+	} {
+		if got := outcome("import", c.v); got != c.want {
+			t.Errorf("outcome(%+v) = %q, want %q", c.v, got, c.want)
+		}
+	}
+}
+
 // TestPolicyOverIRRd: with -irrd, -policy's aut-num answers first and the
 // sets come from the server, never from the file.
 func TestPolicyOverIRRd(t *testing.T) {
