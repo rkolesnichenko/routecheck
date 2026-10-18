@@ -130,10 +130,52 @@ All heavy runs follow the standing rules:
 - A registry that failed to download being skipped without the run saying so.
 - Any published figure not traceable to a log.
 
+## Settled after the builder check *(my calls, unless a reason in the code is given)*
+
+1. **Pairs are selected from RIPE's files only.**
+   - The selection maps (`imports`, `reImports`, `autnums` in `realdata_test.go`) are built only from the
+     objects read from RIPE's files. Every other registry is loaded for resolution only, so the candidate
+     lists, the shuffle and the sample are those of v0.2.
+   - The run logs its pairs. The RIPE-only baseline run and the every-registry run must log the same pair
+     list, and both must equal the 60 pairs in `.data/realdata-v0.2.log`. That is checked by diffing the
+     logs before any figure is published.
+2. **NONAUTH sources.** RIPE's split files hold only `source: RIPE` (counted 2026-10-18: aut-num 40,036,
+   as-set 29,157, route 471,252, all RIPE). Another registry's dump may also hold a `-NONAUTH` source, for
+   example ARIN-NONAUTH.
+   - The test does what the command does: precedence by first appearance, in the fixed file order. A
+     NONAUTH source therefore ranks where it first appears.
+   - Its objects count as held, as they do for a user running the recommended `-dump` order.
+   - The run logs the resulting source order and the objects kept per source.
+   - Changing how the command ranks NONAUTH sources is a non-goal.
+3. **Fetching registries alone.**
+   - `fetch-data.sh` gets a registries-only mode. It keeps every existing `MANIFEST` line byte for byte and
+     adds or replaces only the registry files' lines. It refuses to run when there is no `MANIFEST`.
+   - The default full fetch also fetches the registries, and still pins the newest RIBs, as today.
+   - The test runs on whatever `MANIFEST` pins: an old RIPE-only `MANIFEST` loads RIPE and says so. Asking
+     for a registry `MANIFEST` does not pin fails the test.
+4. **The memory projection, as a rule.**
+   - Under the guard, measure the peak RSS of loading RIPE alone, then of loading every registry, without
+     the RIB pass (a load-only mode).
+   - Projected full-run peak = the v0.2 full run's measured peak RSS (4,234 MB) + (every-registry load
+     peak − RIPE load peak).
+   - Go only if the projection is at most 6 GB (6,144 MB), the standing rule for scaling a heavy run. The
+     guard's 8 GB cap still applies to the real run. The real run's measured peak is what gets published.
+5. **File names.**
+   - One flat `.data/realdata/`.
+   - Split registries are named `<registry>.db.<class>.gz` (`ripe.db.route.gz`, `apnic.db.route.gz`).
+     Single-file registries are named `<registry>.db.gz` (`arin.db.gz`, `radb.db.gz`, `altdb.db.gz`).
+   - The registry is the name's prefix before `.db`. The test orders dump files by the fixed precedence
+     order above, never by `MANIFEST` order. An unknown prefix fails the test.
+6. **RADB's RPKI filtering.** Nothing extra is applied. The VRPs give each observed route's RPKI state as
+   before. RADB's filtering only changes which route objects exist, and so the hygiene counts, and the
+   docs say so.
+7. **Time is not the constraint.** The test's `-timeout` and the guard's timeout may be raised as needed,
+   and the wall time is published. v0.2's run took 3m7s by its TOTALS line; 15 minutes was 0.1.0's.
+
 ## Left to the builder
 
-- How the script fetches registries alone, and the environment variable's name and format.
-- How the per-registry memory measurement is run.
+- The registries-only mode's interface, and the registry-choosing environment variable's name and format.
+- How the load-only measurement is run (a mode of `TestRealData` or a separate test).
 - The size of the top list of missing sets, and how the log presents the comparison.
 - Whether this ships as a release: the user decides at the end. If only the script, the test and the docs
   change, it need not be one.
