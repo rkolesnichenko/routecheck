@@ -119,12 +119,16 @@ conjuncts. The clauses are then taken in order.
   When an earlier clause or a term peval could not evaluate was undecided, the
   route may take that one instead, and the output says so ("after undecided
   clause N"). When the AS-path tests of the conjunct that accepted the route
-  name a set reaching AS-ANY (an as-set whose `members:` is `AS-ANY`; in a
-  regexp it matches any one AS), the output names that set:
-  `accepted by clause 2 (AS-X reaches AS-ANY: any AS)`, or
+  name a set reaching AS-ANY (an as-set that reaches `AS-ANY`, directly or
+  through nested sets; in a regexp it matches any one AS), the output names
+  that set: `accepted by clause 2 (AS-X reaches AS-ANY: any AS)`, or
   `(AS-X, AS-Y reach AS-ANY: any AS)` for several, before any "after undecided"
   part. A negated test counts too. The test let any AS through, so the
-  acceptance says less about the path than it seems to.
+  acceptance may say less about the path than it seems to. Only the conjunct
+  that accepted is read: with `<AS-ALL$> OR <AS-A$>`, where AS-ALL reaches
+  AS-ANY, a route is accepted by the first conjunct and AS-ALL is named even
+  when the route also passes the stricter `<AS-A$>`; written
+  `<AS-A$> OR <AS-ALL$>`, such a route names no set.
 - **rejected**: every clause says no, and no term is undecided. For each clause,
   the output gives the first test that said no. When a referenced set is missing
   from the registry, the output names it ("missing from the registry"). Such a
@@ -186,6 +190,10 @@ with a hint that offers the capture's addresses as candidates.
 2. The coverage warnings.
 3. For each family and direction:
    - the counts and the policy's clauses;
+   - the sets missing from the registry ("missing from the registry: ...");
+   - when some accepted routes passed a test through a set reaching AS-ANY, one
+     line naming those sets and counting those routes, whatever `-routes` asks
+     for: `accepted through a set reaching AS-ANY (any AS): AS1887:AS-PEERINGS:AS8501, 2 routes`;
    - the Rejected routes, grouped by their first failing test, with up to 5
      examples per group;
    - the Undecided routes, grouped by reason;
@@ -319,12 +327,12 @@ Both spellings of 0xFFFFFF03 are read, in any case:
 ## Known limitations
 
 - **AS-ANY in filter position.** A policy that accepts or announces a set
-  reaching AS-ANY or RS-ANY (`accept AS-X`, `NOT AS-X`, where AS-X's `members:`
-  is `AS-ANY`) gives "unevaluable" routes: AS-ANY denotes the whole IRR, which
-  rpsl does not expand. That report's `Unevaluable` holds peval's error, and
-  each of its routes is Undecided with the reason `unevaluable`. Other reports
-  of the run are decided as usual. routecheck gives the set no meaning of its
-  own. The same set inside an AS-path regexp is not a limitation: it matches
+  reaching AS-ANY or RS-ANY (`accept AS-X`, `NOT AS-X`, where AS-X reaches
+  `AS-ANY` directly or through nested sets) gives "unevaluable" routes: AS-ANY
+  denotes the whole IRR, which rpsl does not expand. That report's
+  `Unevaluable` holds peval's error, and each of its routes is Undecided with
+  the reason `unevaluable`. Other reports of the run are decided as usual.
+  routecheck gives the set no meaning of its own. The same set inside an AS-path regexp is not a limitation: it matches
   any one AS, and an accepted route names it (see Verdicts). RIPE's
   `AS1887:AS-Peerings:AS8501` is such a set, named in AS8308's
   `import: from AS1887 ... accept <AS1887:AS-Peerings:AS8501$>`. On the data of
@@ -333,12 +341,13 @@ Both spellings of 0xFFFFFF03 are read, in any case:
   `.data/handcheck-AS8308-v0.2.log`).
 - **Load every registry a policy's sets reach.** A set that is missing from the
   registries you load makes its clause reject routes the registry as a whole
-  would accept (D4: "missing from the registry"). In the RIPE-only real-data runs,
-  390,727 of the 391,010 export rejections had a failing clause that named a set
-  RIPE does not hold in 0.1.0 (`.data/realdata-r19.log`), and 389,127 of 389,413
-  on the data of 2026-10-18 (`.data/realdata-v0.2.log`). RIPE alone is not
-  enough for most transit policies: load the other registries' dumps too, or
-  use `-irrd` with a server that mirrors them.
+  would accept (D4: "missing from the registry"). RIPE alone was loaded in both
+  real-data runs. In 0.1.0's run, 390,727 of the 391,010 export rejections had a
+  failing clause that named a set RIPE does not hold (`.data/realdata-r19.log`),
+  and in 0.2's run, on the data of 2026-10-18, 389,127 of 389,413
+  (`.data/realdata-v0.2.log`). RIPE alone is not enough for most transit
+  policies: load the other registries' dumps too, or use `-irrd` with a server
+  that mirrors them.
 - **Out of scope** (spec §12):
   - ASPA path verification;
   - BMP and RIS Live;

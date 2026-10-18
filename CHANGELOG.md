@@ -12,11 +12,11 @@ a minor version may change the API.
 
 - Requires rpsl v0.30.0 (`rpsl`, `rpsl/types`, `rpsl/resolve`; `ast` and
   `lexer` indirect at v0.30.0). mrt stays at v0.1.0.
-- An AS-path regexp that names a set reaching AS-ANY (an as-set whose
-  `members:` is `AS-ANY`) is now evaluated. rpsl's peval gives the set as a
-  `resolve.ASNSet` whose `Any()` is true, and in a regexp it matches any one
-  AS. In 0.1.0 such a policy was an "unevaluable" report with every route
-  Undecided.
+- An AS-path regexp that names a set reaching AS-ANY (an as-set that reaches
+  `AS-ANY`, directly or through nested sets) is now evaluated. rpsl's peval
+  gives the set as a `resolve.ASNSet` whose `Any()` is true, and in a regexp it
+  matches any one AS. In 0.1.0 such a policy was an "unevaluable" report with
+  every route Undecided.
 - `Report.Unevaluable` and the `unevaluable` reason (rulings R19, R21) now arise
   only from AS-ANY or RS-ANY in filter position (`accept AS-X`, `NOT AS-X`),
   which rpsl still refuses to expand.
@@ -36,6 +36,10 @@ a minor version may change the API.
   `(X reaches AS-ANY: any AS)`, or `(X, Y reach AS-ANY: any AS)`, to
   `accepted by clause N`, before any "after undecided" part. The JSON field is
   `"AnySets"`, `null` when there are none.
+- The text output's report block has one more line when some accepted routes
+  name a set reaching AS-ANY, whatever `-routes` asks for: the sets and the
+  number of those routes, such as
+  `accepted through a set reaching AS-ANY (any AS): AS1887:AS-PEERINGS:AS8501, 2 routes`.
 - The real-data test counts, per direction, the accepted routes whose
   `AnySets` is not empty, and lists them by report and set.
 
@@ -62,8 +66,9 @@ The sample, by the same seed as 0.1.0's, was again 50 aut-nums with a literal
 | | |
 |---|---|
 | Outcome | PASS: 60 of 60 pairs checked; 0 timed out, 0 over a set limit, 0 other errors |
-| Wall time | 3m7s, of which the checks took 29s |
-| Memory guard | peak RSS 4234 MB, 188 s |
+| Wall time | 3m7s, of which the checks took 29s (the test's own TOTALS) |
+| Memory guard | peak RSS 4234 MB, 188 s (the guard's figures, over the whole `go test` command) |
+| Go heap in use | peak 3055 MB, the highest of the test's per-pair samples (after pair 2, AS9086 from AS6762) |
 | Registry | 659,819 objects, 40,036 aut-nums, loaded in 7.4 s |
 | RIB entries read | 73,145,509, with 0 malformed entries and 0 record errors |
 | Observations | 4,540,048 (family × pair) |
@@ -94,6 +99,10 @@ Decisions:
   AS9086 from AS6762, 8.7 s against 61 s. 0.1.0's published command did not ask
   the guard for normal priority, and the guard otherwise runs the command at
   background priority, which is the likely cause. That was not measured.
+- **Memory.** 0.1.0's run was at the guard's background priority, so its peak
+  RSS (2607 MB) is not comparable with this run's. The Go heap in use, sampled
+  the same way after each pair, peaked at 3307 MB in 0.1.0's run
+  (`.data/realdata-r19.log`) and at 3055 MB in this one.
 
 #### Hand check, AS8308 from AS1887 (`.data/handcheck-AS8308-v0.2.log`)
 

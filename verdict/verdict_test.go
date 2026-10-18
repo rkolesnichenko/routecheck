@@ -471,6 +471,8 @@ func TestDecideAnySetsPerConjunct(t *testing.T) {
 		{"beside a set not reaching AS-ANY", withA, route("192.0.2.0/24", 64501), withAnySets(accepted(0), "AS-ALL")},
 		{"canonical name, written in lower case", lower, route("192.0.2.0/24", 64501), withAnySets(accepted(0), "AS-ALL")},
 		{"sorted and deduplicated", several, route("192.0.2.0/24", 64501), withAnySets(accepted(0), "AS-ALL", "AS-ZZZ")},
+		{"negated, one-AS path: rejected", negated, route("192.0.2.0/24", 64501),
+			rejected(Fail{Clause: 0, Test: "NOT <AS-ALL>"})},
 		{"rejected", withA, route("192.0.2.0/24", 64502),
 			rejected(Fail{Clause: 0, Test: "<AS-A>"})},
 		{"rejected by both conjuncts", twoConj, route("198.51.100.0/24", 64501),

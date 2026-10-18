@@ -97,6 +97,7 @@ type modelStats struct {
 	earlier, pevalOnAccept                 int            // Accepted verdicts with EarlierUndecided, with Reasons
 	sameIndex                              int            // Accepted verdicts naming an undecided term of the clause's own Index
 	anySets                                int            // Accepted verdicts with AnySets
+	allSets                                int            // AS-ALL entries of the normal forms' PathMatch.Sets
 }
 
 func TestDecideModel(t *testing.T) {
@@ -129,6 +130,25 @@ func TestDecideModel(t *testing.T) {
 			}
 			if len(p.Clauses) == 0 && len(p.Undecided) == 0 {
 				st.noPolicy++
+			}
+			// Every AS-ALL the normal form's path tests carry reaches
+			// AS-ANY. Outcomes alone would not show a lost Any() where an
+			// optional atom (AS-ALL?) lets the path match without it.
+			for _, c := range p.Clauses {
+				for _, cj := range c.Filter.Conjuncts {
+					for _, m := range cj.Paths {
+						for name, s := range m.Sets {
+							if name.String() != reoracle.SetAll {
+								continue
+							}
+							st.allSets++
+							if !s.Any() {
+								t.Fatalf("seed %d, %s: %s in <%s> has Any() false\nclauses (normal form):\n%s\naut-num:\n%s",
+									seed, fam.name, name, m.RE, clauseTexts(p), aut)
+							}
+						}
+					}
+				}
 			}
 			nv := &naive{t: t, ctx: ctx, exp: resolve.Expander{Src: src}, routes: g.routes, memo: map[string]tri{}}
 			clauses := make([]*nnode, len(p.Clauses))
@@ -214,6 +234,10 @@ func TestDecideModel(t *testing.T) {
 	// scaled to the seeds drawn.
 	if floor := modelAnySetsFloor * seeds / modelPolicies; st.anySets < floor {
 		t.Errorf("Accepted with AnySets %d times, under the floor of %d", st.anySets, floor)
+	}
+	t.Logf("%s entries checked for Any() in the normal forms' path tests: %d", reoracle.SetAll, st.allSets)
+	if st.allSets == 0 {
+		t.Errorf("no %s entry in any normal form's path tests: the Any() check above checked nothing", reoracle.SetAll)
 	}
 	if st.earlier == 0 || st.pevalOnAccept == 0 || st.sameIndex == 0 {
 		t.Errorf("Accepted with EarlierUndecided %d times, with peval Reasons %d times, at the clause's own Index %d times; want all three",

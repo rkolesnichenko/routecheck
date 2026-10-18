@@ -193,9 +193,11 @@ Packages, imports strictly downward:
   deduplicated) of the sets reaching AS-ANY named by the AS-path tests, either polarity, of the
   conjunct that accepted the route: per conjunct, not per clause. It is nil otherwise, and always
   nil on Rejected and Undecided. Text: `accepted by clause N (X reaches AS-ANY: any AS)`, or
-  `(X, Y reach AS-ANY: any AS)`, before any "after undecided" part. JSON: `"AnySets"`, `null` when
-  none. pathre asks only `Has`, which is true for every AS of such a set; never read `List`/`Len`
-  of one without `Any()` first.
+  `(X, Y reach AS-ANY: any AS)`, before any "after undecided" part. The report block also prints,
+  whatever `-routes` asks for, `accepted through a set reaching AS-ANY (any AS): X, Y, N routes`
+  (the distinct sets, sorted, and the number of accepted routes with AnySets; ruling G1). JSON:
+  `"AnySets"`, `null` when none. pathre asks only `Has`, which is true for every AS of such a
+  set; never read `List`/`Len` of one without `Any()` first.
 - **R23. No session selected.** `SessionInfo.Selected` counts the records selected for X; when it is 0 the CLI exits 3 ("no record of a session with AS X [from ADDR] in the capture ..."), and Check still returns its Result. Without `-local` such a capture names no local AS, so Check returns ErrOptions first and the CLI exits 2 with the same cause in the message (R26). A `-local` that is not the capture's LocalAS is checked as given, with a warning on stderr and in the text; the exit status is unchanged.
 - **Transparent route server.** When the announcements skipped as "not X first" outnumber the
   routes held at the end (all families), the text output says X looks like a transparent route
@@ -281,9 +283,9 @@ in `.data/`, which is never committed.
   RS-ANY), `accept AS-X` or `NOT AS-X`, gives an "unevaluable" report: every route Undecided (R19).
   rpsl refuses to enumerate it, and routecheck gives it no meaning of its own. In an AS-path regexp
   such a set is decided (any one AS) and named in `Verdict.AnySets`.
-- **Registries.** Load every registry a policy's sets reach. In the RIPE-only real-data runs,
-  390,727 of 391,010 export rejections named sets RIPE does not hold in 0.1.0's, and 389,127 of
-  389,413 in 0.2's.
+- **Registries.** Load every registry a policy's sets reach. RIPE alone was loaded in both
+  real-data runs: in 0.1.0's run 390,727 of 391,010 export rejections named sets RIPE does not
+  hold, and in 0.2's run 389,127 of 389,413.
 
 ## Process
 

@@ -730,6 +730,35 @@ source: TEST
 		t.Errorf("decoded AnySets %q, want [AS-ANYSET]", got)
 	}
 	wantContains(t, "json", compact(t, out), `"AnySets":["AS-ANYSET"]`)
+	if strings.Contains(out, "accepted through a set") {
+		t.Errorf("json: holds the text summary line:\n%s", out)
+	}
+
+	// With the default -routes (none), no route line is printed, and the
+	// report block says how many routes a set reaching AS-ANY let through:
+	// two of three here (the third, X alone, is rejected).
+	two := write(t, "two.mrt", slices.Concat(
+		gUpdate(gAt(1), gX, gL, "192.0.2.1", "192.0.2.2", nil, gNLRI("198.51.100.0/24", "198.51.101.0/24"), gAttrs("192.0.2.1", gSeq(gX, gY))),
+		gUpdate(gAt(2), gX, gL, "192.0.2.1", "192.0.2.2", nil, gNLRI("192.0.2.0/24"), gAttrs("192.0.2.1", gSeq(gX)))))
+	for _, c := range []struct {
+		file, counts, line string
+		exit               int
+	}{
+		{f, "1 route: 1 accepted, 0 rejected, 0 undecided", "AS-ANYSET, 1 route", exitOK},
+		{two, "3 routes: 2 accepted, 1 rejected, 0 undecided", "AS-ANYSET, 2 routes", exitRejected},
+	} {
+		dflt := []string{"-local", "AS64496", "-peer", "AS64500", "-session", c.file, "-dump", reg, "-af", "ipv4", "-direction", "import"}
+		code, out, stderr = run(t, dflt...)
+		if code != c.exit {
+			t.Fatalf("default -routes: exit %d, want %d; stderr %s\n%s", code, c.exit, stderr, out)
+		}
+		wantContains(t, "default -routes", out,
+			"import, AS64496 from AS64500: "+c.counts+"\n    clause 1 (import attribute 1): ",
+			"\n    accepted through a set reaching AS-ANY (any AS): "+c.line+"\n")
+		if strings.Contains(out, "accepted by clause") || strings.Contains(out, "routes (") {
+			t.Errorf("default -routes: a route line is printed:\n%s", out)
+		}
+	}
 }
 
 // TestOutcomeAnySets: one set reaches, several reach, and the sets come

@@ -641,11 +641,11 @@ source: TEST
 }
 
 // TestCheckUnevaluable pins ruling R19: a policy peval cannot evaluate
-// because a filter names a set that reaches AS-ANY (a *resolve.AnySetError;
-// in an AS-path regexp it would evaluate as any AS) gives that one
-// report Undecided routes with the single reason "unevaluable", while the
-// other direction decides as usual; any other peval error still fails the
-// run.
+// because a filter names a set that reaches AS-ANY or RS-ANY (a
+// *resolve.AnySetError; an as-set in an AS-path regexp would evaluate as
+// any AS) gives that one report Undecided routes with the single reason
+// "unevaluable", while the other direction decides as usual; any other
+// peval error still fails the run.
 func TestCheckUnevaluable(t *testing.T) {
 	autLAny := `aut-num: AS64496
 as-name: L
@@ -737,6 +737,30 @@ source: TEST
 		t.Errorf("collector export: %+v", res[0].Export)
 	}
 
+	// RS-ANY too (R19): a route-set reaching RS-ANY in filter position.
+	autLRS := `aut-num: AS64496
+as-name: L
+import: from AS64500 accept RS-ANYSET
+source: TEST
+`
+	rsAny := `route-set: RS-ANYSET
+members: RS-ANY
+source: TEST
+`
+	res = run(t, checker(registry(t, autLRS, autX, rsAny)), routecheck.ModeSession, capture(), routecheck.Options{
+		Local: types.ASN(asL), Peer: types.ASN(asX), AF: []types.AddrFamily{af(t, "ipv4.unicast")}, Directions: routecheck.DirImport,
+	})
+	rs := res[0].Import
+	if !strings.Contains(rs.Unevaluable, "RS-ANYSET") || len(rs.Policy.Clauses) != 0 {
+		t.Errorf("route-set: Unevaluable %q, %d clauses; want unevaluable", rs.Unevaluable, len(rs.Policy.Clauses))
+	}
+	checkCounts(t, "route-set", *rs, 0, 0, 4)
+	for _, rv := range rs.Routes {
+		if v := rv.Verdict; len(v.Reasons) != 1 || v.Reasons[0].Kind != verdict.ReasonUnevaluable {
+			t.Errorf("route-set, %s: %+v; want the single reason unevaluable", rv.Route.Prefix, v)
+		}
+	}
+
 	// Any other error from peval's Source still fails the run: only an
 	// *AnySetError is narrowed to Undecided.
 	c := checker(src)
@@ -788,6 +812,135 @@ source: TEST
 			}
 		} else if v.AnySets != nil {
 			t.Errorf("%s: %s with AnySets %q, want nil", rv.Route.Prefix, v.Outcome, v.AnySets)
+		}
+	}
+
+	// The set as peval binds and expands it: a set template bound for the
+	// peer, a set reaching AS-ANY only through a nested set, and an EXCEPT
+	// whose flattened clauses both carry the path test. Each accepted route
+	// names the set the regexp names (once bound), never the leaf.
+	for _, c := range []struct {
+		name, aut, sets string
+		want            []string // summaries
+		anySets         []string // on every accepted route
+	}{
+		{"template bound for the peer", `aut-num: AS64496
+as-name: L
+import: from AS64500 accept <^AS64500 AS64496:AS-ANYT:PeerAS$>
+source: TEST
+`, `as-set: AS64496:AS-ANYT:AS64500
+members: AS-ANY
+source: TEST
+`, want, []string{"AS64496:AS-ANYT:AS64500"}},
+		{"nested set", `aut-num: AS64496
+as-name: L
+import: from AS64500 accept <^AS64500 AS-NEST$>
+source: TEST
+`, `as-set: AS-NEST
+members: AS-ALL, AS64501
+source: TEST
+
+as-set: AS-ALL
+members: AS-ANY
+source: TEST
+`, want, []string{"AS-NEST"}},
+		{"EXCEPT, both flattened clauses", `aut-num: AS64496
+as-name: L
+import: { from AS64500 accept <^AS64500 AS-ALL$>; } EXCEPT { from AS64500 accept {198.51.100.0/24}; }
+source: TEST
+`, `as-set: AS-ALL
+members: AS-ANY
+source: TEST
+`, []string{
+			"10.0.0.0/8 undecided:" + verdict.ReasonPathNotSequence,
+			"192.0.2.0/24 rejected",
+			"198.51.100.0/24 accepted:0",
+			"203.0.113.0/24 accepted:1",
+		}, []string{"AS-ALL"}},
+	} {
+		res := run(t, checker(registry(t, c.aut, autX, c.sets)), routecheck.ModeSession, capture(), routecheck.Options{
+			Local: types.ASN(asL), Peer: types.ASN(asX), AF: []types.AddrFamily{af(t, "ipv4.unicast")}, Directions: routecheck.DirImport,
+		})
+		imp := res[0].Import
+		if imp.Unevaluable != "" {
+			t.Errorf("%s: Unevaluable %q", c.name, imp.Unevaluable)
+			continue
+		}
+		if got := summaries(*imp); !slices.Equal(got, c.want) {
+			t.Errorf("%s: routes:\n got %q\nwant %q\nclauses %+v", c.name, got, c.want, imp.Policy.Clauses)
+		}
+		for _, rv := range imp.Routes {
+			v := rv.Verdict
+			if v.Outcome == verdict.Accepted {
+				if !slices.Equal(v.AnySets, c.anySets) {
+					t.Errorf("%s, %s: AnySets %q, want %q", c.name, rv.Route.Prefix, v.AnySets, c.anySets)
+				}
+			} else if v.AnySets != nil {
+				t.Errorf("%s, %s: %s with AnySets %q, want nil", c.name, rv.Route.Prefix, v.Outcome, v.AnySets)
+			}
+		}
+	}
+
+	// The export direction: X's export toward L names the set too.
+	autXAny := `aut-num: AS64500
+as-name: X
+export: to AS64496 announce <^AS64500 AS-ANYSET$>
+source: TEST
+`
+	res = run(t, checker(registry(t, autL, autXAny, anySet)), routecheck.ModeSession, capture(), routecheck.Options{
+		Local: types.ASN(asL), Peer: types.ASN(asX), AF: []types.AddrFamily{af(t, "ipv4.unicast")}, Directions: routecheck.DirExport,
+	})
+	if len(res[0].Export) != 1 {
+		t.Fatalf("export: %d reports", len(res[0].Export))
+	}
+	exp := res[0].Export[0]
+	if exp.Unevaluable != "" {
+		t.Fatalf("export: Unevaluable %q", exp.Unevaluable)
+	}
+	if got := summaries(exp); !slices.Equal(got, want) {
+		t.Errorf("export: routes:\n got %q\nwant %q", got, want)
+	}
+	for _, rv := range exp.Routes {
+		v := rv.Verdict
+		if v.Outcome == verdict.Accepted {
+			if !slices.Equal(v.AnySets, []string{"AS-ANYSET"}) {
+				t.Errorf("export, %s: AnySets %q, want [AS-ANYSET]", rv.Route.Prefix, v.AnySets)
+			}
+		} else if v.AnySets != nil {
+			t.Errorf("export, %s: %s with AnySets %q, want nil", rv.Route.Prefix, v.Outcome, v.AnySets)
+		}
+	}
+
+	// The conjunct that accepted, in the order written: X then Y passes
+	// both <... AS-ALL$> and the stricter <... AS64501$>, and names AS-ALL
+	// only when the AS-ALL conjunct comes first (docs/routecheck.md).
+	allSet := `as-set: AS-ALL
+members: AS-ANY
+source: TEST
+`
+	for _, c := range []struct {
+		filter  string
+		anySets []string // of 198.51.100.0/24, path X Y
+	}{
+		{"<^AS64500 AS-ALL$> OR <^AS64500 AS64501$>", []string{"AS-ALL"}},
+		{"<^AS64500 AS64501$> OR <^AS64500 AS-ALL$>", nil},
+	} {
+		aut := "aut-num: AS64496\nas-name: L\nimport: from AS64500 accept " + c.filter + "\nsource: TEST\n"
+		res := run(t, checker(registry(t, aut, autX, allSet)), routecheck.ModeSession, capture(), routecheck.Options{
+			Local: types.ASN(asL), Peer: types.ASN(asX), AF: []types.AddrFamily{af(t, "ipv4.unicast")}, Directions: routecheck.DirImport,
+		})
+		found := false
+		for _, rv := range res[0].Import.Routes {
+			if rv.Route.Prefix != pfx("198.51.100.0/24") {
+				continue
+			}
+			found = true
+			if v := rv.Verdict; v.Outcome != verdict.Accepted || !slices.Equal(v.AnySets, c.anySets) || (v.AnySets == nil) != (c.anySets == nil) {
+				t.Errorf("%s: 198.51.100.0/24 %s with AnySets %q, want accepted with %q", c.filter, v.Outcome, v.AnySets, c.anySets)
+			}
+		}
+		if !found {
+			t.Errorf("%s: 198.51.100.0/24 not decided", c.filter)
 		}
 	}
 }

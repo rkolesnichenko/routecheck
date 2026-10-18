@@ -243,6 +243,21 @@ func (p *printer) report(dir string, rep routecheck.Report, label, owner string)
 	if m := rep.Policy.Missing(); len(m) > 0 {
 		p.line("    missing from the registry: %s", refs(m))
 	}
+	// Accepted through a set reaching AS-ANY: said here too, since the
+	// per-route note is printed only for the routes -routes lists.
+	var anySets []string
+	anyRoutes := 0
+	for _, rv := range rep.Routes {
+		if rv.Verdict.Outcome == verdict.Accepted && len(rv.Verdict.AnySets) > 0 {
+			anyRoutes++
+			anySets = append(anySets, rv.Verdict.AnySets...)
+		}
+	}
+	if anyRoutes > 0 {
+		slices.Sort(anySets)
+		p.line("    accepted through a set reaching AS-ANY (any AS): %s, %s",
+			strings.Join(slices.Compact(anySets), ", "), count(anyRoutes, "route", "routes"))
+	}
 	if rep.Unevaluable != "" {
 		p.line("    policy not evaluable, no route decided: %s", rep.Unevaluable)
 	}
