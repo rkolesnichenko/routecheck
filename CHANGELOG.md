@@ -8,6 +8,13 @@ a minor version may change the API.
 
 ## [Unreleased]
 
+### Added
+
+- `-max-prefixes N` sets the most prefixes one set's expansion may reach
+  (rpsl's `MaxPrefixes`). The default is rpsl's limit. 0, negative numbers and
+  non-numbers are refused with exit status 2. It applies with `-dump` and with
+  `-irrd`.
+
 ## [0.3.0] - 2026-10-18
 
 ### Changed

@@ -193,7 +193,8 @@ Packages, imports strictly downward:
   MaxPrefixes, MaxVisited, MaxDepth, MaxConjuncts) takes R19's path for that report only: the same
   `Unevaluable`, empty `Policy` and `unevaluable` reason. The run goes on, and the exit status is
   R19's (0 or 1 by the Rejected routes, never 3 for it). There is no new reason kind. The CLI's
-  `expander` variable (internal/cli) is a test-only seam for lowering a limit; no flag sets it.
+  `-max-prefixes N` (internal/cli) sets `Expander.MaxPrefixes`; absent, it is the zero `Expander`
+  (rpsl's default); 0 and negatives are refused (a negative is unlimited in rpsl).
 - **AnySets.** `Verdict.AnySets` is, on an Accepted verdict only, the canonical names (sorted,
   deduplicated) of the sets reaching AS-ANY named by the AS-path tests, either polarity, of the
   conjunct that accepted the route: per conjunct, not per clause. It is nil otherwise, and always

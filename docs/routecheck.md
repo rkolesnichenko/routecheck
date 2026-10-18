@@ -46,6 +46,7 @@ before any other argument. A stray argument is refused with exit status 2.
 | `-vrps FILE` | A VRP JSON file in rpki-client or Routinator format. With it, each route gets an RPKI origin-validation state. |
 | `-af` | `ipv4`, `ipv6` or `both` (the default): the unicast families checked. Routes of any other family are dropped and counted. |
 | `-direction` | `import` (L's policy), `export` (X's policy) or `both` (the default). |
+| `-max-prefixes N` | The most prefixes one set's expansion may reach (rpsl's `MaxPrefixes`). The default is rpsl's limit. A report over it is unevaluable (R27); raising N lets it be decided at the memory cost given under "Known limitations". N must be a positive integer. |
 | `-peer-addr IP` | Session mode only. Read only the capture's records that have this peer address. |
 | `-at TIME` | Session mode only. Report the state at this RFC 3339 time, such as `2026-10-16T12:00:00Z`. Records at that time are included. The default is the end of the capture. |
 | `-pre-policy` | Session mode only. States that the RIB dumps in the input are X's Adj-RIB-In before import policy (see D2 below). |
@@ -185,7 +186,7 @@ conjuncts. The clauses are then taken in order.
   | `path-too-expensive` | The AS-path regexp exceeded the matcher's work budget for this path (D6). |
   | `path-unbound` | The regexp's PeerAS was not bound. This is a caller's bug: peval always binds it. |
   | `peval` | A term peval could not evaluate for this session, with peval's own reason. For example, `peval: peer router not given` (pass `-local-rtr`/`-peer-rtr`). |
-  | `unevaluable` | peval could not evaluate the whole policy, because it names a set reaching AS-ANY or RS-ANY in filter position (`accept AS-X`, `NOT AS-X`), where rpsl cannot expand it (see "Known limitations"), or a set over one of rpsl's expansion limits (MaxPrefixes, MaxVisited, MaxDepth, MaxConjuncts). |
+  | `unevaluable` | peval could not evaluate the whole policy, because it names a set reaching AS-ANY or RS-ANY in filter position (`accept AS-X`, `NOT AS-X`), where rpsl cannot expand it (see "Known limitations"), or a set over one of rpsl's expansion limits (MaxPrefixes, MaxVisited, MaxDepth, MaxConjuncts); `-max-prefixes` raises the first. |
 
 - **no policy**: L has no import term toward X in this family (or, for export,
   X has no export term toward the neighbour). Its routes are not decided. This is

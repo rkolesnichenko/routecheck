@@ -28,12 +28,6 @@ const (
 	exitFailed   = 3 // the check could not complete
 )
 
-// expander is the expansion engine's configuration for the peval.Evaluator.
-// It is a test seam: it is zero (rpsl's defaults) and no flag or environment
-// variable sets it; tests lower a limit through it and restore it, so a test
-// that sets it must not call t.Parallel.
-var expander resolve.Expander
-
 // maxExamples is how many routes each group of Rejected or Undecided routes
 // shows.
 const maxExamples = 5
@@ -101,6 +95,8 @@ type config struct {
 	vrps       string
 	opts       routecheck.Options
 	localGiven bool
+	// maxPrefixes is -max-prefixes; 0 is rpsl's default.
+	maxPrefixes int
 	// draftSupplies is what -policy answers first ("aut-num AS1 (TEST)"),
 	// set by loadPolicy.
 	draftSupplies []string
@@ -147,7 +143,7 @@ func Run(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 	}
 	defer closeSrc()
 
-	c := &routecheck.Checker{Eval: peval.Evaluator{Src: src, Expander: expander}, Routes: src}
+	c := &routecheck.Checker{Eval: peval.Evaluator{Src: src, Expander: resolve.Expander{MaxPrefixes: cfg.maxPrefixes}}, Routes: src}
 	results, err := c.Check(ctx, cfg.mode, records(cfg.inputs), cfg.opts)
 	if errors.Is(err, routecheck.ErrOptions) {
 		hint := ""
@@ -247,6 +243,7 @@ func parse(args []string, stdout, stderr io.Writer) (*config, error) {
 	prePolicy := fs.Bool("pre-policy", false, "session mode: RIB dumps in the input are X's Adj-RIB-In before import policy")
 	localRtr := fs.String("local-rtr", "", "L's router `address` on the session, for peerings that name routers")
 	peerRtr := fs.String("peer-rtr", "", "X's router `address` on the session, for peerings that name routers")
+	maxPrefixes := fs.Int("max-prefixes", 0, "the most prefixes one set's expansion may reach (`N`); default rpsl's limit; raising it costs memory, see docs/routecheck.md")
 	format := fs.String("format", "text", "output `format`: text or json")
 	routes := fs.String("routes", "none", "text: the routes `listed` after the summary: all, rejected, undecided or none")
 
@@ -265,7 +262,11 @@ func parse(args []string, stdout, stderr io.Writer) (*config, error) {
 	set := map[string]bool{}
 	fs.Visit(func(f *flag.Flag) { set[f.Name] = true })
 
-	cfg := &config{dumps: dumps, irrd: *irrd, policyFile: *policyFile, vrps: *vrps, format: *format, routes: *routes}
+	if set["max-prefixes"] && *maxPrefixes < 1 {
+		return nil, usagef("-max-prefixes: %d is not a positive number of prefixes", *maxPrefixes)
+	}
+
+	cfg := &config{maxPrefixes: *maxPrefixes, dumps: dumps, irrd: *irrd, policyFile: *policyFile, vrps: *vrps, format: *format, routes: *routes}
 	var err error
 	if *peer == "" {
 		return nil, usagef("-peer is required")

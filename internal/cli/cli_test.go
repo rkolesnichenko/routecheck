@@ -99,7 +99,7 @@ func TestHelp(t *testing.T) {
 	wantContains(t, "usage", stdout,
 		"routecheck -peer AS (-session FILE [-local AS] | -collector FILE -local AS)",
 		"-irrd", "-sources", "-policy", "-vrps", "-af", "-direction", "-peer-addr", "-at", "-pre-policy",
-		"-local-rtr", "-peer-rtr", "-format", "-routes", "repeatable", "Exit status",
+		"-local-rtr", "-peer-rtr", "-max-prefixes", "-format", "-routes", "repeatable", "Exit status",
 		"a key that does not parse", "cut mid-record", "the session in the capture")
 }
 
@@ -129,6 +129,9 @@ func TestBadCommandLines(t *testing.T) {
 		{"bad peer address", session("-peer-addr", "192.0.2"), "-peer-addr"},
 		{"bad local router", session("-local-rtr", "x"), "-local-rtr"},
 		{"bad peer router", session("-peer-rtr", "x"), "-peer-rtr"},
+		{"zero max-prefixes", session("-max-prefixes", "0"), "-max-prefixes"},
+		{"negative max-prefixes", session("-max-prefixes", "-5"), "-max-prefixes"},
+		{"non-number max-prefixes", session("-max-prefixes", "many"), "-max-prefixes"},
 		{"sources without irrd", session("-sources", "TEST"), "-sources"},
 		{"positional argument", session("extra.mrt"), "extra.mrt"},
 		{"unknown flag", session("-frobnicate"), "frobnicate"},
@@ -684,16 +687,11 @@ source: TEST
 	}
 }
 
-// TestUnevaluableLimit: a set over one of rpsl's expansion limits makes that
-// report unevaluable (Ruling R27); the run goes on and does not exit 3. The
-// limit is lowered through the package's test seam, expander.
-func TestUnevaluableLimit(t *testing.T) {
-	old := expander
-	t.Cleanup(func() { expander = old })
-	expander = resolve.Expander{MaxPrefixes: 1}
-
-	registry := func(export string) string {
-		return `aut-num: AS64496
+// limitRegistry is the registry TestUnevaluableLimit and TestMaxPrefixesOption
+// share: L imports AS-BIG, which expands to exactly 2 prefixes, and X exports
+// what export says.
+func limitRegistry(export string) string {
+	return `aut-num: AS64496
 import: from AS64500 accept AS-BIG
 source: TEST
 
@@ -713,10 +711,16 @@ route: 198.51.100.0/24
 origin: AS64501
 source: TEST
 `
-	}
+}
+
+// TestUnevaluableLimit: a set over one of rpsl's expansion limits makes that
+// report unevaluable (Ruling R27); the run goes on and does not exit 3. The
+// limit is lowered with -max-prefixes.
+func TestUnevaluableLimit(t *testing.T) {
+	registry := limitRegistry
 	f := write(t, "one.mrt", gUpdate(gAt(1), gX, gL, "192.0.2.1", "192.0.2.2", nil, gNLRI("192.0.2.0/24"), gAttrs("192.0.2.1", gSeq(gX))))
 	argsFor := func(reg string) []string {
-		return []string{"-local", "AS64496", "-peer", "AS64500", "-session", f, "-dump", reg, "-af", "ipv4"}
+		return []string{"-local", "AS64496", "-peer", "AS64500", "-session", f, "-dump", reg, "-af", "ipv4", "-max-prefixes", "1"}
 	}
 
 	// A: only the import is over the limit; the export (announce ANY) is decided.
@@ -764,6 +768,51 @@ source: TEST
 	}
 	if n := strings.Count(out, "policy not evaluable"); n != 2 {
 		t.Errorf("C: %d 'policy not evaluable' lines, want 2:\n%s", n, out)
+	}
+}
+
+// TestMaxPrefixesOption: -max-prefixes sets the most prefixes one set's
+// expansion may reach; AS-BIG expands to exactly 2, so 2 decides the report
+// and 1 makes it unevaluable, over -dump and over -irrd alike.
+func TestMaxPrefixesOption(t *testing.T) {
+	f := write(t, "one.mrt", gUpdate(gAt(1), gX, gL, "192.0.2.1", "192.0.2.2", nil, gNLRI("192.0.2.0/24"), gAttrs("192.0.2.1", gSeq(gX))))
+	text := limitRegistry("ANY")
+	reg := write(t, "reg.txt", []byte(text))
+	addr := serve(t, text)
+	base := []string{"-local", "AS64496", "-peer", "AS64500", "-session", f, "-af", "ipv4"}
+	dump := append(slices.Clone(base), "-dump", reg)
+	decided := func(t *testing.T, out string) {
+		t.Helper()
+		if n := strings.Count(out, "policy not evaluable"); n != 0 {
+			t.Errorf("%d 'policy not evaluable' lines, want 0:\n%s", n, out)
+		}
+		wantContains(t, "import line", out, "import, AS64496 from AS64500: 1 route: 1 accepted")
+	}
+	over := func(t *testing.T, out string) {
+		t.Helper()
+		if n := strings.Count(out, "policy not evaluable"); n != 1 {
+			t.Errorf("%d 'policy not evaluable' lines, want 1:\n%s", n, out)
+		}
+		wantContains(t, "limit", out, "MaxPrefixes (1)")
+	}
+	for _, tc := range []struct {
+		name string
+		args []string
+		want func(*testing.T, string)
+	}{
+		{"absent", dump, decided},
+		{"at the size", append(slices.Clone(dump), "-max-prefixes", "2"), decided},
+		{"below", append(slices.Clone(dump), "-max-prefixes", "1"), over},
+		{"huge", append(slices.Clone(dump), "-max-prefixes", "1099511627776"), decided},
+		{"irrd", append(slices.Clone(base), "-irrd", addr, "-sources", "TEST", "-max-prefixes", "1"), over},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			code, out, stderr := run(t, tc.args...)
+			if code != exitOK {
+				t.Fatalf("exit %d; stderr %s\n%s", code, stderr, out)
+			}
+			tc.want(t, out)
+		})
 	}
 }
 
