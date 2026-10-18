@@ -117,13 +117,13 @@ func TestRealData(t *testing.T) {
 	t0 := time.Now()
 	reg := loadRegistry(t, rd.dumps)
 	loadTime := since(t0)
-	t.Logf("registry: %d objects from %d dumps of %d registries (%s), sources in precedence order %s; %d RIPE aut-nums, %d naming a literal import peer (%d with an AS-path regexp toward one), in %s (heap in use %s)",
-		reg.objects, len(rd.dumps), len(reg.registries), strings.Join(reg.registries, ","), strings.Join(reg.sources, ","), len(reg.autnums), len(reg.imports), len(reg.reImports), loadTime, heapInUse())
+	var per []string
+	for _, s := range reg.sources {
+		per = append(per, fmt.Sprintf("%s=%d", s, reg.perSource[s]))
+	}
+	t.Logf("registry: %d objects from %d dumps of %d registries (%s), sources in precedence order %s, objects per source %s; %d RIPE aut-nums, %d naming a literal import peer (%d with an AS-path regexp toward one), in %s (heap in use %s)",
+		reg.objects, len(rd.dumps), len(reg.registries), strings.Join(reg.registries, ","), strings.Join(reg.sources, ","), strings.Join(per, ", "), len(reg.autnums), len(reg.imports), len(reg.reImports), loadTime, heapInUse())
 	if os.Getenv("ROUTECHECK_REALDATA_LOAD_ONLY") == "1" {
-		var per []string
-		for _, s := range reg.sources {
-			per = append(per, fmt.Sprintf("%s=%d", s, reg.perSource[s]))
-		}
 		runtime.GC()
 		t.Logf("LOAD: registries %s; sources %s; objects per source %s; %d RIPE aut-nums selectable; loaded in %s; heap in use after GC %s",
 			strings.Join(reg.registries, ","), strings.Join(reg.sources, ","), strings.Join(per, ", "), len(reg.autnums), loadTime, heapInUse())
@@ -281,7 +281,10 @@ func dumpRegistry(name string) (string, bool) {
 
 // registryIndex is a dump's registry's place in registryOrder.
 func registryIndex(name string) int {
-	reg, _ := dumpRegistry(filepath.Base(name))
+	reg, ok := dumpRegistry(filepath.Base(name))
+	if !ok {
+		panic("realdata: " + name + " is not a dump of a known registry")
+	}
 	return slices.Index(registryOrder, reg)
 }
 
@@ -353,7 +356,10 @@ func loadRegistry(tb testing.TB, dumps []string) *irrRegistry {
 	var order []string
 	families := []types.AddrFamily{{AFI: types.AFIv4, SAFI: types.SAFIUnicast}, {AFI: types.AFIv6, SAFI: types.SAFIUnicast}}
 	for _, name := range dumps {
-		regName, _ := dumpRegistry(filepath.Base(name))
+		regName, ok := dumpRegistry(filepath.Base(name))
+		if !ok {
+			tb.Fatalf("%s is not a dump of a known registry", name)
+		}
 		if !slices.Contains(reg.registries, regName) {
 			reg.registries = append(reg.registries, regName)
 		}

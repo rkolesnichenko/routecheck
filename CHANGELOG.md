@@ -10,11 +10,14 @@ a minor version may change the API.
 
 ### Changed
 
-- `scripts/fetch-data.sh --registries` adds 15 more IRR registries to an
-  existing pinned `MANIFEST`: APNIC, ARIN, AFRINIC, LACNIC, RADB and RADB's
+- `scripts/fetch-data.sh` now fetches everything: RIPE, then 15 more IRR
+  registries, then the RIBs and the VRPs. Every registry is required: one that
+  still fails after its retries stops the script before `MANIFEST` is written,
+  and a rerun fetches only what is missing. `--registries` adds the 15 to an
+  existing pinned `MANIFEST` without touching its pinned lines. The registries
+  are APNIC, ARIN, AFRINIC, LACNIC, RADB and RADB's
   mirrors altdb, bboi, bell, canarie, jpirr, nestegg, nttcom, panix, reach and
-  tc, from the URLs of rpsl's `scripts/fetch-irr-dumps.sh`. The lines that are
-  not registry files stay as they were. The script's header lists the files and
+  tc, from the URLs of rpsl's `scripts/fetch-irr-dumps.sh`. The script's header lists the files and
   the precedence order.
 - `TestRealData` loads every registry the `MANIFEST` pins, in that precedence
   order (RIPE, APNIC, ARIN, AFRINIC, LACNIC, RADB, then the mirrors), where it
@@ -56,9 +59,9 @@ an 8 GB cap at normal priority, with `GOMAXPROCS=4`, `GOMEMLIMIT=6GiB` and
 - **Source order** in the `LOAD:` line is the precedence order: RIPE, APNIC,
   ARIN, AFRINIC, LACNIC, RADB, ALTDB, BBOI, BELL, CANARIE, JPIRR, NESTEGG,
   NTTCOM, PANIX, REACH, TC. No `-NONAUTH` source occurs in any dump.
-- **RPKI filtering.** RADB's dump on RADB's FTP is RPKI-filtered (invalid route
-  objects removed) and the mirrors' dumps are not (rpsl's CLAUDE.md), so the
-  route-object figures below depend on which dump is loaded.
+- **RPKI filtering.** rpsl's CLAUDE.md records RADB's and NTT's dumps as
+  RPKI-filtered (invalid route objects removed), and the other mirrors on RADB's
+  FTP as not, so the route-object figures below depend on which dump is loaded.
 
 #### The memory gate (`.data/every-registry-gate.log`)
 
@@ -83,11 +86,12 @@ With `ROUTECHECK_REALDATA_REGISTRIES=ripe`, every TOTALS figure equals 0.2.0's
 run (`.data/realdata-v0.2.log`) except the wall time and the slowest pair's
 time.
 
-**The 10 pairs over rpsl's default `MaxPrefixes` (1,048,576).** Each is one
-filter whose set expansion passes the limit once every registry resolves its
-sets, so peval returns a `*resolve.SetTooLargeError` and the test counts the
-pair as "set too large". RIPE alone gives none. 8 are in X's export toward a
-transit neighbour (pairs 1, 2, 10, 21, 24, 30, 32 and 33), for example AS6762's
+**The 10 pairs over rpsl's default `MaxPrefixes` (1,048,576).** Each has at
+least one filter whose set expansion passes the limit once every registry
+resolves its sets (the table gives the first filter the check reached), so
+peval returns a `*resolve.SetTooLargeError` and the test counts the pair as
+"set too large". RIPE alone gives none. 8 are in X's export toward a large
+neighbour (AS174, AS1299, AS1273, AS9121; pairs 1, 2, 10, 21, 24, 30, 32 and 33), for example AS6762's
 `export: to AS174 announce AS-SEABONE`. 2 are in L's import (pairs 15 and 53),
 for example AS44032's `import: from AS15645 accept AS-UAIX`
 (`.data/over-limit-terms.log`, made by `.data/policy-lines.sh` from RIPE's
@@ -96,7 +100,7 @@ over-limit filter is.
 
 | pair | set | expansion reached |
 |---|---|---|
-| 1 | AS174 \| AS-DELTA | 1,048,663 |
+| 1 | AS-DELTA | 1,048,663 |
 | 2 | AS-SEABONE | 1,048,960 |
 | 10 and 33 | AS34984:AS-TELLCOM | 1,049,089 |
 | 15 | AS-UAIX | 1,048,718 |
@@ -117,7 +121,9 @@ the 50 pairs both runs checked.
 | Import accepted / rejected / undecided | 2,108,348 / 146 / 0 | 2,108,348 / 146 / 0 |
 | Export accepted / rejected / undecided | 2,591,904 / 47,522 / 225 | 2,592,840 / 47,317 / 225 |
 | Export rejected with a missing set | 47,236 | 47,131 |
-| L's observations with a route object | 528,974 of 2,108,128 | 1,568,538 of 2,108,128 |
+| X's export neighbour reports, with a policy | 1,249, 279 | 1,249, 285 |
+| Decided export routes | 2,639,651 | 2,640,382 |
+| L's observations with a route-object answer | 528,974 of 2,108,128 | 1,568,538 of 2,108,128 |
 
 - **The premise did not hold.** The design expected most of 0.2.0's export
   rejections to be an artifact of loading RIPE alone. On the 50 pairs both runs
@@ -128,10 +134,16 @@ the 50 pairs both runs checked.
   (389,413 - 47,522) are in the 10 pairs the every-registry run could not
   check.
 - **By pair.** Export rejections fell in 17 of the 50 pairs and rose in one:
-  AS31270 from AS25577, 30 to 37, with a missing set both times. The reason for
-  that rise was not investigated.
-- **Route objects change the most.** L's observations with a route object rose
-  from 528,974 to 1,568,538 of 2,108,128 on the same pairs.
+  AS31270 from AS25577, 30 to 37, with a missing set both times. In that pair 5
+  of X's 12 no-policy reports gained a policy (12 to 7 of 30); the mechanism was
+  not measured.
+- **The export denominator moved.** X's neighbour reports are 1,249 in both
+  runs, but those with a policy went from 279 to 285, so 731 more export routes
+  were decided (2,639,651 to 2,640,382; `.data/same-pairs-v2.log`).
+- **Route objects change the most.** L's observations with a route-object
+  answer rose from 528,974 to 1,568,538 of 2,108,128 on the same pairs. The
+  denominator is yes + no; L's observations are 2,108,494, of which 366 are
+  unknown.
 
 **Every-registry TOTALS over the 50 pairs it checked**
 (`.data/realdata-every-registry.log`):
@@ -143,7 +155,9 @@ the 50 pairs both runs checked.
 - route objects: import yes 1,568,538, no 539,590, unknown 366; export yes
   1,888,411, no 751,499, unknown 472;
 - the top missing sets on export are AS-ISPSERVICES, AS-STEFFANN-IPV4,
-  AS-STEFFANN-IPV6 and AS-TELFORT, at 46,052 routes each.
+  AS-STEFFANN-IPV6 and AS-TELFORT, at 46,052 routes each. They are one pair's:
+  AS200184 from AS1136 holds 46,052 of the 47,317 remaining export rejections
+  (`.data/same-pairs-v2.log`).
 
 For comparison, the RIPE-only run over its 60 pairs
 (`.data/realdata-ripe-only.log`) leaves 1 distinct missing set on import and

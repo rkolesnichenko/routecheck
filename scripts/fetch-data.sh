@@ -3,8 +3,8 @@
 # committed — RIPE NCC's terms forbid redistributing RIS files):
 #
 #   scripts/fetch-data.sh                # everything below
-#   scripts/fetch-data.sh --registries   # only the other registries (below)
-#   GOMAXPROCS=4 memguard.sh 8 6000 env GOWORK=off GOMAXPROCS=4 GOMEMLIMIT=6GiB \
+#   scripts/fetch-data.sh --registries   # add the other registries to an existing MANIFEST (below)
+#   MEMGUARD_NORMAL_PRIORITY=1 GOMAXPROCS=4 memguard.sh 8 6000 env GOWORK=off GOMAXPROCS=4 GOMEMLIMIT=6GiB \
 #     ROUTECHECK_REALDATA=$PWD/.data/realdata go test -count=1 -timeout 100m -run TestRealData -v .
 #
 # (TestRealData runs alone, under a memory guard with an 8 GB cap: 3m25s and a
@@ -40,7 +40,8 @@
 # that is not a registry file stays as it is, byte for byte and in order (the
 # RIBs and VRPs stay the ones already pinned), and the registry lines follow.
 # It needs a MANIFEST, so it refuses to run before the first full run.
-# FETCH_DATA_DIR overrides .data/realdata.
+# FETCH_DATA_DIR overrides .data/realdata; a relative one is resolved from the
+# repo root (the script cds there first).
 set -eu
 cd "$(dirname "$0")/.."
 

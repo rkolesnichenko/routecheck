@@ -68,11 +68,14 @@ routecheck -peer AS… -local AS… -collector RIB.mrt \
   -dump lacnic.db.gz -dump radb.db.gz -dump altdb.db.gz …
 ```
 
-The files come from `scripts/fetch-data.sh` (RIPE's split files, then
-`--registries` for the other 15; it pins them in `.data/realdata/MANIFEST`) or
-from rpsl's `scripts/fetch-irr-dumps.sh`. RADB's dump on RADB's FTP is
-RPKI-filtered and the mirrors' are not, so route-object answers depend on which
-dump you load. In the real-data test's load-only mode, loading all 16
+The files come from `scripts/fetch-data.sh`, whose default run fetches RIPE's
+split files, the other 15 registries, the RIBs and the VRPs, and pins them in
+`.data/realdata/MANIFEST` (every registry is required: one that still fails
+after its retries stops the script before MANIFEST is written, and a rerun
+fetches only what is missing; `--registries` adds the 15 to an existing
+MANIFEST without touching its pinned lines), or from rpsl's `scripts/fetch-irr-dumps.sh`. rpsl's CLAUDE.md records RADB's and NTT's dumps as
+RPKI-filtered, and the other mirrors on RADB's FTP as not, so route-object
+answers depend on which dump you load. In the real-data test's load-only mode, loading all 16
 registries took 35.871 s and a peak RSS of 3,534 MB, against 7.468 s and
 1,130 MB for RIPE alone (`.data/load-all.log`, `.data/load-ripe.log`); these are
 not the command's own figures. See "Known limitations" for what
@@ -383,19 +386,25 @@ Both spellings of 0xFFFFFF03 are read, in any case:
   suggested. On the 50 pairs both runs could check, export rejections went from
   47,522 to 47,317 (`.data/same-pairs.log`). What remains mostly names sets no
   loaded registry holds: AS-ISPSERVICES, AS-STEFFANN-IPV4, AS-STEFFANN-IPV6 and
-  AS-TELFORT, at 46,052 routes each, are in none of the 32 dumps
-  (`.data/every-registry-checks.log`). For those, load a source that holds them,
+  AS-TELFORT, at 46,052 routes each (all one pair's: AS200184 from AS1136), are in none of the 32 dumps
+  (`.data/every-registry-checks.log`). For those, load a source that holds them, if any does (none of the 32 dumps does),
   or use `-irrd` with a server that does. What loading more registries changes
-  most is the route-object answer: L's observations with a route object went
-  from 528,974 to 1,568,538 of 2,108,128 on the same pairs. Do not read 0.2.0's 389,413
+  most is the route-object answer: L's observations with a route-object
+  answer went from 528,974 to 1,568,538 of 2,108,128 on the same pairs (the
+  denominator is yes + no; 366 more are unknown). The export denominator moved a
+  little too: with every registry, 731 more export routes were decided on those
+  pairs (2,639,651 to 2,640,382, `.data/same-pairs-v2.log`), and in one pair
+  (AS31270 from AS25577) export rejections rose from 30 to 37; 5 of X's 12
+  no-policy reports there gained a policy, and the mechanism was not measured.
+  Do not read 0.2.0's 389,413
   export rejections falling to 47,522 as the registries' effect: 341,891 of the
   389,413 were in the 10 pairs that could not be checked with every registry
   (389,413 - 47,522), see the next bullet.
 - **A transit-sized filter can exceed rpsl's `MaxPrefixes`.** With every
-  registry loaded, 10 of the 60 sampled pairs have one filter whose expansion
+  registry loaded, 10 of the 60 sampled pairs have at least one filter whose expansion
   passes rpsl's default limit of 1,048,576 prefixes (the largest reached
-  1,053,142), where RIPE alone gives none. 8 are in X's export toward a transit
-  neighbour, 2 in L's import (`.data/over-limit-terms.log`). One over-limit
+  1,053,142), where RIPE alone gives none. 8 are in X's export toward a large
+  neighbour (AS174, AS1299, AS1273, AS9121), 2 in L's import (`.data/over-limit-terms.log`). One over-limit
   filter fails the whole run: for AS6762's `export: to AS174 announce
   AS-SEABONE`, the command exits 3 and prints only
   `routecheck: peval: AS174 | AS-SEABONE: resolve: expansion exceeds MaxPrefixes (1048576): reached 1048960`,

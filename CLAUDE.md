@@ -259,11 +259,13 @@ Packages, imports strictly downward:
   on rpsl's `main`, then update the commit in `pathre/testdata/README.md`:
   `cd ../rpsl/resolve && RPSL_ROUTEMODEL_COMMIT=$(git rev-parse HEAD) RPSL_ROUTEMODEL_VECTORS=$PWD/../../routecheck/pathre/testdata/routemodel-vectors.jsonl go test -count=1 -run TestWriteVectors ./internal/routemodel`
 - **Real data (opt-in).** `scripts/fetch-data.sh` downloads into `.data/realdata/` and pins each
-  file in `.data/realdata/MANIFEST`. It fetches RIPE's split dumps, the newest route-views2 RIB
-  and RIS rrc00 bview, and NTT's VRPs. `scripts/fetch-data.sh --registries` adds the 15 other
-  registries (APNIC, ARIN, AFRINIC, LACNIC, RADB and its ten mirrors) to an existing MANIFEST,
-  keeping its other lines, in the precedence order the run loads them. Then, alone:
-  `GOMAXPROCS=4 memguard.sh 8 6000 env GOWORK=off GOMAXPROCS=4 GOMEMLIMIT=6GiB ROUTECHECK_REALDATA=$PWD/.data/realdata go test -count=1 -timeout 100m -run TestRealData -v .`
+  file in `.data/realdata/MANIFEST`. The default run fetches everything: RIPE's split dumps, the 15 other
+  registries (APNIC, ARIN, AFRINIC, LACNIC, RADB and its ten mirrors; the order they are pinned
+  is the precedence order the run loads them in), then the newest route-views2 RIB and RIS rrc00
+  bview, and NTT's VRPs. Every registry is required: one that still fails after its retries stops
+  the script before MANIFEST is written, and a rerun fetches only what is missing.
+  `--registries` adds the 15 to an existing MANIFEST without touching its pinned lines. Then, alone:
+  `MEMGUARD_NORMAL_PRIORITY=1 GOMAXPROCS=4 memguard.sh 8 6000 env GOWORK=off GOMAXPROCS=4 GOMEMLIMIT=6GiB ROUTECHECK_REALDATA=$PWD/.data/realdata go test -count=1 -timeout 100m -run TestRealData -v .`
   - It loads every registry the MANIFEST pins, but picks the pairs from RIPE's files only.
     Measured on 2026-10-18: every registry took 3m25s and a peak RSS of 6,215 MB
     (`.data/realdata-every-registry.log`), over the 6,144 MB projection threshold of the memory
@@ -301,12 +303,12 @@ in `.data/`, which is never committed.
   its 389,413 export rejections named sets RIPE does not hold. Loading all 16 changed little on
   the 50 pairs both runs could check: export rejections 47,522 to 47,317. What remains mostly
   names sets no loaded registry holds (AS-ISPSERVICES, AS-STEFFANN-IPV4, AS-STEFFANN-IPV6,
-  AS-TELFORT: 46,052 routes each). The "missing set" tag names a clause's missing sets; it does
+  AS-TELFORT: 46,052 routes each, all one pair's: AS200184 from AS1136). The "missing set" tag names a clause's missing sets; it does
   not say a missing set caused the rejection. 341,891 of 0.2.0's 389,413 export rejections were
   in the 10 pairs that could not be checked with every registry (389,413 - 47,522), see
   MaxPrefixes: 389k to 47k is not the registries' effect.
-- **MaxPrefixes.** With every registry loaded, 10 of 60 pairs have one filter over rpsl's default
-  1,048,576 prefixes: 8 in X's export toward a transit neighbour, 2 in L's import
+- **MaxPrefixes.** With every registry loaded, 10 of 60 pairs have at least one filter over rpsl's default
+  1,048,576 prefixes: 8 in X's export toward a large neighbour (AS174, AS1299, AS1273, AS9121), 2 in L's import
   (`.data/over-limit-terms.log`). The command exits 3 when a checked direction holds the
   over-limit filter; check the other direction (`.data/maxprefixes-cli-export.log`,
   `.data/maxprefixes-cli.log`).
