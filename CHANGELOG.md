@@ -62,6 +62,12 @@ an 8 GB cap at normal priority, with `GOMAXPROCS=4`, `GOMEMLIMIT=6GiB` and
 - **RPKI filtering.** rpsl's CLAUDE.md records RADB's and NTT's dumps as
   RPKI-filtered (invalid route objects removed), and the other mirrors on RADB's
   FTP as not, so the route-object figures below depend on which dump is loaded.
+- **Unchecked data.** Only the five regional registries check that whoever
+  registers an object holds the resources; RADB and the mirrors do not, and a
+  mirror may be stale. They hold 1,843,733 of the 4,866,879 objects loaded
+  (RADB 1,370,610 and the ten mirrors 473,123, `.data/load-all.log`). A figure
+  that rests on an object found only there rests on unchecked data; which
+  registry supplied each newly resolved set or route object was not measured.
 
 #### The memory gate (`.data/every-registry-gate.log`)
 
@@ -143,7 +149,8 @@ the 50 pairs both runs checked.
 - **Route objects change the most.** L's observations with a route-object
   answer rose from 528,974 to 1,568,538 of 2,108,128 on the same pairs. The
   denominator is yes + no; L's observations are 2,108,494, of which 366 are
-  unknown.
+  unknown. How much of the rise rests on RADB and the mirrors (unchecked data,
+  above) was not measured.
 
 **Every-registry TOTALS over the 50 pairs it checked**
 (`.data/realdata-every-registry.log`):

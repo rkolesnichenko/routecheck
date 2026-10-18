@@ -75,7 +75,12 @@ after its retries stops the script before MANIFEST is written, and a rerun
 fetches only what is missing; `--registries` adds the 15 to an existing
 MANIFEST without touching its pinned lines), or from rpsl's `scripts/fetch-irr-dumps.sh`. rpsl's CLAUDE.md records RADB's and NTT's dumps as
 RPKI-filtered, and the other mirrors on RADB's FTP as not, so route-object
-answers depend on which dump you load. In the real-data test's load-only mode, loading all 16
+answers depend on which dump you load. Only the five regional registries (RIPE,
+APNIC, ARIN, AFRINIC, LACNIC) check that whoever registers an object holds the
+resources; RADB and the mirrors do not, and a mirror may be stale. That is why
+they come after the regional registries in the order above, and why an answer
+that rests on an object found only there (a route accepted through it, a route
+object it supplies) rests on unchecked data. In the real-data test's load-only mode, loading all 16
 registries took 35.871 s and a peak RSS of 3,534 MB, against 7.468 s and
 1,130 MB for RIPE alone (`.data/load-all.log`, `.data/load-ripe.log`); these are
 not the command's own figures. See "Known limitations" for what
@@ -391,7 +396,11 @@ Both spellings of 0xFFFFFF03 are read, in any case:
   or use `-irrd` with a server that does. What loading more registries changes
   most is the route-object answer: L's observations with a route-object
   answer went from 528,974 to 1,568,538 of 2,108,128 on the same pairs (the
-  denominator is yes + no; 366 more are unknown). The export denominator moved a
+  denominator is yes + no; 366 more are unknown). How much of that rests on
+  RADB and the mirrors, which do not check resource holders, was not measured;
+  they hold 1,843,733 of the 4,866,879 objects loaded (`.data/load-all.log`).
+  The 32 routes the hand check followed rest on AFRINIC's route objects, which
+  come first among the registries holding them. The export denominator moved a
   little too: with every registry, 731 more export routes were decided on those
   pairs (2,639,651 to 2,640,382, `.data/same-pairs-v2.log`), and in one pair
   (AS31270 from AS25577) export rejections rose from 30 to 37; 5 of X's 12
