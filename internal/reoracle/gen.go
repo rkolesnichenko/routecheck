@@ -16,21 +16,25 @@ const (
 	NumASes = 6
 )
 
-// Set names the generator writes. SetA and SetEmpty are in Sets; SetAny is
-// AS-ANY, which matches any AS; SetMissing is in no map, so it matches no AS.
+// Set names the generator writes. SetA, SetEmpty and SetAll are in Sets.
+// SetAll is a set that reaches AS-ANY and SetAny is AS-ANY itself: both
+// match any AS. SetMissing is in no map, so it matches no AS.
 const (
 	SetA       = "AS-A"
 	SetEmpty   = "AS-EMPTY"
+	SetAll     = "AS-ALL"
 	SetAny     = "AS-ANY"
 	SetMissing = "AS-MISSING"
 )
 
 // Sets returns the members of the generator's expanded sets: AS-A holds
-// 64501 and 64502, AS-EMPTY nothing.
+// 64501 and 64502, AS-EMPTY nothing, and AS-ALL, a set that reaches AS-ANY,
+// every AS (resolve.NewAnyASNSet: Any and Has are true, List is empty).
 func Sets() map[types.SetName]resolve.ASNSet {
 	return map[types.SetName]resolve.ASNSet{
 		mustSet(SetA):     resolve.NewASNSet(FirstAS+1, FirstAS+2),
 		mustSet(SetEmpty): resolve.NewASNSet(),
+		mustSet(SetAll):   resolve.NewAnyASNSet(),
 	}
 }
 
@@ -174,7 +178,7 @@ func (g *Gen) atom(depth int) (s string, anchor bool) {
 }
 
 func (g *Gen) set() string {
-	switch g.r.IntN(8) {
+	switch g.r.IntN(10) {
 	case 0, 1, 2:
 		return SetA
 	case 3:
@@ -183,6 +187,10 @@ func (g *Gen) set() string {
 		return SetAny
 	case 6:
 		return strings.ToLower(SetAny) // set names are case-insensitive
+	case 7:
+		return SetAll
+	case 8:
+		return strings.ToLower(SetAll)
 	default:
 		return SetMissing
 	}

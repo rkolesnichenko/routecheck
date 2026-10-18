@@ -10,9 +10,10 @@
 // Its reading of RFC 2622 §5.4:
 //
 //   - The alphabet is AS numbers; an atom matches exactly one AS. "." is any
-//     AS; an AS number that AS; an as-set any AS in the set (AS-ANY any AS
-//     at all; a set the caller did not expand none); "[...]" any AS one of
-//     its items matches, "[^...]" any AS none of them matches.
+//     AS; an AS number that AS; an as-set any AS in the set (AS-ANY, and a
+//     set whose ASNSet.Any is true because it reaches AS-ANY, any AS at all;
+//     a set the caller did not expand none); "[...]" any AS one of its items
+//     matches, "[^...]" any AS none of them matches.
 //   - "^" and "$" are the path's start and end; a regexp with neither
 //     matches if it matches some contiguous part of the path.
 //   - "*", "+", "?", "{m}", "{m,n}", "{m,}" repeat as in POSIX.
@@ -178,6 +179,10 @@ func (t *translator) tr(e policy.ASPathExpr) (string, error) {
 			return anyToken, nil
 		}
 		members, ok := t.sets[x.Name]
+		if ok && members.Any() {
+			// A set reaching AS-ANY: its List is empty, but it holds every AS.
+			return anyToken, nil
+		}
 		if !ok || members.Len() == 0 {
 			return nothing, nil
 		}

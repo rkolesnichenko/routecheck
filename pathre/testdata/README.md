@@ -7,11 +7,15 @@ which answers each vector with rpsl's `routemodel.MatchPath`, a matcher that
 translates the regexp to Go's `regexp` package and is independent of pathre's
 algorithm.
 
-- rpsl commit: `bbe2c4b52886e41d9ca5ee975fe1dc46f50d67fc`
-- Line 1 is a header: `{"generator":...,"rpsl_commit":...,"seed":1}`.
-- Every other line is `{"re":"<regexp body, no < >>","sets":{"AS-A":[64501,64502]},"path":[64500,64501],"match":true}`.
+- rpsl commit: `f3da4d56f3300e1c14c8e4108f91aab8914d15a1` (v0.30.0)
+- Format version 2. Line 1 is a header: `{"version":2,"generator":...,"rpsl_commit":...,"seed":1}`.
+  The reader refuses any other version: version 1 had no `any_sets`, and reading it would take
+  a set that reaches AS-ANY for one that matches nothing.
+- Every other line is `{"re":"<regexp body, no < >>","sets":{"AS-A":[64501,64502]},"any_sets":["AS-ALL"],"path":[64500,64501],"match":true}`.
   A vector routemodel declines carries `"err":"too-complex"` or `"err":"not-single-as"` and no `match`.
-  `AS-ANY` never appears in `sets`; it means any AS.
+- `any_sets` names the sets that reach AS-ANY (`resolve.NewAnyASNSet`: any AS); it is absent when
+  there are none, and a set in it is never in `sets`. The literal `AS-ANY` is in neither; it
+  means any AS.
 - Contents: the five RFC 2622 section 5.4 examples over five paths each, rpsl's
   `TestMatchPath` table, 5,000 seeded random regexps with 4 random paths each,
   and 20 regexps with repetition counts in 1001-5000.
