@@ -428,7 +428,7 @@ Both spellings of 0xFFFFFF03 are read, in any case:
   `policy not evaluable` line. The run goes on and the other reports are decided,
   so there is no need to check the other direction. `-max-prefixes N` lifts the
   limit (below); the default stays rpsl's. On
-  the data of 2026-10-18 all 60 pairs are checked: 82 report instances, 81
+  the data of 2026-10-18 all 60 pairs are checked at rpsl's default limit: 82 report instances, 81
   distinct reports (AS34984's export to AS9121 appears in pairs 10 and 33): 80
   export, in 9 pairs; 2 import, in 2 pairs (one pair, AS44032 from AS15645, has both, so 9 + 2 - 1 = 10); all `MaxPrefixes`, holding 549,847
   routes (`.data/realdata-set-limits.log`,
@@ -453,8 +453,11 @@ Both spellings of 0xFFFFFF03 are read, in any case:
     absent run reproduces the figures above (its ipv4 part equals
     `.data/set-limits-cli.log`: 44 reports, 21 over, 1,160,277 / 0 / 400,748; its
     ipv6 part is 31 reports, 13 over, 20,767 / 0 / 47,597). At 2,097,152 every
-    ipv6 report is decided: its 47,597 routes are 34,396 accepted and 33,968
-    rejected (20,767 + 13,629 = 34,396; 13,629 + 33,968 = 47,597). The 21 ipv4
+    ipv6 report is decided: the 47,597 routes of the 13 reports that were over
+    are now 13,629 accepted and 33,968 rejected (13,629 + 33,968 = 47,597), so
+    ipv6 as a whole (31 reports, 68,364 routes) is 34,396 accepted (20,767 +
+    13,629), 33,968 rejected and 0 undecided (34,396 + 33,968 = 68,364). The
+    reports over the limit: 34 = 21 + 13 (ipv4 + ipv6); reports: 75 = 44 + 31. The 21 ipv4
     reports, all naming `AS-SEABONE`, stay over ("reached 2,097,154"). Nothing up
     to 4,194,304 decided AS6762's ipv4 export on this machine; 4,194,304 needs
     more than 8 GB. 8,388,608 and 16,777,216 were not tried.
@@ -467,10 +470,11 @@ Both spellings of 0xFFFFFF03 are read, in any case:
     59,395 rejected (106,712 - 47,317). Every one of the 59,395 newly rejected
     routes is counted "rejected with a missing set in a failing clause" (106,526 -
     47,131): their filters were decided from what the registries hold, and those
-    lack sets the filters name (AS-SEABONE-V6's expansion has 748 missing sets).
+    lack sets the filters name (pair 2's 33,968 are against AS-SEABONE-V6, whose
+    expansion has 748 missing sets).
     Read them as rejections against incomplete filters, not as proven policy
     violations. Distinct missing sets left on export rose from 116 to 808. The 50
-    pairs that never reached the limit are identical line for line
+    pairs that never reached the limit are identical line for line but for each pair's timing header
     (`.data/max-prefixes-same-pairs.log`); the 10 that differ are the 10 over the
     limit at the default.
   - **Not measured:** limits between 2,097,152 and 4,194,304; anything above

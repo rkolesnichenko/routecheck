@@ -323,7 +323,7 @@ in `.data/`, which is never committed.
   unchecked data. Which registry supplied each newly resolved object was not measured.
 - **MaxPrefixes.** With every registry loaded, 10 of 60 pairs have at least one filter over rpsl's default
   1,048,576 prefixes. That report is unevaluable (R27) and the run goes on; no workaround is
-  needed; `-max-prefixes N` lifts it and the default stays rpsl's. All 60 pairs are checked: 82 report instances, 81 distinct reports
+  needed; `-max-prefixes N` lifts it and the default stays rpsl's. All 60 pairs are checked at rpsl's default limit: 82 report instances, 81 distinct reports
   (AS34984's export to AS9121 appears in pairs 10 and 33): 80 export, in 9 pairs; 2 import, in 2 pairs (one pair, AS44032 from AS15645, has both, so 9 + 2 - 1 = 10);
   549,847 routes (`.data/realdata-set-limits.log`, `.data/set-limits-pairs-unevaluable.log`).
   Cost of `-max-prefixes` (this machine, peak RSS under the 8 GB guard, 2026-10-18): AS9086 from AS6762

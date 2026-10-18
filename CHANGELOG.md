@@ -17,14 +17,14 @@ a minor version may change the API.
 
 ### Measured, max-prefixes
 
-These figures come from the runs of 2026-10-18 at the commit that added `-max-prefixes`, on the same pinned
+These figures come from the runs of 2026-10-18 on the branch that adds `-max-prefixes`, on the same pinned
 files as v0.3.0's measurements, every registry loaded in precedence order, under the memory guard (8 GB cap,
 normal priority, `GOMAXPROCS=4`, `GOMEMLIMIT=6GiB`, one run at a time). Memory is this machine's peak RSS.
 The default stays rpsl's 1,048,576. The logs are kept by the maintainer and are not committed.
 
 #### The command on AS9086 from AS6762, `-af both`, no `-vrps`
 
-| `-max-prefixes` | result | peak RSS | time | reports over MaxPrefixes | AS6762's export (75 reports) | log |
+| `-max-prefixes` | result | peak RSS | time | reports over MaxPrefixes | AS6762's export, both families (75 reports) | log |
 |---|---|---|---|---|---|---|
 | absent (1,048,576) | exit 0 | 5,848 MB | 47 s | 34 | 1,181,044 accepted / 0 rejected / 448,345 undecided | `.data/max-prefixes-cli-default.log` |
 | 2,097,152 | exit 1 | 6,511 MB | 63 s | 21 | 1,194,673 accepted / 33,968 rejected / 400,748 undecided | `.data/max-prefixes-cli-2097152.log` |
@@ -35,9 +35,10 @@ The default stays rpsl's 1,048,576. The logs are kept by the maintainer and are 
   unevaluable report was a MaxPrefixes one.
 - The absent run reproduces v0.3.0: its ipv4 part equals `.data/set-limits-cli.log` (44 reports, 21 over,
   1,160,277 / 0 / 400,748), and its ipv6 part (31 reports, 13 over, 20,767 / 0 / 47,597) equals pair 2's ipv6
-  line in `.data/realdata-set-limits.log`. 1,160,277 + 20,767 = 1,181,044; 400,748 + 47,597 = 448,345.
-- At 2,097,152 every ipv6 report is decided: 47,597 routes, 34,396 accepted and 33,968 rejected (20,767 +
-  13,629 = 34,396; 13,629 + 33,968 = 47,597). Each of the 33,968 rejections is "prefix not in filter" against
+  line in `.data/realdata-set-limits.log`. 1,160,277 + 20,767 = 1,181,044; 400,748 + 47,597 = 448,345; reports over the limit 34 = 21 + 13; reports 75 = 44 + 31.
+- At 2,097,152 every ipv6 report is decided. The 13 reports that were over hold 47,597 routes, now 13,629
+  accepted and 33,968 rejected (13,629 + 33,968 = 47,597). ipv6 as a whole (31 reports, 68,364 routes) is
+  34,396 accepted (20,767 + 13,629), 33,968 rejected and 0 undecided (34,396 + 33,968 = 68,364). Each of the 33,968 rejections is "prefix not in filter" against
   `AS-SEABONE-V6`, whose expansion has 748 missing sets. The 21 ipv4 reports, all naming `AS-SEABONE`, stay
   over ("reached 2,097,154").
 - The command at 2,097,152 equals pair 2 of the every-registry run below: ipv4 1,160,277 / 0 / 400,748, ipv6
