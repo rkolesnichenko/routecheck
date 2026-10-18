@@ -1,6 +1,6 @@
 # Engine differential — input snapshot
 
-copied from rpsl v0.29.0 resolve/testdata/snapshot; synthetic
+copied from rpsl v0.30.0 resolve/testdata/snapshot; synthetic
 
 In routecheck, `bgpq4_test.go` (TestPrefixPolicyMatchesBgpq4) serves these
 four files to bgpq4 with rpsl's `resolve/irrdq` and `resolve/irrdserver`, and

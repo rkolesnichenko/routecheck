@@ -641,14 +641,15 @@ source: TEST
 }
 
 // TestCheckUnevaluable pins ruling R19: a policy peval cannot evaluate
-// because a set in it is AS-ANY (a *resolve.AnySetError) gives that one
+// because a filter names a set that reaches AS-ANY (a *resolve.AnySetError;
+// in an AS-path regexp it would evaluate as any AS) gives that one
 // report Undecided routes with the single reason "unevaluable", while the
 // other direction decides as usual; any other peval error still fails the
 // run.
 func TestCheckUnevaluable(t *testing.T) {
 	autLAny := `aut-num: AS64496
 as-name: L
-import: from AS64500 accept <^AS64500 AS-ANYSET$>
+import: from AS64500 accept AS-ANYSET
 source: TEST
 `
 	anySet := `as-set: AS-ANYSET
@@ -696,7 +697,7 @@ source: TEST
 	autLv6 := `aut-num: AS64496
 as-name: L
 import: from AS64500 accept AS64500
-mp-import: afi ipv6.unicast from AS64500 accept <^AS64500 AS-ANYSET$>
+mp-import: afi ipv6.unicast from AS64500 accept AS-ANYSET
 source: TEST
 `
 	res = run(t, checker(registry(t, autLv6, autX, anySet)), routecheck.ModeSession, capture(), routecheck.Options{
@@ -721,7 +722,7 @@ source: TEST
 	// Collector mode, export toward a neighbour: the same report shape.
 	autXAny := `aut-num: AS64500
 as-name: X
-export: to AS64510 announce <^AS64500 AS-ANYSET$>
+export: to AS64510 announce AS-ANYSET
 source: TEST
 `
 	recs := [][]byte{pitRec(at(0), cpeer(1, asN1)), ribRec(at(0), "192.0.2.0/24", ent(0, asN1, asX))}

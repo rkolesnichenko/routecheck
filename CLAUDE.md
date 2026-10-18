@@ -14,7 +14,7 @@ truth, and the rulings below amend it where they say so. The plan it was built f
   rejects (and why), and which it cannot decide (and why). Which routes X's own export policy does
   not permit.
 - **Per-route hygiene.** Each route's RPKI state, and whether a route object exists.
-- **Dependencies.** It requires the published rpsl v0.29.0 (`rpsl`, `rpsl/types`, `rpsl/resolve`)
+- **Dependencies.** It requires the published rpsl v0.30.0 (`rpsl`, `rpsl/types`, `rpsl/resolve`)
   and mrt v0.1.0.
 - **What is new here.** `pathre` (an AS-path regexp matcher over real paths) and `verdict`.
 - **The "separate consumer".** rpsl's own rule ("never match an AS-path regexp against a live
@@ -50,7 +50,7 @@ Packages, imports strictly downward:
 5. **Go 1.23 floor, conventions C1–C3, API golden** (D9). Options are `X(in)` / `XWith(in,
    XOptions)`. Sentinels use `errors.New`. `api/*.txt` is every exported signature, held by
    `go run ./internal/apisurface -check`.
-6. **go.mod.** It requires exactly rpsl, rpsl/types, rpsl/resolve at v0.29.0 and mrt at v0.1.0
+6. **go.mod.** It requires exactly rpsl, rpsl/types, rpsl/resolve at v0.30.0 and mrt at v0.1.0
    (plus rpsl/ast and rpsl/lexer, indirect). No `replace`, no `go.work`. A bump of rpsl or mrt is
    a decision: update check.sh's list in the same change.
 7. **Never commit or push a local home-directory path.** No absolute path under a home directory
@@ -179,7 +179,8 @@ Packages, imports strictly downward:
   - JSON is a view: outcomes and RPKI states as words, communities as `"hi:lo"`, clauses as
     `{Index, Term, Filter}`. A test decodes it back with `DisallowUnknownFields`.
 - **R19/R21. Unevaluable.** A `*resolve.AnySetError` from `Eval.Import`/`Export` (AS-ANY where
-  rpsl cannot expand it, such as an as-set with `members: AS-ANY` in an AS-path regexp) does not
+  rpsl cannot expand it, such as an as-set with `members: AS-ANY` in filter position, `accept AS-X`; since rpsl v0.30.0 in
+  an AS-path regexp it evaluates as any AS) does not
   fail the run. That one report gets:
   - `Report.Unevaluable` = the error's text, set whatever the route count;
   - an empty `Policy`;
