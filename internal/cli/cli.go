@@ -15,6 +15,7 @@ import (
 
 	"github.com/rkolesnichenko/routecheck"
 	"github.com/rkolesnichenko/routecheck/observe"
+	"github.com/rkolesnichenko/rpsl/resolve"
 	"github.com/rkolesnichenko/rpsl/resolve/peval"
 	"github.com/rkolesnichenko/rpsl/types"
 )
@@ -26,6 +27,12 @@ const (
 	exitUsage    = 2 // a command line routecheck cannot use
 	exitFailed   = 3 // the check could not complete
 )
+
+// expander is the expansion engine's configuration for the peval.Evaluator.
+// It is a test seam: it is zero (rpsl's defaults) and no flag or environment
+// variable sets it; tests lower a limit through it and restore it, so a test
+// that sets it must not call t.Parallel.
+var expander resolve.Expander
 
 // maxExamples is how many routes each group of Rejected or Undecided routes
 // shows.
@@ -140,7 +147,7 @@ func Run(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 	}
 	defer closeSrc()
 
-	c := &routecheck.Checker{Eval: peval.Evaluator{Src: src}, Routes: src}
+	c := &routecheck.Checker{Eval: peval.Evaluator{Src: src, Expander: expander}, Routes: src}
 	results, err := c.Check(ctx, cfg.mode, records(cfg.inputs), cfg.opts)
 	if errors.Is(err, routecheck.ErrOptions) {
 		hint := ""

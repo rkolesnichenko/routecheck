@@ -186,9 +186,14 @@ Packages, imports strictly downward:
   - every route Undecided with the single reason `ReasonUnevaluable` (`"unevaluable"`, Why = the
     error text, Clause and Index -1).
 
-  Every other peval error (a limit, ctx, a Source error, a missing aut-num) still fails the run.
+  Every other peval error (ctx, a Source error, a missing aut-num) still fails the run.
   The same set inside an AS-path regexp (`<^AS-X$>`) is not an error: since rpsl v0.30.0 it is a
   `resolve.ASNSet` whose `Any()` is true, any one AS there (see AnySets).
+- **R27. Over a limit is unevaluable.** A `*resolve.SetTooLargeError` (any of rpsl's four limits:
+  MaxPrefixes, MaxVisited, MaxDepth, MaxConjuncts) takes R19's path for that report only: the same
+  `Unevaluable`, empty `Policy` and `unevaluable` reason. The run goes on, and the exit status is
+  R19's (0 or 1 by the Rejected routes, never 3 for it). There is no new reason kind. The CLI's
+  `expander` variable (internal/cli) is a test-only seam for lowering a limit; no flag sets it.
 - **AnySets.** `Verdict.AnySets` is, on an Accepted verdict only, the canonical names (sorted,
   deduplicated) of the sets reaching AS-ANY named by the AS-path tests, either polarity, of the
   conjunct that accepted the route: per conjunct, not per clause. It is nil otherwise, and always
@@ -306,15 +311,18 @@ in `.data/`, which is never committed.
   AS-TELFORT: 46,052 routes each, all one pair's: AS200184 from AS1136). The "missing set" tag names a clause's missing sets; it does
   not say a missing set caused the rejection. 341,891 of 0.2.0's 389,413 export rejections were
   in the 10 pairs that could not be checked with every registry (389,413 - 47,522), see
-  MaxPrefixes: 389k to 47k is not the registries' effect. Only the five regional registries
+  MaxPrefixes: 389k to 47k is not the registries' effect. With all 60 pairs checked, every registry
+  gives 47,317 export rejections, the same as the 50 pairs alone (`.data/realdata-set-limits.log`,
+  `.data/set-limits-same-pairs.log`); the 10 pairs reject nothing on export: their export routes are
+  accepted or undecided, and 549,845 of the 549,846 undecided are unevaluable. Only the five regional registries
   check resource holders; RADB and the mirrors do not (1,843,733 of the 4,866,879 objects
   loaded, `.data/load-all.log`), so an answer resting on an object found only there rests on
   unchecked data. Which registry supplied each newly resolved object was not measured.
 - **MaxPrefixes.** With every registry loaded, 10 of 60 pairs have at least one filter over rpsl's default
-  1,048,576 prefixes: 8 in X's export toward a large neighbour (AS174, AS1299, AS1273, AS9121), 2 in L's import
-  (`.data/over-limit-terms.log`). The command exits 3 when a checked direction holds the
-  over-limit filter; check the other direction (`.data/maxprefixes-cli-export.log`,
-  `.data/maxprefixes-cli.log`).
+  1,048,576 prefixes. That report is unevaluable (R27) and the run goes on; no workaround is
+  needed and no flag raises the limit. All 60 pairs are checked: 82 report instances, 81 distinct reports
+  (AS34984's export to AS9121 appears in pairs 10 and 33): 80 export, in 9 pairs; 2 import, in 2 pairs (one pair, AS44032 from AS15645, has both, so 9 + 2 - 1 = 10);
+  549,847 routes (`.data/realdata-set-limits.log`, `.data/set-limits-pairs-unevaluable.log`).
 
 ## Process
 

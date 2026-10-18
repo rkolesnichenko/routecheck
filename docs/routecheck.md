@@ -185,7 +185,7 @@ conjuncts. The clauses are then taken in order.
   | `path-too-expensive` | The AS-path regexp exceeded the matcher's work budget for this path (D6). |
   | `path-unbound` | The regexp's PeerAS was not bound. This is a caller's bug: peval always binds it. |
   | `peval` | A term peval could not evaluate for this session, with peval's own reason. For example, `peval: peer router not given` (pass `-local-rtr`/`-peer-rtr`). |
-  | `unevaluable` | peval could not evaluate the whole policy, because it names a set reaching AS-ANY or RS-ANY in filter position (`accept AS-X`, `NOT AS-X`), where rpsl cannot expand it (see "Known limitations"). |
+  | `unevaluable` | peval could not evaluate the whole policy, because it names a set reaching AS-ANY or RS-ANY in filter position (`accept AS-X`, `NOT AS-X`), where rpsl cannot expand it (see "Known limitations"), or a set over one of rpsl's expansion limits (MaxPrefixes, MaxVisited, MaxDepth, MaxConjuncts). |
 
 - **no policy**: L has no import term toward X in this family (or, for export,
   X has no export term toward the neighbour). Its routes are not decided. This is
@@ -287,7 +287,7 @@ One attribute with REFINE or EXCEPT gives several clauses that share one `Index`
 | 0 | Nothing was Rejected. Undecided routes and "no policy" alone exit 0: they are listed, not failures. |
 | 1 | Some route was Rejected, in either direction. |
 | 2 | A bad command line, including options the library refuses (`routecheck.ErrOptions`, such as a session mode run with no `-local` whose capture names no local AS; when the capture holds no record of the session at all, the message says so). |
-| 3 | The run could not complete. Causes: an unreadable file; a capture cut mid-record ("truncated record"), such as a file the daemon is still writing; in session mode, a capture with no record of a session with X (at `-peer-addr`, when given), which is not "X announced nothing" (ruling R23; a 2-byte BGP4MP capture shows a 4-byte X as AS23456, so it holds no record of X); a missing aut-num; peval failing (a limit, a Source error; but not AS-ANY or RS-ANY in filter position, which is "unevaluable"); an unreachable server; a RIB dump in session mode without `-pre-policy`; a broken `-policy` draft; or an interrupted run. |
+| 3 | The run could not complete. Causes: an unreadable file; a capture cut mid-record ("truncated record"), such as a file the daemon is still writing; in session mode, a capture with no record of a session with X (at `-peer-addr`, when given), which is not "X announced nothing" (ruling R23; a 2-byte BGP4MP capture shows a 4-byte X as AS23456, so it holds no record of X); a missing aut-num; peval failing (a Source error; but not AS-ANY or RS-ANY in filter position, nor a set over an expansion limit, which make that report "unevaluable"); an unreachable server; a RIB dump in session mode without `-pre-policy`; a broken `-policy` draft; or an interrupted run. |
 
 ## Which captures qualify for -session
 
@@ -380,7 +380,9 @@ Both spellings of 0xFFFFFF03 are read, in any case:
   `import: from AS1887 ... accept <AS1887:AS-Peerings:AS8501$>`. On the data of
   2026-10-18 that clause accepted 2 of the 39 ipv4 routes seen from AS1887; the
   other 37 were accepted by the clause before it (`.data/realdata-v0.2.log`,
-  `.data/handcheck-AS8308-v0.2.log`).
+  `.data/handcheck-AS8308-v0.2.log`). A set over one of rpsl's expansion
+  limits (MaxPrefixes, MaxVisited, MaxDepth, MaxConjuncts) is reported unevaluable,
+  the same way as a set reaching AS-ANY in filter position, and the run goes on (see the next bullets).
 - **Load every registry a policy's sets reach, and some sets are in none.** A
   set that is missing from the registries you load makes its clause reject
   routes the registry as a whole would accept (D4: "missing from the
@@ -408,20 +410,30 @@ Both spellings of 0xFFFFFF03 are read, in any case:
   Do not read 0.2.0's 389,413
   export rejections falling to 47,522 as the registries' effect: 341,891 of the
   389,413 were in the 10 pairs that could not be checked with every registry
-  (389,413 - 47,522), see the next bullet.
-- **A transit-sized filter can exceed rpsl's `MaxPrefixes`.** With every
-  registry loaded, 10 of the 60 sampled pairs have at least one filter whose expansion
-  passes rpsl's default limit of 1,048,576 prefixes (the largest reached
-  1,053,142), where RIPE alone gives none. 8 are in X's export toward a large
-  neighbour (AS174, AS1299, AS1273, AS9121), 2 in L's import (`.data/over-limit-terms.log`). One over-limit
-  filter fails the whole run: for AS6762's `export: to AS174 announce
-  AS-SEABONE`, the command exits 3 and prints only
-  `routecheck: peval: AS174 | AS-SEABONE: resolve: expansion exceeds MaxPrefixes (1048576): reached 1048960`,
-  with no report for any other neighbour or family
-  (`.data/maxprefixes-cli-export.log`). The same pair's other direction
-  (`-local AS9086 -direction import`) exits 0, with 978,368 routes accepted
-  (`.data/maxprefixes-cli.log`). The workaround is to check the direction that
-  does not hold the over-limit filter; no flag raises the limit.
+  (389,413 - 47,522), see the next bullet. Now that all 60 pairs are checked with
+  every registry, the total is 47,317 export rejections (the same as the 50
+  pairs alone, `.data/set-limits-same-pairs.log`). The 10 pairs reject nothing
+  on export: their export routes are accepted or undecided, and 549,845 of the
+  549,846 undecided are unevaluable (the other one is `peer router not given`,
+  `.data/realdata-set-limits.log`). How many of RIPE alone's 341,891 rejections
+  in those pairs became accepted and how many undecided was not measured route
+  by route.
+- **A transit-sized filter can exceed rpsl's `MaxPrefixes`, and that report is unevaluable.**
+  With every registry loaded, 10 of the 60 sampled pairs have at least one filter
+  whose expansion passes rpsl's default limit of 1,048,576 prefixes (the largest
+  reached 1,053,142), where RIPE alone gives none. Such a report is unevaluable:
+  its routes are Undecided with the reason `unevaluable`, its `Unevaluable` field
+  holds peval's error naming the limit and the set, and the text output prints a
+  `policy not evaluable` line. The run goes on and the other reports are decided,
+  so there is no need to check the other direction. No flag raises the limit. On
+  the data of 2026-10-18 all 60 pairs are checked: 82 report instances, 81
+  distinct reports (AS34984's export to AS9121 appears in pairs 10 and 33): 80
+  export, in 9 pairs; 2 import, in 2 pairs (one pair, AS44032 from AS15645, has both, so 9 + 2 - 1 = 10); all `MaxPrefixes`, holding 549,847
+  routes (`.data/realdata-set-limits.log`,
+  `.data/set-limits-pairs-unevaluable.log`). The command on AS9086 from AS6762
+  exits 0 (it exited 3 before, `.data/maxprefixes-cli-both.log`) and prints, for
+  `export, AS6762 to AS174:`, the `policy not evaluable` line
+  (`.data/set-limits-cli.log`).
 - **Out of scope** (spec §12):
   - ASPA path verification;
   - BMP and RIS Live;

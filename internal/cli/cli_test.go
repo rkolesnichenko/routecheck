@@ -684,6 +684,89 @@ source: TEST
 	}
 }
 
+// TestUnevaluableLimit: a set over one of rpsl's expansion limits makes that
+// report unevaluable (Ruling R27); the run goes on and does not exit 3. The
+// limit is lowered through the package's test seam, expander.
+func TestUnevaluableLimit(t *testing.T) {
+	old := expander
+	t.Cleanup(func() { expander = old })
+	expander = resolve.Expander{MaxPrefixes: 1}
+
+	registry := func(export string) string {
+		return `aut-num: AS64496
+import: from AS64500 accept AS-BIG
+source: TEST
+
+aut-num: AS64500
+export: to AS64496 announce ` + export + `
+source: TEST
+
+as-set: AS-BIG
+members: AS64500, AS64501
+source: TEST
+
+route: 192.0.2.0/24
+origin: AS64500
+source: TEST
+
+route: 198.51.100.0/24
+origin: AS64501
+source: TEST
+`
+	}
+	f := write(t, "one.mrt", gUpdate(gAt(1), gX, gL, "192.0.2.1", "192.0.2.2", nil, gNLRI("192.0.2.0/24"), gAttrs("192.0.2.1", gSeq(gX))))
+	argsFor := func(reg string) []string {
+		return []string{"-local", "AS64496", "-peer", "AS64500", "-session", f, "-dump", reg, "-af", "ipv4"}
+	}
+
+	// A: only the import is over the limit; the export (announce ANY) is decided.
+	regA := write(t, "regA.txt", []byte(registry("ANY")))
+	code, out, stderr := run(t, argsFor(regA)...)
+	if code != exitOK {
+		t.Fatalf("A: exit %d; stderr %s\n%s", code, stderr, out)
+	}
+	wantContains(t, "A text", out,
+		"import, AS64496 from AS64500:",
+		"policy not evaluable, no route decided: ",
+		"MaxPrefixes",
+		"export, AS64500 to AS64496: 1 route: ")
+	if n := strings.Count(out, "policy not evaluable"); n != 1 {
+		t.Errorf("A: %d 'policy not evaluable' lines, want 1:\n%s", n, out)
+	}
+
+	// B: JSON; only the import is unevaluable.
+	code, out, stderr = run(t, append(argsFor(regA), "-format", "json")...)
+	if code != exitOK {
+		t.Fatalf("B: exit %d; stderr %s\n%s", code, stderr, out)
+	}
+	dec := json.NewDecoder(strings.NewReader(out))
+	dec.DisallowUnknownFields()
+	var view []jsonResult
+	if err := dec.Decode(&view); err != nil {
+		t.Fatalf("B: does not decode into the view: %v", err)
+	}
+	if len(view) != 1 || view[0].Import == nil || len(view[0].Export) != 1 {
+		t.Fatalf("B: view: %+v", view)
+	}
+	if got := view[0].Import.Unevaluable; !strings.Contains(got, "MaxPrefixes") {
+		t.Errorf("B: Import.Unevaluable %q does not name MaxPrefixes", got)
+	}
+	if got := view[0].Export[0].Unevaluable; got != "" {
+		t.Errorf("B: Export[0].Unevaluable %q, want empty", got)
+	}
+	wantContains(t, "B json", compact(t, out), `"Kind":"unevaluable"`)
+
+	// C: the export is over the limit too; both reports are unevaluable.
+	regC := write(t, "regC.txt", []byte(registry("AS-BIG")))
+	code, out, stderr = run(t, argsFor(regC)...)
+	if code != exitOK {
+		t.Fatalf("C: exit %d; stderr %s\n%s", code, stderr, out)
+	}
+	if n := strings.Count(out, "policy not evaluable"); n != 2 {
+		t.Errorf("C: %d 'policy not evaluable' lines, want 2:\n%s", n, out)
+	}
+}
+
 // TestAnySetPath: a set reaching AS-ANY named in an AS-path regexp is
 // evaluated; the accepted route says which set let any AS through, in text
 // and in JSON (Verdict.AnySets).
