@@ -244,7 +244,8 @@ func (p *printer) report(dir string, rep routecheck.Report, label, owner string)
 		p.line("    missing from the registry: %s", refs(m))
 	}
 	// Accepted through a set reaching AS-ANY: said here too, since the
-	// per-route note is printed only for the routes -routes lists.
+	// per-route note is printed only for the routes -routes lists. The count
+	// is of routes, each once however many of the sets it names.
 	var anySets []string
 	anyRoutes := 0
 	for _, rv := range rep.Routes {
@@ -255,7 +256,7 @@ func (p *printer) report(dir string, rep routecheck.Report, label, owner string)
 	}
 	if anyRoutes > 0 {
 		slices.Sort(anySets)
-		p.line("    accepted through a set reaching AS-ANY (any AS): %s, %s",
+		p.line("    accepted through a set reaching AS-ANY (any AS): %s (%s)",
 			strings.Join(slices.Compact(anySets), ", "), count(anyRoutes, "route", "routes"))
 	}
 	if rep.Unevaluable != "" {
