@@ -259,21 +259,36 @@ Packages, imports strictly downward:
   on rpsl's `main`, then update the commit in `pathre/testdata/README.md`:
   `cd ../rpsl/resolve && RPSL_ROUTEMODEL_COMMIT=$(git rev-parse HEAD) RPSL_ROUTEMODEL_VECTORS=$PWD/../../routecheck/pathre/testdata/routemodel-vectors.jsonl go test -count=1 -run TestWriteVectors ./internal/routemodel`
 - **Real data (opt-in).** `scripts/fetch-data.sh` downloads into `.data/realdata/` and pins each
-  file in `.data/realdata/MANIFEST`. It fetches RIPE's split dumps, the newest route-views2 RIB
-  and RIS rrc00 bview, and NTT's VRPs. Then, alone:
-  `GOMAXPROCS=4 memguard.sh 8 6000 env GOWORK=off GOMAXPROCS=4 GOMEMLIMIT=6GiB ROUTECHECK_REALDATA=$PWD/.data/realdata go test -count=1 -timeout 100m -run TestRealData -v .`
-  (about 15 minutes and 2.6 GB).
+  file in `.data/realdata/MANIFEST`. The default run fetches everything: RIPE's split dumps, the 15 other
+  registries (APNIC, ARIN, AFRINIC, LACNIC, RADB and its ten mirrors; the order they are pinned
+  is the precedence order the run loads them in), then the newest route-views2 RIB and RIS rrc00
+  bview, and NTT's VRPs. Every registry is required: one that still fails after its retries stops
+  the script before MANIFEST is written, and a rerun fetches only what is missing.
+  `--registries` adds the 15 to an existing MANIFEST without touching its pinned lines. Then, alone:
+  `MEMGUARD_NORMAL_PRIORITY=1 GOMAXPROCS=4 memguard.sh 8 6000 env GOWORK=off GOMAXPROCS=4 GOMEMLIMIT=6GiB ROUTECHECK_REALDATA=$PWD/.data/realdata go test -count=1 -timeout 100m -run TestRealData -v .`
+  - It loads every registry the MANIFEST pins, but picks the pairs from RIPE's files only.
+    Measured on 2026-10-18: every registry took 3m25s and a peak RSS of 6,215 MB
+    (`.data/realdata-every-registry.log`), over the 6,144 MB projection threshold of the memory
+    gate (`.data/every-registry-gate.log`), so ask before running it; RIPE alone took 3m31s and
+    4,741 MB (`.data/realdata-ripe-only.log`).
+  - `ROUTECHECK_REALDATA_REGISTRIES` (comma-separated registry names, case-insensitive; empty means
+    every pinned registry) loads only those. `ripe` is 0.2.0's load.
+  - `ROUTECHECK_REALDATA_LOAD_ONLY=1` loads the registries, logs a `LOAD:` line and stops before
+    the RIBs (all 16: 35.871 s, peak RSS 3,534 MB, `.data/load-all.log`).
   - `ROUTECHECK_REALDATA_SAMPLE`, `_REGEXP_SAMPLE` and `_SEED` choose the sample.
   - `ROUTECHECK_CHECK_TIMEOUT` (default 600s) is the per-pair timeout.
   - The benchmarks (`BenchmarkDecide`, `BenchmarkCollector`; `ROUTECHECK_BENCH_LOCAL`, `_PEER`,
-    `_AF` and `_ROUTES`) use the same data. Their commands are in `bench_test.go`.
+    `_AF` and `_ROUTES`) use the same data and load every pinned registry too. Their commands
+    are in `bench_test.go`. Set `ROUTECHECK_REALDATA_REGISTRIES=ripe` to compare with 0.2.0's
+    figures. Their memory peaks with every registry were not measured.
 - `scripts/release.sh vX.Y.Z`: see the header of the script. Rehearse with `--dry-run`. Never run
   it without the user's go-ahead: it pushes a tag. Never query the Go proxy for an unpushed tag,
   since the proxy caches the miss.
 
 ## Heavy runs
 
-Real-data runs and benchmarks hold a registry (2 to 3 GB). Run them one at a time, alone, under
+Real-data runs and benchmarks hold the registries (TestRealData peak RSS 6,215 MB with all 16,
+4,741 MB with RIPE alone). Run them one at a time, alone, under
 the memory guard, never beside check.sh or each other. Every figure in a doc or the CHANGELOG
 comes from a command run in this work, with its log named. Otherwise it is unknown. The logs live
 in `.data/`, which is never committed.
@@ -284,9 +299,22 @@ in `.data/`, which is never committed.
   RS-ANY), `accept AS-X` or `NOT AS-X`, gives an "unevaluable" report: every route Undecided (R19).
   rpsl refuses to enumerate it, and routecheck gives it no meaning of its own. In an AS-path regexp
   such a set is decided (any one AS) and named in `Verdict.AnySets`.
-- **Registries.** Load every registry a policy's sets reach. RIPE alone was loaded in both
-  real-data runs: in 0.1.0's run 390,727 of 391,010 export rejections named sets RIPE does not
-  hold, and in 0.2's run 389,127 of 389,413.
+- **Registries.** Load every registry a policy's sets reach. 0.2.0 loaded RIPE alone: 389,127 of
+  its 389,413 export rejections named sets RIPE does not hold. Loading all 16 changed little on
+  the 50 pairs both runs could check: export rejections 47,522 to 47,317. What remains mostly
+  names sets no loaded registry holds (AS-ISPSERVICES, AS-STEFFANN-IPV4, AS-STEFFANN-IPV6,
+  AS-TELFORT: 46,052 routes each, all one pair's: AS200184 from AS1136). The "missing set" tag names a clause's missing sets; it does
+  not say a missing set caused the rejection. 341,891 of 0.2.0's 389,413 export rejections were
+  in the 10 pairs that could not be checked with every registry (389,413 - 47,522), see
+  MaxPrefixes: 389k to 47k is not the registries' effect. Only the five regional registries
+  check resource holders; RADB and the mirrors do not (1,843,733 of the 4,866,879 objects
+  loaded, `.data/load-all.log`), so an answer resting on an object found only there rests on
+  unchecked data. Which registry supplied each newly resolved object was not measured.
+- **MaxPrefixes.** With every registry loaded, 10 of 60 pairs have at least one filter over rpsl's default
+  1,048,576 prefixes: 8 in X's export toward a large neighbour (AS174, AS1299, AS1273, AS9121), 2 in L's import
+  (`.data/over-limit-terms.log`). The command exits 3 when a checked direction holds the
+  over-limit filter; check the other direction (`.data/maxprefixes-cli-export.log`,
+  `.data/maxprefixes-cli.log`).
 
 ## Process
 

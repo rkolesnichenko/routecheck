@@ -42,18 +42,28 @@ import (
 // scripts/fetch-data.sh could fetch them, all pinned in
 // $ROUTECHECK_REALDATA/MANIFEST. Run it alone, under a memory guard (8 GB
 // cap), as the published figures were (memguard.sh LIMIT_GB TIMEOUT_S CMD,
-// rpsl's tool). At the guard's normal priority, as below, the 0.2 run took
-// 3m7s by the test's TOTALS line (188 s and 4.2 GB peak RSS by the guard,
-// over the whole go test command); 0.1.0's, whose command did not ask for
-// normal priority, took 15m8s by TOTALS (909 s and 2.6 GB by the guard):
+// rpsl's tool). At the guard's normal priority, as below, the 0.2 run (a
+// RIPE-only load) took 3m7s by the test's TOTALS line (188 s and 4.2 GB peak
+// RSS by the guard, over the whole go test command); 0.1.0's (RIPE only too),
+// whose command did not ask for normal priority, took 15m8s by TOTALS (909 s
+// and 2.6 GB by the guard). On 2026-10-18 with every registry it took 3m25s
+// and 6,215 MB (.data/realdata-every-registry.log), and with
+// ROUTECHECK_REALDATA_REGISTRIES=ripe 3m31s and 4,741 MB
+// (.data/realdata-ripe-only.log):
 //
 //	scripts/fetch-data.sh
 //	MEMGUARD_NORMAL_PRIORITY=1 GOMAXPROCS=4 memguard.sh 8 6000 env GOWORK=off GOMAXPROCS=4 GOMEMLIMIT=6GiB \
 //	  ROUTECHECK_REALDATA=$PWD/.data/realdata \
 //	  go test -count=1 -timeout 100m -run TestRealData -v .
 //
-// It loads RIPE as the command does (a Corpus keeping policy, behind a
-// resolve.Cache), then reads the RIBs once to learn which ASes appear on a
+// It loads every registry dump MANIFEST pins as the command does (one Corpus
+// keeping policy, behind a resolve.Cache), in this precedence order, first
+// wins: RIPE, APNIC, ARIN, AFRINIC, LACNIC, RADB, then RADB's mirrors (ALTDB,
+// BBOI, BELL, CANARIE, JPIRR, NESTEGG, NTTCOM, PANIX, REACH, TC); a source's
+// precedence is that of the first object read with it. The sampled pairs come
+// from RIPE's files only (only its aut-nums are candidates for L and X), so
+// loading more registries changes what the checks resolve, never which pairs
+// are checked. It then reads the RIBs once to learn which ASes appear on a
 // path, and picks a seeded sample of aut-nums L that name an AS X in a
 // literal "import: from X" (or mp-import), X on some path and X's own
 // aut-num in RIPE (the export direction reads it). A second read writes,
@@ -84,6 +94,14 @@ import (
 // BenchmarkDecide takes), the bound on the verdict path memo, and every
 // path-too-expensive verdict.
 //
+// ROUTECHECK_REALDATA_REGISTRIES (comma-separated, case-insensitive; default
+// every registry in MANIFEST) loads only those registries' dumps, still in
+// the order above; naming one MANIFEST does not hold fails the test.
+// ROUTECHECK_REALDATA_LOAD_ONLY=1 loads the registries, logs a LOAD: line
+// (registries, sources in order, objects per source, the RIPE aut-nums
+// selectable, the load time and the heap in use after a GC) and returns before
+// reading VRPs or RIBs.
+//
 // ROUTECHECK_REALDATA_SAMPLE (default 50), ROUTECHECK_REALDATA_REGEXP_SAMPLE
 // (default 10: the pairs added whose import term has an AS-path regexp,
 // which the plain sample may not draw at all) and ROUTECHECK_REALDATA_SEED
@@ -98,8 +116,19 @@ func TestRealData(t *testing.T) {
 
 	t0 := time.Now()
 	reg := loadRegistry(t, rd.dumps)
-	t.Logf("registry: %d objects from %d dumps, %d aut-nums, %d naming a literal import peer (%d with an AS-path regexp toward one), in %s (heap in use %s)",
-		reg.objects, len(rd.dumps), len(reg.autnums), len(reg.imports), len(reg.reImports), since(t0), heapInUse())
+	loadTime := since(t0)
+	var per []string
+	for _, s := range reg.sources {
+		per = append(per, fmt.Sprintf("%s=%d", s, reg.perSource[s]))
+	}
+	t.Logf("registry: %d objects from %d dumps of %d registries (%s), sources in precedence order %s, objects per source %s; %d RIPE aut-nums, %d naming a literal import peer (%d with an AS-path regexp toward one), in %s (heap in use %s)",
+		reg.objects, len(rd.dumps), len(reg.registries), strings.Join(reg.registries, ","), strings.Join(reg.sources, ","), strings.Join(per, ", "), len(reg.autnums), len(reg.imports), len(reg.reImports), loadTime, heapInUse())
+	if os.Getenv("ROUTECHECK_REALDATA_LOAD_ONLY") == "1" {
+		runtime.GC()
+		t.Logf("LOAD: registries %s; sources %s; objects per source %s; %d RIPE aut-nums selectable; loaded in %s; heap in use after GC %s",
+			strings.Join(reg.registries, ","), strings.Join(reg.sources, ","), strings.Join(per, ", "), len(reg.autnums), loadTime, heapInUse())
+		return
+	}
 	var vrps *rpki.VRPs
 	if rd.vrps == "" {
 		t.Logf("VRPs: none in MANIFEST (fetch-data.sh could not fetch them): RPKI states not checked")
@@ -120,6 +149,11 @@ func TestRealData(t *testing.T) {
 	pairs, candidates, reCandidates := pickPairs(reg, seen, sample, reSample, uint64(seed))
 	t.Logf("sample: %d pairs: %d of %d candidate aut-nums, then %d of %d more whose import from X has an AS-path regexp (seed %d)",
 		len(pairs), min(sample, candidates), candidates, len(pairs)-min(sample, candidates), reCandidates, seed)
+	ids := make([]string, len(pairs))
+	for i, p := range pairs {
+		ids[i] = fmt.Sprintf("AS%d-AS%d", p.L, p.X)
+	}
+	t.Logf("PAIRS: %s", strings.Join(ids, " "))
 	if len(pairs) == 0 {
 		t.Fatal("no candidate aut-num: nothing to check")
 	}
@@ -147,7 +181,8 @@ func TestRealData(t *testing.T) {
 		t.Logf("  AS%d: %d entries through it (%s); file %s", x, seen.all[x], strings.Join(per, ", "), sizeOf(files[x]))
 	}
 
-	tot := totals{reasons: [2]tally{{}, {}}, tooExp: tally{}, unevaluable: tally{}, anySets: tally{}}
+	tot := totals{reasons: [2]tally{{}, {}}, tooExp: tally{}, unevaluable: tally{}, anySets: tally{},
+		missingSets: [2]tally{{}, {}}, routeObj: [2]tally{{}, {}}}
 	for i, p := range pairs {
 		r := checkPair(t, reg, vrps, p, files[bgp.ASN(p.X)], timeout)
 		r.log(t, i+1, len(pairs))
@@ -162,7 +197,7 @@ func TestRealData(t *testing.T) {
 // realData is MANIFEST's files by role.
 type realData struct {
 	dir   string
-	dumps []string // ripe.db.*.gz
+	dumps []string // <registry>.db*.gz, in precedence order, the chosen registries only
 	ribs  []string // route-views2 RIBs, then RIS bviews
 	vrps  string   // "" when MANIFEST has none
 }
@@ -198,12 +233,15 @@ func openRealData(tb testing.TB) realData {
 			tb.Fatalf("MANIFEST names %s at %d bytes; it is missing or another size (run scripts/fetch-data.sh)", f[0], size)
 		}
 		switch {
-		case strings.HasPrefix(f[0], "ripe.db."):
-			rd.dumps = append(rd.dumps, path)
 		case strings.HasPrefix(f[0], "rv2-"), strings.HasPrefix(f[0], "rrc"):
 			rd.ribs = append(rd.ribs, path)
 		case strings.HasPrefix(f[0], "vrps-"):
 			rd.vrps = path
+		default:
+			if _, ok := dumpRegistry(f[0]); !ok {
+				tb.Fatalf("MANIFEST: %s is neither a dump of a known registry, a RIB nor VRPs", f[0])
+			}
+			rd.dumps = append(rd.dumps, path)
 		}
 	}
 	// route-views2 first, then RIS ("rrc" would sort before "rv2").
@@ -214,33 +252,118 @@ func openRealData(tb testing.TB) realData {
 		return 1
 	}
 	slices.SortStableFunc(rd.ribs, func(a, b string) int { return cmp.Compare(rank(a), rank(b)) })
+	rd.dumps = orderDumps(rd.dumps)
+	dumps, err := chooseDumps(rd.dumps, os.Getenv("ROUTECHECK_REALDATA_REGISTRIES"))
+	if err != nil {
+		tb.Fatalf("ROUTECHECK_REALDATA_REGISTRIES: %v", err)
+	}
+	rd.dumps = dumps
 	if len(rd.dumps) == 0 || len(rd.ribs) == 0 {
 		tb.Fatalf("MANIFEST names %d dumps and %d RIBs; it needs both", len(rd.dumps), len(rd.ribs))
 	}
 	return rd
 }
 
-// ripeRegistry is RIPE loaded as the command loads it.
-type ripeRegistry struct {
+// registryOrder is the precedence of the registries a run can load, first
+// wins: RIPE, the other RIRs, RADB, then RADB's mirrors.
+var registryOrder = []string{"ripe", "apnic", "arin", "afrinic", "lacnic", "radb", "altdb", "bboi", "bell", "canarie", "jpirr", "nestegg", "nttcom", "panix", "reach", "tc"}
+
+// dumpRegistry returns the registry a dump's base name belongs to: the part
+// before the first ".db." or ".db.gz". ok is false when that registry is not
+// in registryOrder or the name has neither form.
+func dumpRegistry(name string) (string, bool) {
+	reg, _, found := strings.Cut(name, ".db.")
+	if !found || !slices.Contains(registryOrder, reg) {
+		return "", false
+	}
+	return reg, true
+}
+
+// registryIndex is a dump's registry's place in registryOrder.
+func registryIndex(name string) int {
+	reg, ok := dumpRegistry(filepath.Base(name))
+	if !ok {
+		panic("realdata: " + name + " is not a dump of a known registry")
+	}
+	return slices.Index(registryOrder, reg)
+}
+
+// orderDumps returns the dumps stably sorted by registryOrder, keeping their
+// given order within a registry. Every name must pass dumpRegistry.
+func orderDumps(dumps []string) []string {
+	out := slices.Clone(dumps)
+	slices.SortStableFunc(out, func(a, b string) int { return cmp.Compare(registryIndex(a), registryIndex(b)) })
+	return out
+}
+
+// chooseDumps keeps the dumps of the registries want names
+// (ROUTECHECK_REALDATA_REGISTRIES: comma-separated, case-insensitive); ""
+// keeps every dump. A name that is not in registryOrder, or that has no dump
+// in dumps, is an error naming it. The result keeps dumps' order.
+func chooseDumps(dumps []string, want string) ([]string, error) {
+	if want == "" {
+		return slices.Clone(dumps), nil
+	}
+	chosen := map[string]bool{}
+	for _, w := range strings.Split(want, ",") {
+		w = strings.ToLower(strings.TrimSpace(w))
+		if !slices.Contains(registryOrder, w) {
+			return nil, fmt.Errorf("%q is not a registry (one of %s)", w, strings.Join(registryOrder, ", "))
+		}
+		chosen[w] = true
+	}
+	var out []string
+	has := map[string]bool{}
+	for _, d := range dumps {
+		if reg, ok := dumpRegistry(filepath.Base(d)); ok && chosen[reg] {
+			out = append(out, d)
+			has[reg] = true
+		}
+	}
+	for _, w := range registryOrder {
+		if chosen[w] && !has[w] {
+			return nil, fmt.Errorf("registry %q has no dump in MANIFEST", w)
+		}
+	}
+	return out, nil
+}
+
+// irrRegistry is the chosen registries loaded as the command loads them. The
+// pairs' selection maps (imports, reImports, autnums) hold RIPE's aut-nums
+// only; the Corpus holds every registry.
+type irrRegistry struct {
 	src     resolve.PolicySource      // a resolve.Cache over the Corpus's source
-	imports map[types.ASN][]types.ASN // aut-num → the ASes it names as "from ASn" in import:/mp-import:, sorted
+	imports map[types.ASN][]types.ASN // RIPE aut-num → the ASes it names as "from ASn" in import:/mp-import:, sorted
 	// reImports is imports restricted to the terms whose filter has an
 	// AS-path regexp.
-	reImports map[types.ASN][]types.ASN
-	autnums   map[types.ASN]bool // the aut-nums the dumps hold
-	objects   int                // objects kept by the Corpus
+	reImports  map[types.ASN][]types.ASN
+	autnums    map[types.ASN]bool // the aut-nums RIPE's dumps hold
+	objects    int                // objects kept by the Corpus
+	sources    []string           // the precedence passed to Corpus.Source: first appearance of source: in file order
+	perSource  map[string]int     // objects kept per source (upper case)
+	registries []string           // the registries loaded, in order
 }
 
 // loadRegistry parses the dumps (rpsl.Parse, rpsl.Decode) into one
 // resolve.Corpus keeping policy, source precedence by first appearance, and
-// wraps its source in a resolve.Cache, as internal/cli's loadPolicy does.
-func loadRegistry(tb testing.TB, dumps []string) *ripeRegistry {
+// wraps its source in a resolve.Cache, as internal/cli's loadPolicy does. The
+// dumps are given in precedence order (orderDumps). Only the files of RIPE
+// feed the selection maps, so adding registries never changes the pairs.
+func loadRegistry(tb testing.TB, dumps []string) *irrRegistry {
 	tb.Helper()
 	c := &resolve.Corpus{KeepPolicy: true}
-	reg := &ripeRegistry{imports: map[types.ASN][]types.ASN{}, reImports: map[types.ASN][]types.ASN{}, autnums: map[types.ASN]bool{}}
+	reg := &irrRegistry{imports: map[types.ASN][]types.ASN{}, reImports: map[types.ASN][]types.ASN{}, autnums: map[types.ASN]bool{}, perSource: map[string]int{}}
 	var order []string
 	families := []types.AddrFamily{{AFI: types.AFIv4, SAFI: types.SAFIUnicast}, {AFI: types.AFIv6, SAFI: types.SAFIUnicast}}
 	for _, name := range dumps {
+		regName, ok := dumpRegistry(filepath.Base(name))
+		if !ok {
+			tb.Fatalf("%s is not a dump of a known registry", name)
+		}
+		if !slices.Contains(reg.registries, regName) {
+			reg.registries = append(reg.registries, regName)
+		}
+		fromRIPE := regName == "ripe"
 		f, err := os.Open(name)
 		if err != nil {
 			tb.Fatal(err)
@@ -262,10 +385,12 @@ func loadRegistry(tb testing.TB, dumps []string) *ripeRegistry {
 			if obj == nil {
 				continue
 			}
+			var source string
 			for _, a := range o.Attributes() {
 				if fs := strings.Fields(a.Value); strings.EqualFold(a.Name, "source") && len(fs) > 0 {
-					if s := strings.ToUpper(fs[0]); !slices.Contains(order, s) {
-						order = append(order, s)
+					source = strings.ToUpper(fs[0])
+					if !slices.Contains(order, source) {
+						order = append(order, source)
 					}
 					break
 				}
@@ -274,8 +399,9 @@ func loadRegistry(tb testing.TB, dumps []string) *ripeRegistry {
 				continue
 			}
 			reg.objects++
+			reg.perSource[source]++
 			an, ok := obj.(*object.AutNum)
-			if !ok {
+			if !ok || !fromRIPE {
 				continue
 			}
 			reg.autnums[an.AS] = true
@@ -310,6 +436,7 @@ func loadRegistry(tb testing.TB, dumps []string) *ripeRegistry {
 		}
 		f.Close()
 	}
+	reg.sources = order
 	reg.src = resolve.NewCache(c.Source(order...), 0)
 	return reg
 }
@@ -472,7 +599,7 @@ type pair struct{ L, X types.ASN }
 // AS-path regexp in its filter (few policies have one, and only they
 // exercise pathre and the path memo). It returns the pairs, the first
 // sample's first, and the number of candidates of each kind.
-func pickPairs(reg *ripeRegistry, seen *asCounts, n, m int, seed uint64) (pairs []pair, candidates, reCandidates int) {
+func pickPairs(reg *irrRegistry, seen *asCounts, n, m int, seed uint64) (pairs []pair, candidates, reCandidates int) {
 	rng := rand.New(rand.NewPCG(seed, 0))
 	sample := func(peersOf map[types.ASN][]types.ASN, n int, skip map[types.ASN]bool) int {
 		usable := func(l types.ASN) []types.ASN {
@@ -746,8 +873,14 @@ type pairResult struct {
 	// Rejected routes for which a failing clause names a set the registry
 	// does not hold: import, export.
 	rejMissing [2]int
-	examples   []string
-	tooExp     tally // ReasonPathTooExpensive terms
+	// missingSets counts, per direction, the Rejected routes whose failing
+	// clauses name each missing set (a set once per route).
+	missingSets [2]tally
+	// routeObj counts, per direction and report, the routes by the route-object
+	// answer: "yes", "no", "unknown" (RouteVerdict.RouteObj true, false, nil).
+	routeObj [2]tally
+	examples []string
+	tooExp   tally // ReasonPathTooExpensive terms
 	// unevaluable counts the routes of each unevaluable report, by report
 	// and peval's error (ReasonUnevaluable).
 	unevaluable tally
@@ -770,9 +903,10 @@ type pairResult struct {
 }
 
 // checkPair runs one collector-mode Check and summarizes it.
-func checkPair(tb testing.TB, reg *ripeRegistry, vrps *rpki.VRPs, p pair, file string, timeout time.Duration) pairResult {
+func checkPair(tb testing.TB, reg *irrRegistry, vrps *rpki.VRPs, p pair, file string, timeout time.Duration) pairResult {
 	tb.Helper()
-	r := pairResult{p: p, reasons: [2]tally{{}, {}}, tooExp: tally{}, unevaluable: tally{}, anySets: tally{}}
+	r := pairResult{p: p, reasons: [2]tally{{}, {}}, tooExp: tally{}, unevaluable: tally{}, anySets: tally{},
+		missingSets: [2]tally{{}, {}}, routeObj: [2]tally{{}, {}}}
 	counter := &countingSource{Source: reg.src}
 	c := &routecheck.Checker{Eval: peval.Evaluator{Src: reg.src}, Routes: counter}
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
@@ -920,12 +1054,26 @@ func (r *pairResult) report(rep *routecheck.Report, dir int, label string) {
 				r.anySets[label+": "+s]++
 			}
 		}
+		switch {
+		case rv.RouteObj == nil:
+			r.routeObj[dir]["unknown"]++
+		case *rv.RouteObj:
+			r.routeObj[dir]["yes"]++
+		default:
+			r.routeObj[dir]["no"]++
+		}
 		if rv.Verdict.Outcome == verdict.Rejected {
+			named := map[string]bool{}
 			for _, f := range rv.Verdict.Fails {
-				if len(f.Missing) > 0 {
-					r.rejMissing[dir]++
-					break
+				for _, m := range f.Missing {
+					named[m.String()] = true
 				}
+			}
+			if len(named) > 0 {
+				r.rejMissing[dir]++
+			}
+			for k := range named {
+				r.missingSets[dir][k]++
 			}
 		}
 		if rv.Verdict.Outcome == verdict.Rejected && examples < 2 && len(r.examples) < 6 {
@@ -1047,6 +1195,7 @@ type totals struct {
 	impNoPolicy, expReports, expNoPol   int
 	reasons                             [2]tally
 	rejMissing                          [2]int
+	missingSets, routeObj               [2]tally
 	tooExp                              tally
 	unevaluable                         tally
 	anySetRoutes                        [2]int
@@ -1093,6 +1242,10 @@ func (t *totals) add(r *pairResult) {
 	}
 	t.rejMissing[0] += r.rejMissing[0]
 	t.rejMissing[1] += r.rejMissing[1]
+	for d := range 2 {
+		t.missingSets[d].addAll(r.missingSets[d])
+		t.routeObj[d].addAll(r.routeObj[d])
+	}
 	t.reasons[0].addAll(r.reasons[0])
 	t.reasons[1].addAll(r.reasons[1])
 	t.tooExp.addAll(r.tooExp)
@@ -1119,6 +1272,12 @@ func (t *totals) log(tb testing.TB, wall time.Duration) {
 	tb.Logf("TOTALS: %d observations (family × pair); import: %s (%d families with no policy); export: %d neighbour reports (%d no policy): %s",
 		t.obs, t.imp, t.impNoPolicy, t.expReports, t.expNoPol, t.exp)
 	tb.Logf("TOTALS: rejected with a missing set in a failing clause: import %d, export %d", t.rejMissing[0], t.rejMissing[1])
+	tb.Logf("TOTALS: missing sets left: import %d distinct, export %d distinct", len(t.missingSets[0]), len(t.missingSets[1]))
+	tb.Logf("TOTALS: missing sets by routes, import: %s", topN(t.missingSets[0], 20))
+	tb.Logf("TOTALS: missing sets by routes, export: %s", topN(t.missingSets[1], 20))
+	for d, name := range [2]string{"import", "export"} {
+		tb.Logf("TOTALS: route objects, %s: yes %d, no %d, unknown %d", name, t.routeObj[d]["yes"], t.routeObj[d]["no"], t.routeObj[d]["unknown"])
+	}
 	tb.Logf("TOTALS: undecided reasons, import: %s", t.reasons[0])
 	tb.Logf("TOTALS: undecided reasons, export: %s", t.reasons[1])
 	tb.Logf("TOTALS: path-too-expensive verdicts: %d; routes decided under a policy with an AS-path test: %d", sumTally(t.tooExp), t.pathRoutes)
@@ -1140,6 +1299,21 @@ func (t *totals) log(tb testing.TB, wall time.Duration) {
 	if t.hygCalls != t.hygKeys {
 		tb.Errorf("hygiene read an (origin, family) more than once: %d reads for %d keys", t.hygCalls, t.hygKeys)
 	}
+}
+
+// topN is the n largest entries of t as "key count", comma-separated, by count
+// descending then key ascending; "" for an empty tally.
+func topN(t tally, n int) string {
+	keys := slices.Collect(maps.Keys(t))
+	slices.SortFunc(keys, func(a, b string) int { return cmp.Or(cmp.Compare(t[b], t[a]), cmp.Compare(a, b)) })
+	var b strings.Builder
+	for i, k := range keys[:min(n, len(keys))] {
+		if i > 0 {
+			b.WriteString(", ")
+		}
+		fmt.Fprintf(&b, "%s %d", k, t[k])
+	}
+	return b.String()
 }
 
 func sumTally(t tally) int {
