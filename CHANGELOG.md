@@ -15,6 +15,80 @@ a minor version may change the API.
   non-numbers are refused with exit status 2. It applies with `-dump` and with
   `-irrd`.
 
+### Measured, max-prefixes
+
+These figures come from the runs of 2026-10-18 at the commit that added `-max-prefixes`, on the same pinned
+files as v0.3.0's measurements, every registry loaded in precedence order, under the memory guard (8 GB cap,
+normal priority, `GOMAXPROCS=4`, `GOMEMLIMIT=6GiB`, one run at a time). Memory is this machine's peak RSS.
+The default stays rpsl's 1,048,576. The logs are kept by the maintainer and are not committed.
+
+#### The command on AS9086 from AS6762, `-af both`, no `-vrps`
+
+| `-max-prefixes` | result | peak RSS | time | reports over MaxPrefixes | AS6762's export (75 reports) | log |
+|---|---|---|---|---|---|---|
+| absent (1,048,576) | exit 0 | 5,848 MB | 47 s | 34 | 1,181,044 accepted / 0 rejected / 448,345 undecided | `.data/max-prefixes-cli-default.log` |
+| 2,097,152 | exit 1 | 6,511 MB | 63 s | 21 | 1,194,673 accepted / 33,968 rejected / 400,748 undecided | `.data/max-prefixes-cli-2097152.log` |
+| 4,194,304 | stopped by the guard (over 8 GB) | 8,411 MB when stopped | 82 s | not known | not known | `.data/max-prefixes-cli-4194304.log` |
+
+- 8,388,608 and 16,777,216 were not tried, after the guard stopped 4,194,304.
+- The import line is the same in both completed runs: 978,368 accepted, 0 rejected, 0 undecided. Every
+  unevaluable report was a MaxPrefixes one.
+- The absent run reproduces v0.3.0: its ipv4 part equals `.data/set-limits-cli.log` (44 reports, 21 over,
+  1,160,277 / 0 / 400,748), and its ipv6 part (31 reports, 13 over, 20,767 / 0 / 47,597) equals pair 2's ipv6
+  line in `.data/realdata-set-limits.log`. 1,160,277 + 20,767 = 1,181,044; 400,748 + 47,597 = 448,345.
+- At 2,097,152 every ipv6 report is decided: 47,597 routes, 34,396 accepted and 33,968 rejected (20,767 +
+  13,629 = 34,396; 13,629 + 33,968 = 47,597). Each of the 33,968 rejections is "prefix not in filter" against
+  `AS-SEABONE-V6`, whose expansion has 748 missing sets. The 21 ipv4 reports, all naming `AS-SEABONE`, stay
+  over ("reached 2,097,154").
+- The command at 2,097,152 equals pair 2 of the every-registry run below: ipv4 1,160,277 / 0 / 400,748, ipv6
+  34,396 / 33,968 / 0.
+
+#### `TestRealData`, 60 pairs, every registry, `ROUTECHECK_REALDATA_MAX_PREFIXES=2097152` (`.data/realdata-max-prefixes.log`)
+
+PASS; the log's `limits: MaxPrefixes 2097152` line confirms the limit; 60 of 60 pairs checked, 0 timed out,
+0 set too large. Wall time 4m38s (the checks 1m28s; the slowest pair, AS9086 from AS6762, 27.83 s). Peak RSS
+6,565 MB; pressure level 1; swap grew 0 MB.
+
+| | default (v0.3.0, `.data/realdata-set-limits.log`) | 2,097,152 |
+|---|---|---|
+| observations | 4,540,048 | 4,540,048 |
+| import accepted / rejected / undecided | 3,787,990 / 146 / 2 | 3,787,990 / 146 / 2 |
+| export accepted | 4,401,731 | 4,491,432 |
+| export rejected | 47,317 | 106,712 |
+| export undecided | 550,071 | 400,975 |
+| export rejected with a missing set in a failing clause | 47,131 | 106,526 |
+| distinct missing sets left, export | 116 | 808 |
+| unevaluable reports, distinct | 81 | 24 |
+| unevaluable report instances, counted per pair | 82 | 24 |
+| routes in unevaluable reports | 549,847 | 400,751 |
+| wall time | 3m45s | 4m38s |
+| peak RSS | 6,482 MB | 6,565 MB |
+
+- Routes decided that were unevaluable: 549,847 - 400,751 = 149,096, equal to the export undecided drop
+  (550,071 - 400,975). Export accepted rose by 89,701 (4,491,432 - 4,401,731) and export rejected by 59,395
+  (106,712 - 47,317); 89,701 + 59,395 = 149,096.
+- Every one of the 59,395 newly rejected routes is counted "rejected with a missing set in a failing clause"
+  (106,526 - 47,131 = 59,395): their filters were decided from what the registries hold, and those lack
+  sets the filters name. They are rejections against incomplete filters, not proven policy violations.
+- The 24 reports left (`.data/max-prefixes-pairs-unevaluable.log`), in 3 pairs: pair 2 (AS9086 from
+  AS6762), 21 export reports naming `AS-SEABONE`, "reached 2,097,154"; pair 15 (AS44032 from AS15645), 2
+  reports of 1 route each, "reached 2,100,534" (AS15645's export to AS25372, and AS44032's `accept AS-UAIX`);
+  pair 53 (AS42861 from AS6695), 1 import report of 1 route, `accept AS-DECIX AND NOT <...>`, "reached
+  2,097,192". The other 7 of v0.3.0's 10 over-limit pairs (1, 10, 21, 24, 30, 32, 33) have none.
+
+#### The 50 pairs that never reached the limit did not move (`.data/max-prefixes-same-pairs.log`)
+
+Every line but the timing header of every pair's block, `.data/realdata-set-limits.log` against
+`.data/realdata-max-prefixes.log`: 60 pairs, 50 identical, 10 differing (1, 2, 10, 15, 21, 24, 30, 32, 33,
+53), exactly the 10 over the limit at the default (`.data/set-limits-pairs-unevaluable.log`).
+
+#### Not measured
+
+- Limits between 2,097,152 and 4,194,304, and anything above 4,194,304 (the guard's cap).
+- How large `AS-SEABONE`'s full expansion is; it is above 2,097,154.
+- Memory on a machine without the 8 GB cap.
+- Which of the newly rejected routes would be accepted if the missing sets existed.
+
 ## [0.3.0] - 2026-10-18
 
 ### Changed

@@ -426,7 +426,8 @@ Both spellings of 0xFFFFFF03 are read, in any case:
   its routes are Undecided with the reason `unevaluable`, its `Unevaluable` field
   holds peval's error naming the limit and the set, and the text output prints a
   `policy not evaluable` line. The run goes on and the other reports are decided,
-  so there is no need to check the other direction. No flag raises the limit. On
+  so there is no need to check the other direction. `-max-prefixes N` lifts the
+  limit (below); the default stays rpsl's. On
   the data of 2026-10-18 all 60 pairs are checked: 82 report instances, 81
   distinct reports (AS34984's export to AS9121 appears in pairs 10 and 33): 80
   export, in 9 pairs; 2 import, in 2 pairs (one pair, AS44032 from AS15645, has both, so 9 + 2 - 1 = 10); all `MaxPrefixes`, holding 549,847
@@ -435,6 +436,47 @@ Both spellings of 0xFFFFFF03 are read, in any case:
   exits 0 (it exited 3 before, `.data/maxprefixes-cli-both.log`) and prints, for
   `export, AS6762 to AS174:`, the `policy not evaluable` line
   (`.data/set-limits-cli.log`).
+  - **`-max-prefixes N` raises the limit, and memory pays for it.** Absent, the
+    limit is rpsl's 1,048,576 (the user's decision: the default stays). The cost
+    is measured on one pair, AS9086 from AS6762, every registry, the command
+    with `-af both` and without `-vrps`. Memory is this machine's peak RSS under
+    the memory guard's 8 GB cap, measured 2026-10-18:
+
+    | `-max-prefixes` | result | peak RSS | time | reports over MaxPrefixes | AS6762's export, both families (75 reports) | log |
+    |---|---|---|---|---|---|---|
+    | absent (1,048,576) | exit 0 | 5,848 MB | 47 s | 34 | 1,181,044 accepted / 0 rejected / 448,345 undecided | `.data/max-prefixes-cli-default.log` |
+    | 2,097,152 | exit 1 | 6,511 MB | 63 s | 21 | 1,194,673 accepted / 33,968 rejected / 400,748 undecided | `.data/max-prefixes-cli-2097152.log` |
+    | 4,194,304 | stopped by the guard (over 8 GB) | 8,411 MB when stopped | 82 s | not known | not known | `.data/max-prefixes-cli-4194304.log` |
+
+    The import line is the same in both completed runs (978,368 accepted, 0
+    rejected, 0 undecided). Every unevaluable report was a MaxPrefixes one. The
+    absent run reproduces the figures above (its ipv4 part equals
+    `.data/set-limits-cli.log`: 44 reports, 21 over, 1,160,277 / 0 / 400,748; its
+    ipv6 part is 31 reports, 13 over, 20,767 / 0 / 47,597). At 2,097,152 every
+    ipv6 report is decided: its 47,597 routes are 34,396 accepted and 33,968
+    rejected (20,767 + 13,629 = 34,396; 13,629 + 33,968 = 47,597). The 21 ipv4
+    reports, all naming `AS-SEABONE`, stay over ("reached 2,097,154"). Nothing up
+    to 4,194,304 decided AS6762's ipv4 export on this machine; 4,194,304 needs
+    more than 8 GB. 8,388,608 and 16,777,216 were not tried.
+  - **The every-registry run at 2,097,152** (`.data/realdata-max-prefixes.log`,
+    `ROUTECHECK_REALDATA_MAX_PREFIXES`): PASS, 60 of 60 pairs checked, 0 set too
+    large. Wall time 4m38s (3m45s at the default), peak RSS 6,565 MB (6,482 MB).
+    Unevaluable reports: 24 (from 81), in 3 pairs (2, 15, 53); routes in
+    them 400,751 (from 549,847). 149,096 routes were decided that were
+    unevaluable (549,847 - 400,751): 89,701 accepted (4,491,432 - 4,401,731) and
+    59,395 rejected (106,712 - 47,317). Every one of the 59,395 newly rejected
+    routes is counted "rejected with a missing set in a failing clause" (106,526 -
+    47,131): their filters were decided from what the registries hold, and those
+    lack sets the filters name (AS-SEABONE-V6's expansion has 748 missing sets).
+    Read them as rejections against incomplete filters, not as proven policy
+    violations. Distinct missing sets left on export rose from 116 to 808. The 50
+    pairs that never reached the limit are identical line for line
+    (`.data/max-prefixes-same-pairs.log`); the 10 that differ are the 10 over the
+    limit at the default.
+  - **Not measured:** limits between 2,097,152 and 4,194,304; anything above
+    4,194,304, the guard's cap; how large `AS-SEABONE`'s full expansion is (it is
+    above 2,097,154); memory on a machine without the 8 GB cap; which of the newly
+    rejected routes would be accepted if the missing sets existed.
 - **Out of scope** (spec §12):
   - ASPA path verification;
   - BMP and RIS Live;
