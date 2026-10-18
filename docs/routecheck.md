@@ -381,8 +381,8 @@ Both spellings of 0xFFFFFF03 are read, in any case:
   2026-10-18 that clause accepted 2 of the 39 ipv4 routes seen from AS1887; the
   other 37 were accepted by the clause before it (`.data/realdata-v0.2.log`,
   `.data/handcheck-AS8308-v0.2.log`). A set over one of rpsl's expansion
-  limits (MaxPrefixes, MaxVisited, MaxDepth, MaxConjuncts) is reported the same
-  way, and the run goes on (see the next bullets).
+  limits (MaxPrefixes, MaxVisited, MaxDepth, MaxConjuncts) is reported unevaluable,
+  the same way as a set reaching AS-ANY in filter position, and the run goes on (see the next bullets).
 - **Load every registry a policy's sets reach, and some sets are in none.** A
   set that is missing from the registries you load makes its clause reject
   routes the registry as a whole would accept (D4: "missing from the
@@ -413,25 +413,27 @@ Both spellings of 0xFFFFFF03 are read, in any case:
   (389,413 - 47,522), see the next bullet. Now that all 60 pairs are checked with
   every registry, the total is 47,317 export rejections (the same as the 50
   pairs alone, `.data/set-limits-same-pairs.log`). The 10 pairs reject nothing
-  on export: their routes are accepted or unevaluable (549,845 export routes
-  unevaluable, `.data/realdata-set-limits.log`). How many of RIPE alone's
-  341,891 rejections in those pairs became accepted and how many unevaluable
-  was not measured route by route.
+  on export: their export routes are accepted or undecided, and 549,845 of the
+  549,846 undecided are unevaluable (the other one is `peer router not given`,
+  `.data/realdata-set-limits.log`). How many of RIPE alone's 341,891 rejections
+  in those pairs became accepted and how many undecided was not measured route
+  by route.
 - **A transit-sized filter can exceed rpsl's `MaxPrefixes`, and that report is unevaluable.**
   With every registry loaded, 10 of the 60 sampled pairs have at least one filter
   whose expansion passes rpsl's default limit of 1,048,576 prefixes (the largest
-  reached 1,053,142), where RIPE alone gives none. 8 are in X's export toward a
-  large neighbour (AS174, AS1299, AS1273, AS9121), 2 in L's import
-  (`.data/over-limit-terms.log`). Such a report is unevaluable: its routes are
-  Undecided with the reason `unevaluable`, its `Unevaluable` field holds peval's
-  error naming the limit and the set, and the text output prints a `policy not
-  evaluable` line. The run goes on and the other reports are decided, so there is
-  no need to check the other direction. No flag raises the limit. On the data of
-  2026-10-18 all 60 pairs are checked: 81 unevaluable reports (79 export, 2
-  import), all `MaxPrefixes`, holding 549,847 routes
-  (`.data/realdata-set-limits.log`). The command on AS9086 from AS6762 exits 0
-  (it exited 3 before) and prints, for `export, AS6762 to AS174:`, the `policy
-  not evaluable` line (`.data/set-limits-cli.log`).
+  reached 1,053,142), where RIPE alone gives none. Such a report is unevaluable:
+  its routes are Undecided with the reason `unevaluable`, its `Unevaluable` field
+  holds peval's error naming the limit and the set, and the text output prints a
+  `policy not evaluable` line. The run goes on and the other reports are decided,
+  so there is no need to check the other direction. No flag raises the limit. On
+  the data of 2026-10-18 all 60 pairs are checked: 82 report instances, 81
+  distinct reports (AS34984's export to AS9121 appears in pairs 10 and 33): 80
+  export, in 9 pairs; 2 import, in 2 pairs; all `MaxPrefixes`, holding 549,847
+  routes (`.data/realdata-set-limits.log`,
+  `.data/set-limits-pairs-unevaluable.log`). The command on AS9086 from AS6762
+  exits 0 (it exited 3 before, `.data/maxprefixes-cli-both.log`) and prints, for
+  `export, AS6762 to AS174:`, the `policy not evaluable` line
+  (`.data/set-limits-cli.log`).
 - **Out of scope** (spec §12):
   - ASPA path verification;
   - BMP and RIS Live;

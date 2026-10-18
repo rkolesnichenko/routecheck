@@ -80,7 +80,8 @@ import (
 // default 600s, covering the read of X's file and the decisions: the
 // largest real check, AS9086 from AS6762, took 61-69 s across the 0.1.0
 // runs, so a 60 s default would count it as a timeout and a default run
-// would not reproduce the published figures; 8.7 s in 0.2's). A timeout is counted; any other error fails the test,
+// would not reproduce the published figures; 8.7 s in 0.2's). A timeout is
+// counted; any other error fails the test,
 // a *resolve.SetTooLargeError from Check included (ruling R27: a set over one of
 // rpsl's limits makes only its report unevaluable, tallied with the others
 // below; the error is still counted so the totals show it). A policy peval cannot evaluate because it

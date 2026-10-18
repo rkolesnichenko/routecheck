@@ -219,8 +219,12 @@ logs are kept by the maintainer and are not committed.
 - Over the 60 pairs: 4,540,048 observations. Import 3,787,990 accepted, 146 rejected, 2 undecided. Export
   4,401,731 accepted, 47,317 rejected, 550,071 undecided (549,845 `unevaluable`, 226 `peval: peer router not
   given`).
-- Unevaluable reports: 81, holding 549,847 routes (549,845 export + 2 import). All 81 are `MaxPrefixes`;
-  none hit MaxVisited, MaxDepth or MaxConjuncts. 79 are X's export reports (AS6762 `AS-SEABONE` 34, AS31133
+- Route objects over the 60 pairs: import yes 2,820,473, no 967,034, unknown 631; export yes 3,580,317, no
+  1,417,966, unknown 836. Rejected with a missing set: import 3, export 47,131.
+- Unevaluable reports: 82 report instances, 81 distinct reports (AS34984's export to AS9121 appears in pairs
+  10 and 33), holding 549,847 routes (549,845 export + 2 import; `.data/set-limits-pairs-unevaluable.log`).
+  Per pair: 80 export reports in 9 pairs and 2 import reports in 2 pairs. All are `MaxPrefixes`;
+  none hit MaxVisited, MaxDepth or MaxConjuncts. Distinct, 79 are X's export reports (AS6762 `AS-SEABONE` 34, AS31133
   19, AS9050 10, AS20485 8, AS8953 3, AS20771 2, AS15645 2, AS34984 1) and 2 are L's imports, one route each
   (AS44032 from AS15645, `accept AS-UAIX`; AS42861 from AS6695, `accept AS-DECIX AND NOT <...>`). The test
   counts a report once by its label and error text, so a report met in two pairs counts once while its routes
@@ -235,12 +239,14 @@ observations; import 2,108,348 accepted, 146 rejected, 0 undecided; export 1,249
 
 #### The 10 pairs checked for the first time
 
-These are the 60-pair totals minus the 50-pair figures, both from the run above. 1,899,147 observations.
-Import 1,679,642 accepted, 0 rejected, 2 undecided (both `unevaluable`). Export 338 reports (212 no policy),
-1,808,891 accepted, 0 rejected, 549,846 undecided (549,845 `unevaluable`, 1 `peer router not given`). With
-every registry, these 10 pairs reject no export route: their export routes are accepted or unevaluable. The
-same 10 pairs with RIPE alone had 341,891 export rejections (389,413 - 47,522). How many of those 341,891
-became accepted and how many unevaluable was not measured route by route.
+These are the 60-pair totals minus the 50-pair figures, both from the run above. 1,899,147 observations
+(4,540,048 - 2,640,901). Import 1,679,642 accepted (3,787,990 - 2,108,348), 0 rejected, 2 undecided (both
+`unevaluable`). Export 338 reports (1,587 - 1,249), 212 of them with no policy (1,176 - 964); 1,808,891
+accepted (4,401,731 - 2,592,840), 0 rejected, 549,846 undecided (550,071 - 225): 549,845 `unevaluable` and 1
+`peer router not given` (226 - 225). With every registry, these 10 pairs reject no export route: their export
+routes are accepted or undecided, and 549,845 of the 549,846 undecided are unevaluable. The same 10 pairs
+with RIPE alone had 341,891 export rejections (389,413 - 47,522). How many of those 341,891 became accepted
+and how many undecided (unevaluable or not) was not measured route by route.
 
 #### RIPE alone against every registry, all 60 pairs (`.data/realdata-ripe-only.log`, `.data/realdata-set-limits.log`, `.data/set-limits-same-pairs.log`)
 
