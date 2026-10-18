@@ -265,24 +265,28 @@ Packages, imports strictly downward:
   keeping its other lines, in the precedence order the run loads them. Then, alone:
   `GOMAXPROCS=4 memguard.sh 8 6000 env GOWORK=off GOMAXPROCS=4 GOMEMLIMIT=6GiB ROUTECHECK_REALDATA=$PWD/.data/realdata go test -count=1 -timeout 100m -run TestRealData -v .`
   - It loads every registry the MANIFEST pins, but picks the pairs from RIPE's files only.
-    Measured on 2026-10-18: every registry took 3m25s and a peak RSS of 6,215 MB, which is over the
-    memory guard's 6,144 MB rule, so ask before running it; RIPE alone took 3m31s and 4,741 MB.
+    Measured on 2026-10-18: every registry took 3m25s and a peak RSS of 6,215 MB
+    (`.data/realdata-every-registry.log`), over the 6,144 MB projection threshold of the memory
+    gate (`.data/every-registry-gate.log`), so ask before running it; RIPE alone took 3m31s and
+    4,741 MB (`.data/realdata-ripe-only.log`).
   - `ROUTECHECK_REALDATA_REGISTRIES` (comma-separated registry names, case-insensitive; empty means
     every pinned registry) loads only those. `ripe` is 0.2.0's load.
   - `ROUTECHECK_REALDATA_LOAD_ONLY=1` loads the registries, logs a `LOAD:` line and stops before
-    the RIBs (all 16: 35.871 s, peak RSS 3,534 MB).
+    the RIBs (all 16: 35.871 s, peak RSS 3,534 MB, `.data/load-all.log`).
   - `ROUTECHECK_REALDATA_SAMPLE`, `_REGEXP_SAMPLE` and `_SEED` choose the sample.
   - `ROUTECHECK_CHECK_TIMEOUT` (default 600s) is the per-pair timeout.
   - The benchmarks (`BenchmarkDecide`, `BenchmarkCollector`; `ROUTECHECK_BENCH_LOCAL`, `_PEER`,
-    `_AF` and `_ROUTES`) use the same data and load every pinned registry too. Their commands are
-    in `bench_test.go`. Set `ROUTECHECK_REALDATA_REGISTRIES=ripe` to compare with 0.2.0's figures.
+    `_AF` and `_ROUTES`) use the same data and load every pinned registry too. Their commands
+    are in `bench_test.go`. Set `ROUTECHECK_REALDATA_REGISTRIES=ripe` to compare with 0.2.0's
+    figures. Their memory peaks with every registry were not measured.
 - `scripts/release.sh vX.Y.Z`: see the header of the script. Rehearse with `--dry-run`. Never run
   it without the user's go-ahead: it pushes a tag. Never query the Go proxy for an unpushed tag,
   since the proxy caches the miss.
 
 ## Heavy runs
 
-Real-data runs and benchmarks hold the registries (peak RSS 6,215 MB with all 16, 4,741 MB with RIPE alone). Run them one at a time, alone, under
+Real-data runs and benchmarks hold the registries (TestRealData peak RSS 6,215 MB with all 16,
+4,741 MB with RIPE alone). Run them one at a time, alone, under
 the memory guard, never beside check.sh or each other. Every figure in a doc or the CHANGELOG
 comes from a command run in this work, with its log named. Otherwise it is unknown. The logs live
 in `.data/`, which is never committed.
@@ -298,9 +302,14 @@ in `.data/`, which is never committed.
   the 50 pairs both runs could check: export rejections 47,522 to 47,317. What remains mostly
   names sets no loaded registry holds (AS-ISPSERVICES, AS-STEFFANN-IPV4, AS-STEFFANN-IPV6,
   AS-TELFORT: 46,052 routes each). The "missing set" tag names a clause's missing sets; it does
-  not say a missing set caused the rejection.
-- **MaxPrefixes.** With every registry loaded, 10 of 60 pairs have an import filter over rpsl's
-  default 1,048,576 prefixes; the command exits 3 on such a session.
+  not say a missing set caused the rejection. 341,891 of 0.2.0's 389,413 export rejections were
+  in the 10 pairs that could not be checked with every registry (389,413 - 47,522), see
+  MaxPrefixes: 389k to 47k is not the registries' effect.
+- **MaxPrefixes.** With every registry loaded, 10 of 60 pairs have one filter over rpsl's default
+  1,048,576 prefixes: 8 in X's export toward a transit neighbour, 2 in L's import
+  (`.data/over-limit-terms.log`). The command exits 3 when a checked direction holds the
+  over-limit filter; check the other direction (`.data/maxprefixes-cli-export.log`,
+  `.data/maxprefixes-cli.log`).
 
 ## Process
 

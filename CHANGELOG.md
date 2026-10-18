@@ -70,7 +70,8 @@ with swap growing by 0 MB.
 
 #### `TestRealData`, RIPE alone and every registry
 
-The sample is the same 60 pairs as 0.2.0's.
+The sample is the same 60 pairs as 0.2.0's: the PAIRS lines of both runs are
+identical and equal 0.2.0's (`.data/every-registry-checks.log`, step 6).
 
 | | RIPE only (`.data/realdata-ripe-only.log`) | every registry (`.data/realdata-every-registry.log`) |
 |---|---|---|
@@ -82,10 +83,16 @@ With `ROUTECHECK_REALDATA_REGISTRIES=ripe`, every TOTALS figure equals 0.2.0's
 run (`.data/realdata-v0.2.log`) except the wall time and the slowest pair's
 time.
 
-**The 10 pairs over rpsl's default `MaxPrefixes` (1,048,576).** Each is an
-import filter whose set expansion passes the limit once every registry resolves
-its sets, so peval returns a `*resolve.SetTooLargeError` and the test counts the
-pair as "set too large". RIPE alone gives none.
+**The 10 pairs over rpsl's default `MaxPrefixes` (1,048,576).** Each is one
+filter whose set expansion passes the limit once every registry resolves its
+sets, so peval returns a `*resolve.SetTooLargeError` and the test counts the
+pair as "set too large". RIPE alone gives none. 8 are in X's export toward a
+transit neighbour (pairs 1, 2, 10, 21, 24, 30, 32 and 33), for example AS6762's
+`export: to AS174 announce AS-SEABONE`. 2 are in L's import (pairs 15 and 53),
+for example AS44032's `import: from AS15645 accept AS-UAIX`
+(`.data/over-limit-terms.log`, made by `.data/policy-lines.sh` from RIPE's
+aut-num dump). A pair's name ("import, L from X") is its label, not where the
+over-limit filter is.
 
 | pair | set | expansion reached |
 |---|---|---|

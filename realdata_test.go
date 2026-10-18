@@ -42,10 +42,14 @@ import (
 // scripts/fetch-data.sh could fetch them, all pinned in
 // $ROUTECHECK_REALDATA/MANIFEST. Run it alone, under a memory guard (8 GB
 // cap), as the published figures were (memguard.sh LIMIT_GB TIMEOUT_S CMD,
-// rpsl's tool). At the guard's normal priority, as below, the 0.2 run took
-// 3m7s by the test's TOTALS line (188 s and 4.2 GB peak RSS by the guard,
-// over the whole go test command); 0.1.0's, whose command did not ask for
-// normal priority, took 15m8s by TOTALS (909 s and 2.6 GB by the guard):
+// rpsl's tool). At the guard's normal priority, as below, the 0.2 run (a
+// RIPE-only load) took 3m7s by the test's TOTALS line (188 s and 4.2 GB peak
+// RSS by the guard, over the whole go test command); 0.1.0's (RIPE only too),
+// whose command did not ask for normal priority, took 15m8s by TOTALS (909 s
+// and 2.6 GB by the guard). On 2026-10-18 with every registry it took 3m25s
+// and 6,215 MB (.data/realdata-every-registry.log), and with
+// ROUTECHECK_REALDATA_REGISTRIES=ripe 3m31s and 4,741 MB
+// (.data/realdata-ripe-only.log):
 //
 //	scripts/fetch-data.sh
 //	MEMGUARD_NORMAL_PRIORITY=1 GOMAXPROCS=4 memguard.sh 8 6000 env GOWORK=off GOMAXPROCS=4 GOMEMLIMIT=6GiB \

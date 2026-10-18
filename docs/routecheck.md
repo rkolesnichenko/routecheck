@@ -72,9 +72,10 @@ The files come from `scripts/fetch-data.sh` (RIPE's split files, then
 `--registries` for the other 15; it pins them in `.data/realdata/MANIFEST`) or
 from rpsl's `scripts/fetch-irr-dumps.sh`. RADB's dump on RADB's FTP is
 RPKI-filtered and the mirrors' are not, so route-object answers depend on which
-dump you load. Loading all 16 registries took 35.871 s and a peak RSS of
-3,534 MB, against 7.468 s and 1,130 MB for RIPE alone
-(`.data/load-all.log`, `.data/load-ripe.log`). See "Known limitations" for what
+dump you load. In the real-data test's load-only mode, loading all 16
+registries took 35.871 s and a peak RSS of 3,534 MB, against 7.468 s and
+1,130 MB for RIPE alone (`.data/load-all.log`, `.data/load-ripe.log`); these are
+not the command's own figures. See "Known limitations" for what
 loading every registry did and did not change.
 
 ## The two modes
@@ -386,18 +387,23 @@ Both spellings of 0xFFFFFF03 are read, in any case:
   (`.data/every-registry-checks.log`). For those, load a source that holds them,
   or use `-irrd` with a server that does. What loading more registries changes
   most is the route-object answer: L's observations with a route object went
-  from 528,974 to 1,568,538 of 2,108,128 on the same pairs.
-- **A transit-sized import filter can exceed rpsl's `MaxPrefixes`.** With every
-  registry loaded, 10 of the 60 sampled pairs have an import filter whose
-  expansion passes rpsl's default limit of 1,048,576 prefixes (the largest
-  reached 1,053,142), where RIPE alone gives none
-  (`.data/realdata-every-registry.log`). peval then returns a
-  `*resolve.SetTooLargeError`, which `Check` returns as it returns any policy
-  peval cannot evaluate, and the command exits 3 ("could not complete") with a
-  message such as `routecheck: resolve: expansion of AS-X exceeds MaxPrefixes
-  (1048576): reached 1048960`, naming the set (a filter outside any filter-set
-  has no name in it) and writing no verdict for any route of the run. routecheck
-  has no flag for the limit.
+  from 528,974 to 1,568,538 of 2,108,128 on the same pairs. Do not read 0.2.0's 389,413
+  export rejections falling to 47,522 as the registries' effect: 341,891 of the
+  389,413 were in the 10 pairs that could not be checked with every registry
+  (389,413 - 47,522), see the next bullet.
+- **A transit-sized filter can exceed rpsl's `MaxPrefixes`.** With every
+  registry loaded, 10 of the 60 sampled pairs have one filter whose expansion
+  passes rpsl's default limit of 1,048,576 prefixes (the largest reached
+  1,053,142), where RIPE alone gives none. 8 are in X's export toward a transit
+  neighbour, 2 in L's import (`.data/over-limit-terms.log`). One over-limit
+  filter fails the whole run: for AS6762's `export: to AS174 announce
+  AS-SEABONE`, the command exits 3 and prints only
+  `routecheck: peval: AS174 | AS-SEABONE: resolve: expansion exceeds MaxPrefixes (1048576): reached 1048960`,
+  with no report for any other neighbour or family
+  (`.data/maxprefixes-cli-export.log`). The same pair's other direction
+  (`-local AS9086 -direction import`) exits 0, with 978,368 routes accepted
+  (`.data/maxprefixes-cli.log`). The workaround is to check the direction that
+  does not hold the over-limit filter; no flag raises the limit.
 - **Out of scope** (spec §12):
   - ASPA path verification;
   - BMP and RIS Live;

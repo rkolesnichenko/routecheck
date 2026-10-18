@@ -9,7 +9,8 @@
 #
 # (TestRealData runs alone, under a memory guard with an 8 GB cap: 3m25s and a
 # peak RSS of 6,215 MB with every registry, 3m31s and 4,741 MB with
-# ROUTECHECK_REALDATA_REGISTRIES=ripe, on 2026-10-18.)
+# ROUTECHECK_REALDATA_REGISTRIES=ripe, on 2026-10-18: .data/realdata-every-registry.log,
+# .data/realdata-ripe-only.log.)
 #
 # It fetches:
 #   - RIPE's split database dumps the policies need: aut-num, as-set,
