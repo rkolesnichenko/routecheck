@@ -34,9 +34,15 @@ treatment to a set over a limit.
      and Clause and Index -1.
 
    The other reports are decided as usual: other neighbours, the other direction, the other family.
-2. **All three limits.** `MaxPrefixes`, `MaxVisited` and `MaxDepth` all return `*resolve.SetTooLargeError`,
-   and all three get this treatment *(my call: one error type, one meaning, "this set cannot be expanded
-   within the limits")*.
+2. **All four limits.** rpsl v0.30.0 returns `*resolve.SetTooLargeError` for four limits:
+   - `MaxPrefixes`;
+   - `MaxVisited`;
+   - `MaxDepth`;
+   - `MaxConjuncts`, the size of a normalized filter (`resolve/source.go`'s `Limit` constants; raised in
+     `expander.go`, `expand_more.go` and `normalize.go`).
+
+   All four get this treatment, so a bare `errors.As` is right and no filtering on `.Limit` is needed *(my
+   call: one error type, one meaning, "this policy cannot be expanded within the limits")*.
 3. **No new output.** The existing "unevaluable" report, its text line (`policy not evaluable, no route
    decided: <error>`), the `Unevaluable` JSON field and the `unevaluable` reason carry it. The error text
    already names the limit.
@@ -114,6 +120,26 @@ treatment to a set over a limit.
 - A real failure, such as a missing aut-num, an unreachable server or a Source error, turned into an
   "unevaluable" report: a silent pass.
 - Published figures for the 10 pairs that do not trace to a log.
+
+## Settled after the builder check *(my calls)*
+
+1. **Four limits, not three.** See goal 2. The goal-2 test may use any limit other than `MaxPrefixes`.
+2. **A limit hit while expanding a peering, a peering-set or an rtr-set is treated the same way:** the whole
+   report is unevaluable. If peval cannot tell which neighbours a policy's terms apply to, it can decide none
+   of the report's routes. That is what R19 does too: no partial evaluation (non-goal).
+3. **Exit status when every report is unevaluable** is R19's rule, unchanged. Unevaluable routes are
+   Undecided, so a run with no Rejected route exits 0, and each unevaluable report prints its `policy not
+   evaluable, no route decided: …` line in the text output, whatever `-routes` asks. A new warning or exit
+   status for an all-unevaluable run is a non-goal here.
+4. **The real-data guard is hard.** If `Check` still returns a `*resolve.SetTooLargeError` in `TestRealData`,
+   the test reports an error (`t.Errorf`) and counts the pair, so a limit reached outside `famRun.report`
+   becomes visible. The builder confirms by reading `check.go` that `Eval.Import`/`Eval.Export` in
+   `famRun.report` are its only peval calls; a wider trace is not needed.
+5. **The CLI test may use a test-only seam in `internal/cli`:** for example an unexported package variable,
+   set only from `_test.go`, that overrides the `Expander` limits. A user-facing flag or environment variable
+   is not allowed.
+6. **The release is outside the implementation plan.** The plan ends at a reviewed branch. The push, PR,
+   merge and v0.3.0 tag each wait for the user's go-ahead.
 
 ## Left to the builder
 
