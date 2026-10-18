@@ -97,6 +97,35 @@ anything is documented.
 - **A memory cost published without a measurement,** or a measurement run outside the guard.
 - **A `-max-prefixes 0` that means "unlimited"** or "default" without saying so.
 
+## Settled after the builder check *(my calls)*
+
+1. **A guard stop is an acceptable, published result.** Step 1's command runs use the same settings as the
+   real-data command: `GOMAXPROCS=4`, `GOMEMLIMIT=6GiB`, `memguard.sh 8`, at normal priority. If the guard stops
+   a run, its row in the cost table reads "stopped by the memory guard (8 GB)" with the guard's figures, and
+   no higher value is tried. The table may then have only one or two rows; it is still published. Step 2
+   then uses the highest value that completed. The option is still worth shipping in that case: it lifts any
+   over-limit filter that fits the user's memory, and most are only just over the default ("reached
+   1,048,583" … "1,053,142").
+2. **Step 1's command** is the one of `.data/set-limits-cli.log`, with both families:
+
+   `routecheck -local AS9086 -peer AS6762 -collector .data/realdata/filtered/AS6762.mrt -max-prefixes N
+   -dump <the 32 dumps in .data/realdata/MANIFEST order>`
+
+   It runs in the default direction and with the default `-af both`, without `-vrps`. Step 1 measures the
+   option's cost on one pair. Step 2's like-for-like comparison is `TestRealData` against `TestRealData`
+   (`.data/realdata-set-limits.log`), on the same pinned files.
+3. **Only `MaxPrefixes` reports count.** The loop ends at the first N with no report whose `Unevaluable`
+   names `MaxPrefixes`. A report over another limit, or failing for another reason, is counted and published
+   separately. It does not count against the value.
+4. **The real-data test sets the limit the same way the command does:** `Checker.Eval.Expander =
+   resolve.Expander{MaxPrefixes: n}` when `ROUTECHECK_REALDATA_MAX_PREFIXES` is set. Unset means the zero
+   `Expander`.
+5. **`-irrd` is covered.** The option applies with `-irrd` too: the expansion is local, in the same
+   `peval.Evaluator`. The command's tests already exercise the shared code path, and no live-IRRd test is
+   added. The docs make no claim about a server's own answer limits.
+6. **The release decision stays open.** The docs and CHANGELOG are written from whatever the measurements
+   show. Only the tag waits for the user.
+
 ## Left to the builder
 
 - Where the option's value travels: a field in the command's config, passed to `peval.Evaluator`.
