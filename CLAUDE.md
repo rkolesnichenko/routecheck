@@ -186,9 +186,14 @@ Packages, imports strictly downward:
   - every route Undecided with the single reason `ReasonUnevaluable` (`"unevaluable"`, Why = the
     error text, Clause and Index -1).
 
-  Every other peval error (a limit, ctx, a Source error, a missing aut-num) still fails the run.
+  Every other peval error (ctx, a Source error, a missing aut-num) still fails the run.
   The same set inside an AS-path regexp (`<^AS-X$>`) is not an error: since rpsl v0.30.0 it is a
   `resolve.ASNSet` whose `Any()` is true, any one AS there (see AnySets).
+- **R27. Over a limit is unevaluable.** A `*resolve.SetTooLargeError` (any of rpsl's four limits:
+  MaxPrefixes, MaxVisited, MaxDepth, MaxConjuncts) takes R19's path for that report only: the same
+  `Unevaluable`, empty `Policy` and `unevaluable` reason. The run goes on, and the exit status is
+  R19's (0 or 1 by the Rejected routes, never 3 for it). There is no new reason kind. The CLI's
+  `expander` variable (internal/cli) is a test-only seam for lowering a limit; no flag sets it.
 - **AnySets.** `Verdict.AnySets` is, on an Accepted verdict only, the canonical names (sorted,
   deduplicated) of the sets reaching AS-ANY named by the AS-path tests, either polarity, of the
   conjunct that accepted the route: per conjunct, not per clause. It is nil otherwise, and always

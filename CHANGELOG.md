@@ -33,6 +33,12 @@ a minor version may change the API.
     and, for each direction, the route-object answers (yes, no, unknown).
   - The benchmarks load every pinned registry too. Set
     `ROUTECHECK_REALDATA_REGISTRIES=ripe` to compare them with 0.2.0's figures.
+- `Check` no longer returns a `*resolve.SetTooLargeError` (any of rpsl's four
+  limits: MaxPrefixes, MaxVisited, MaxDepth, MaxConjuncts); that report is
+  unevaluable instead (ruling R27), and the run goes on.
+- The command no longer exits 3 for a set over a limit; the exit status is 0 or
+  1 by the Rejected routes.
+- Every unevaluable report prints its `policy not evaluable` line.
 
 ### Measured
 

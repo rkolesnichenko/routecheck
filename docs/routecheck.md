@@ -185,7 +185,7 @@ conjuncts. The clauses are then taken in order.
   | `path-too-expensive` | The AS-path regexp exceeded the matcher's work budget for this path (D6). |
   | `path-unbound` | The regexp's PeerAS was not bound. This is a caller's bug: peval always binds it. |
   | `peval` | A term peval could not evaluate for this session, with peval's own reason. For example, `peval: peer router not given` (pass `-local-rtr`/`-peer-rtr`). |
-  | `unevaluable` | peval could not evaluate the whole policy, because it names a set reaching AS-ANY or RS-ANY in filter position (`accept AS-X`, `NOT AS-X`), where rpsl cannot expand it (see "Known limitations"). |
+  | `unevaluable` | peval could not evaluate the whole policy, because it names a set reaching AS-ANY or RS-ANY in filter position (`accept AS-X`, `NOT AS-X`), where rpsl cannot expand it (see "Known limitations"), or a set over one of rpsl's expansion limits (MaxPrefixes, MaxVisited, MaxDepth, MaxConjuncts). |
 
 - **no policy**: L has no import term toward X in this family (or, for export,
   X has no export term toward the neighbour). Its routes are not decided. This is
@@ -287,7 +287,7 @@ One attribute with REFINE or EXCEPT gives several clauses that share one `Index`
 | 0 | Nothing was Rejected. Undecided routes and "no policy" alone exit 0: they are listed, not failures. |
 | 1 | Some route was Rejected, in either direction. |
 | 2 | A bad command line, including options the library refuses (`routecheck.ErrOptions`, such as a session mode run with no `-local` whose capture names no local AS; when the capture holds no record of the session at all, the message says so). |
-| 3 | The run could not complete. Causes: an unreadable file; a capture cut mid-record ("truncated record"), such as a file the daemon is still writing; in session mode, a capture with no record of a session with X (at `-peer-addr`, when given), which is not "X announced nothing" (ruling R23; a 2-byte BGP4MP capture shows a 4-byte X as AS23456, so it holds no record of X); a missing aut-num; peval failing (a limit, a Source error; but not AS-ANY or RS-ANY in filter position, which is "unevaluable"); an unreachable server; a RIB dump in session mode without `-pre-policy`; a broken `-policy` draft; or an interrupted run. |
+| 3 | The run could not complete. Causes: an unreadable file; a capture cut mid-record ("truncated record"), such as a file the daemon is still writing; in session mode, a capture with no record of a session with X (at `-peer-addr`, when given), which is not "X announced nothing" (ruling R23; a 2-byte BGP4MP capture shows a 4-byte X as AS23456, so it holds no record of X); a missing aut-num; peval failing (a Source error; but not AS-ANY or RS-ANY in filter position, nor a set over an expansion limit, which make that report "unevaluable"); an unreachable server; a RIB dump in session mode without `-pre-policy`; a broken `-policy` draft; or an interrupted run. |
 
 ## Which captures qualify for -session
 
@@ -373,6 +373,8 @@ Both spellings of 0xFFFFFF03 are read, in any case:
   denotes the whole IRR, which rpsl does not expand. That report's
   `Unevaluable` holds peval's error, and each of its routes is Undecided with
   the reason `unevaluable`. Other reports of the run are decided as usual.
+  A set over one of rpsl's expansion limits (MaxPrefixes, MaxVisited, MaxDepth,
+  MaxConjuncts) is reported the same way, and the run goes on.
   routecheck gives the set no meaning of its own. The same set inside an
   AS-path regexp is not a limitation: it matches any one AS, and an accepted
   route names it (see Verdicts). RIPE's
