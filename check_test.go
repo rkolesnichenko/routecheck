@@ -612,40 +612,102 @@ source: TEST
 	}
 }
 
-func TestCheckPevalError(t *testing.T) {
-	src := registry(t, `aut-num: AS64496
+// TestCheckSetTooLarge pins ruling R27: a set expansion over one of rpsl's
+// limits (a *resolve.SetTooLargeError) makes that one report unevaluable, as
+// R19 does for AS-ANY; a missing aut-num still fails the run.
+func TestCheckSetTooLarge(t *testing.T) {
+	autLBig := `aut-num: AS64496
 as-name: L
 import: from AS64500 accept AS-BIG
 source: TEST
-`, autX, `as-set: AS-BIG
+`
+	opts := routecheck.Options{Local: types.ASN(asL), Peer: types.ASN(asX), AF: []types.AddrFamily{af(t, "ipv4.unicast")}}
+
+	check := func(t *testing.T, res []routecheck.Result, limit string) {
+		t.Helper()
+		imp := res[0].Import
+		if !strings.Contains(imp.Unevaluable, limit) || len(imp.Policy.Clauses) != 0 || len(imp.Policy.Undecided) != 0 {
+			t.Fatalf("import: Unevaluable %q, policy %+v; want %s and an empty policy", imp.Unevaluable, imp.Policy, limit)
+		}
+		checkCounts(t, "import", *imp, 0, 0, 4)
+		for _, rv := range imp.Routes {
+			v := rv.Verdict
+			want := verdict.Reason{Kind: verdict.ReasonUnevaluable, Why: imp.Unevaluable, Clause: -1, Index: -1}
+			if v.Outcome != verdict.Undecided || len(v.Reasons) != 1 || v.Reasons[0] != want {
+				t.Errorf("import, %s: %+v; want Undecided with %+v", rv.Route.Prefix, v, want)
+			}
+			if rv.RouteObj == nil && rv.Route.Prefix != pfx("10.0.0.0/8") {
+				t.Errorf("import, %s: hygiene not computed", rv.Route.Prefix)
+			}
+		}
+	}
+
+	t.Run("MaxPrefixes", func(t *testing.T) {
+		// X's export is "announce ANY", which expands nothing, so the
+		// limit cannot touch it.
+		c := checker(registry(t, autLBig, `aut-num: AS64500
+as-name: X
+export: to AS64496 announce ANY
+source: TEST
+`, `as-set: AS-BIG
 members: AS64500, AS64501
 source: TEST
-`)
-	c := checker(src)
-	c.Eval.Expander = resolve.Expander{MaxPrefixes: 1}
-	res, err := c.Check(context.Background(), routecheck.ModeSession, records(capture()), routecheck.Options{
-		Local: types.ASN(asL), Peer: types.ASN(asX),
+`))
+		c.Eval.Expander = resolve.Expander{MaxPrefixes: 1}
+		res := run(t, c, routecheck.ModeSession, capture(), opts)
+		check(t, res, "MaxPrefixes")
+		if u := res[0].Export[0].Unevaluable; u != "" {
+			t.Errorf("export: Unevaluable %q, want empty", u)
+		}
+		checkCounts(t, "export", res[0].Export[0], 4, 0, 0)
 	})
-	var tooLarge *resolve.SetTooLargeError
-	if !errors.As(err, &tooLarge) || errors.Is(err, routecheck.ErrOptions) || res != nil {
-		t.Errorf("Check = %v, %v; want nil and a *resolve.SetTooLargeError", res, err)
-	}
-	// A missing aut-num is an error too, never a verdict.
-	c = checker(registry(t, autL))
-	res, err = c.Check(context.Background(), routecheck.ModeSession, records(capture()), routecheck.Options{
-		Local: types.ASN(asL), Peer: types.ASN(asX), Directions: routecheck.DirExport,
+
+	t.Run("MaxDepth", func(t *testing.T) {
+		// The top set is at depth 0 and MaxDepth 1 allows one level of
+		// nesting; AS-LOW is two levels below AS-BIG, so it trips.
+		c := checker(registry(t, autLBig, autX, `as-set: AS-BIG
+members: AS-MID
+source: TEST
+`, `as-set: AS-MID
+members: AS-LOW
+source: TEST
+`, `as-set: AS-LOW
+members: AS64501
+source: TEST
+`))
+		c.Eval.Expander = resolve.Expander{MaxDepth: 1}
+		check(t, run(t, c, routecheck.ModeSession, capture(), opts), "MaxDepth")
 	})
-	if !errors.Is(err, resolve.ErrNotFound) || errors.Is(err, routecheck.ErrOptions) || res != nil {
-		t.Errorf("missing aut-num: Check = %v, %v", res, err)
-	}
+
+	t.Run("missing aut-num", func(t *testing.T) {
+		// A missing aut-num is an error, never a verdict, even beside a limit.
+		c := checker(registry(t, autL))
+		res, err := c.Check(context.Background(), routecheck.ModeSession, records(capture()), routecheck.Options{
+			Local: types.ASN(asL), Peer: types.ASN(asX), Directions: routecheck.DirExport,
+		})
+		if !errors.Is(err, resolve.ErrNotFound) || errors.Is(err, routecheck.ErrOptions) || res != nil {
+			t.Errorf("missing aut-num: Check = %v, %v", res, err)
+		}
+		c = checker(registry(t, autLBig, `as-set: AS-BIG
+members: AS64500, AS64501
+source: TEST
+`))
+		c.Eval.Expander = resolve.Expander{MaxPrefixes: 1}
+		res, err = c.Check(context.Background(), routecheck.ModeSession, records(capture()), routecheck.Options{
+			Local: types.ASN(asL), Peer: types.ASN(asX), Directions: routecheck.DirBoth,
+		})
+		if !errors.Is(err, resolve.ErrNotFound) || res != nil {
+			t.Errorf("limit and missing aut-num: Check = %v, %v", res, err)
+		}
+	})
 }
 
 // TestCheckUnevaluable pins ruling R19: a policy peval cannot evaluate
 // because a filter names a set that reaches AS-ANY or RS-ANY (a
 // *resolve.AnySetError; an as-set in an AS-path regexp would evaluate as
 // any AS) gives that one report Undecided routes with the single reason
-// "unevaluable", while the other direction decides as usual; any other
-// peval error still fails the run.
+// "unevaluable", while the other direction decides as usual; a limit is
+// unevaluable too, see TestCheckSetTooLarge; a missing aut-num still fails.
 func TestCheckUnevaluable(t *testing.T) {
 	autLAny := `aut-num: AS64496
 as-name: L

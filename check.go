@@ -144,8 +144,9 @@ type Report struct {
 	NoPolicy bool
 	// Unevaluable is, when peval could not evaluate the policy because it
 	// names AS-ANY or RS-ANY in filter position, where rpsl cannot expand
-	// it (a *resolve.AnySetError, ruling R19), the error's text; empty
-	// otherwise. Such a report has an empty Policy, and each of its routes,
+	// it (a *resolve.AnySetError, ruling R19), or because a set expansion
+	// went over one of rpsl's limits (a *resolve.SetTooLargeError, ruling
+	// R27), the error's text; empty otherwise. Such a report has an empty Policy, and each of its routes,
 	// if it has any, is Undecided with the one reason
 	// verdict.ReasonUnevaluable. A set reaching AS-ANY in an AS-path regexp
 	// is evaluated instead (verdict.Verdict.AnySets).
@@ -207,11 +208,13 @@ const ctxEvery = 4096
 // every one of its routes is Undecided with the single reason
 // verdict.ReasonUnevaluable, whose Why is that text. The same set in an
 // AS-path regexp is evaluated, as any one AS, and an Accepted verdict names
-// it in AnySets.
+// it in AnySets. A set expansion over one of rpsl's limits (a
+// *resolve.SetTooLargeError: MaxPrefixes, MaxVisited, MaxDepth or
+// MaxConjuncts) is the same (ruling R27): the text names the limit.
 //
 // Check returns an error, and no Results, for options it cannot use, an
 // input observe cannot read (a truncated stream, observe.ErrRIBNotPrePolicy),
-// any other policy peval cannot evaluate (a missing aut-num, a limit), an
+// any other policy peval cannot evaluate (a missing aut-num), an
 // error from Routes, and ctx's error once it is done (also while observe
 // reads the input, which it reads whole before yielding a route). Errors for
 // options wrap ErrOptions.
@@ -473,16 +476,21 @@ func (f *famRun) report(s peval.Session, export bool, idx []int) (Report, error)
 	} else {
 		p, err = f.c.Eval.Import(f.ctx, s)
 	}
-	var anySet *resolve.AnySetError
-	unevaluable := errors.As(err, &anySet)
+	var (
+		anySet   *resolve.AnySetError
+		tooLarge *resolve.SetTooLargeError
+	)
+	unevaluable := errors.As(err, &anySet) || errors.As(err, &tooLarge)
 	if err != nil && !unevaluable {
 		return Report{}, err
 	}
 	rep := Report{Toward: s.Peer, Policy: p}
 	if unevaluable {
 		// Ruling R19: the policy names AS-ANY or RS-ANY in filter position,
-		// where rpsl cannot expand it; this report decides nothing, and
-		// says why, for each of its routes.
+		// where rpsl cannot expand it. Ruling R27: a set expansion went over
+		// one of rpsl's limits (MaxPrefixes, MaxVisited, MaxDepth,
+		// MaxConjuncts). Either way this report decides nothing, and says
+		// why, for each of its routes.
 		rep.Policy, rep.Unevaluable = peval.Policy{}, err.Error()
 		return f.unevaluable(rep, idx)
 	}
