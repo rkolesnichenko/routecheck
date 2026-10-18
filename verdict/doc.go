@@ -31,7 +31,8 @@
 //
 // ReasonUnevaluable is never given by Decide: routecheck.Check gives it to
 // every route of a report whose policy peval could not evaluate because it
-// names AS-ANY or RS-ANY where rpsl cannot expand it (ruling R19).
+// names AS-ANY or RS-ANY in filter position, where rpsl cannot expand it
+// (ruling R19).
 //
 // Compile prepares a policy once for many routes: an index of each
 // conjunct's prefix ranges (a path-compressed binary trie per family), the

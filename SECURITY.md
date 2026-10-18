@@ -57,8 +57,10 @@ them as a security-relevant bug.
   flagged is never read as if it were whole.
 - **Never guess.** A test that cannot be decided from the data makes the route
   Undecided, with the reason. A policy that cannot be evaluated is an error for
-  the run, except AS-ANY in an AS-path set, which makes that report
-  "unevaluable".
+  the run, except a set reaching AS-ANY (or RS-ANY) in filter position, which
+  makes that report "unevaluable". In an AS-path regexp such a set matches any
+  one AS, and an accepted route names it (`AnySets`), so the output shows that
+  the path test let any AS through.
 - **No network outside the command.** `pathre`, `verdict`, `observe`, `hygiene`
   and the `routecheck` package do not import `net`, which `check.sh` enforces.
   Only `internal/cli` and `cmd/routecheck` open files and, with `-irrd`, a

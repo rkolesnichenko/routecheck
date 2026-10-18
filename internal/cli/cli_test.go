@@ -608,8 +608,9 @@ func TestDumpPrecedence(t *testing.T) {
 }
 
 // TestUnevaluable: a report whose policy names, in filter position, a set
-// that reaches AS-ANY (ruling R19) reads as not evaluable in text, every route undecided with
-// that reason, and as the reason kind "unevaluable" in JSON; exit 0.
+// that reaches AS-ANY (ruling R19) reads as not evaluable in text, every
+// route undecided with that reason, and as the reason kind "unevaluable" in
+// JSON; exit 0.
 func TestUnevaluable(t *testing.T) {
 	reg := write(t, "reg.txt", []byte(`aut-num: AS64496
 import: from AS64500 accept AS-ANYSET

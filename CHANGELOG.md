@@ -8,6 +8,109 @@ a minor version may change the API.
 
 ## [Unreleased]
 
+### Changed
+
+- Requires rpsl v0.30.0 (`rpsl`, `rpsl/types`, `rpsl/resolve`; `ast` and
+  `lexer` indirect at v0.30.0). mrt stays at v0.1.0.
+- An AS-path regexp that names a set reaching AS-ANY (an as-set whose
+  `members:` is `AS-ANY`) is now evaluated. rpsl's peval gives the set as a
+  `resolve.ASNSet` whose `Any()` is true, and in a regexp it matches any one
+  AS. In 0.1.0 such a policy was an "unevaluable" report with every route
+  Undecided.
+- `Report.Unevaluable` and the `unevaluable` reason (rulings R19, R21) now arise
+  only from AS-ANY or RS-ANY in filter position (`accept AS-X`, `NOT AS-X`),
+  which rpsl still refuses to expand.
+- `pathre` needs no code change: it asks only `Has`, which is true for every AS
+  of such a set. Its first oracle, `pathre/testdata/routemodel-vectors.jsonl`,
+  is regenerated from rpsl's `routemodel` in format version 2, which names the
+  sets reaching AS-ANY in `any_sets`; the reader refuses any other version. The
+  second oracle's generator also names such a set (`AS-ALL`).
+- The JSON output has one more key in every verdict, `"AnySets"` (see Added).
+
+### Added
+
+- `verdict.Verdict.AnySets`: on an Accepted verdict, the canonical names,
+  sorted and deduplicated, of the sets reaching AS-ANY that the AS-path tests
+  (either polarity) of the accepting conjunct name. It is nil otherwise, and
+  always nil on Rejected and Undecided. The text output appends
+  `(X reaches AS-ANY: any AS)`, or `(X, Y reach AS-ANY: any AS)`, to
+  `accepted by clause N`, before any "after undecided" part. The JSON field is
+  `"AnySets"`, `null` when there are none.
+- The real-data test counts, per direction, the accepted routes whose
+  `AnySets` is not empty, and lists them by report and set.
+
+### Measured
+
+These figures come from runs of 2026-10-18 on an Apple M3 Max (darwin/arm64)
+with go1.27.2 (`.data/goversion-v0.2.log`), `GOMAXPROCS=4`, `GOMEMLIMIT=6GiB`
+and `GOWORK=off`, under the memory guard with an 8 GB cap at normal priority.
+The logs are kept by the maintainer and are not committed.
+
+The data was fetched again on 2026-10-18, so these figures are not compared one
+to one with 0.1.0's:
+
+- RIPE's split dumps (9 files), fetched 2026-10-18;
+- route-views2's RIB of 2026-10-18 12:00;
+- RIS rrc00's bview of 2026-10-18 08:00;
+- NTT's VRP export, fetched 2026-10-18.
+
+#### `TestRealData`, 60 pairs (`.data/realdata-v0.2.log`)
+
+The sample, by the same seed as 0.1.0's, was again 50 aut-nums with a literal
+`import: from X`, plus 10 more whose import from X has an AS-path regexp.
+
+| | |
+|---|---|
+| Outcome | PASS: 60 of 60 pairs checked; 0 timed out, 0 over a set limit, 0 other errors |
+| Wall time | 3m7s, of which the checks took 29s |
+| Memory guard | peak RSS 4234 MB, 188 s |
+| Registry | 659,819 objects, 40,036 aut-nums, loaded in 7.4 s |
+| RIB entries read | 73,145,509, with 0 malformed entries and 0 record errors |
+| Observations | 4,540,048 (family × pair) |
+
+Decisions:
+
+| direction | accepted | rejected | undecided | no policy |
+|---|---|---|---|---|
+| Import | 3,787,992 | 146 | 0 | 49 families |
+| Export (1,587 neighbour reports) | 4,608,749 | 389,413 | 226 | 1,182 reports |
+
+- **Unevaluable reports:** 0 (0 routes).
+- **Accepted with `AnySets`:** 2 routes on import, 0 on export, from one
+  (report, set) pair: AS8308's ipv4 import from AS1887, through its clause
+  `accept <AS1887:AS-Peerings:AS8501$>`, with `AnySets`
+  `["AS1887:AS-PEERINGS:AS8501"]`. That report's other 37 routes were accepted
+  by the clause before it, `accept <AS1887:AS-Customers:AS-Received$>`. This is
+  the report that was unevaluable in 0.1.0.
+- **Undecided reasons.** Import: none. Export: `peval: peer router not given`,
+  226.
+- **Missing sets.** Rejected routes whose failing clause names a set missing
+  from RIPE: 3 on import and 389,127 on export.
+- **Other figures.** 0 `path-too-expensive` verdicts over 640 routes decided
+  under a policy with an AS-path test. 326,034 `OriginatedRoutes` reads for
+  326,034 distinct (origin, family). The largest import prefix filter was
+  415,768 ranges (AS42861 from AS6695, ipv4).
+- **Speed.** The checks took 29 s here against 3m0s in 0.1.0, and the largest,
+  AS9086 from AS6762, 8.7 s against 61 s. 0.1.0's published command did not ask
+  the guard for normal priority, and the guard otherwise runs the command at
+  background priority, which is the likely cause. That was not measured.
+
+#### Hand check, AS8308 from AS1887 (`.data/handcheck-AS8308-v0.2.log`)
+
+The command was run in collector mode on both RIBs, with RIPE's dumps and the
+VRPs: `-local AS8308 -peer AS1887 -af ipv4 -direction import -routes all`.
+
+- Exit status 0. Peak RSS 1496 MB, 51 s.
+- `import, AS8308 from AS1887: 39 routes: 39 accepted, 0 rejected, 0 undecided`.
+  The test's log gives the same counts for that report.
+- 2 of the 39 route lines read
+  `accepted by clause 2 (AS1887:AS-PEERINGS:AS8501 reaches AS-ANY: any AS)`:
+  148.81.248.0/24 and 195.187.76.0/24. The other 37 read
+  `accepted by clause 1`.
+- The JSON run of the same command (`.data/handcheck-AS8308-v0.2.json`) gives
+  `"AnySets": ["AS1887:AS-PEERINGS:AS8501"]` on those 2 routes and
+  `"AnySets": null` on the other 37.
+
 ## [0.1.0] - 2026-10-17
 
 First version. It requires rpsl v0.29.0 (`rpsl`,

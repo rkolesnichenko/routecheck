@@ -152,11 +152,12 @@ const (
 	// (Policy.Undecided); Why says why.
 	ReasonPeval = "peval"
 	// ReasonUnevaluable: peval could not evaluate the policy at all because
-	// it names AS-ANY or RS-ANY where rpsl cannot expand it (a
-	// *resolve.AnySetError), so no route of that policy is decided. Decide
-	// never gives it: routecheck.Check gives it, as the only reason, to
-	// every route of such a report, with Why the error's text (it names the
-	// term and the set), Clause and Index -1.
+	// it names AS-ANY or RS-ANY in filter position, where rpsl cannot
+	// expand it (a *resolve.AnySetError; in an AS-path regexp such a set
+	// is evaluated, see Verdict.AnySets), so no route of that policy is
+	// decided. Decide never gives it: routecheck.Check gives it, as the
+	// only reason, to every route of such a report, with Why the error's
+	// text (it names the term and the set), Clause and Index -1.
 	ReasonUnevaluable = "unevaluable"
 )
 

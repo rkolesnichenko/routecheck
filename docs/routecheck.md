@@ -118,7 +118,13 @@ conjuncts. The clauses are then taken in order.
 - **accepted**: some clause says yes. The output names the first such clause.
   When an earlier clause or a term peval could not evaluate was undecided, the
   route may take that one instead, and the output says so ("after undecided
-  clause N").
+  clause N"). When the AS-path tests of the conjunct that accepted the route
+  name a set reaching AS-ANY (an as-set whose `members:` is `AS-ANY`; in a
+  regexp it matches any one AS), the output names that set:
+  `accepted by clause 2 (AS-X reaches AS-ANY: any AS)`, or
+  `(AS-X, AS-Y reach AS-ANY: any AS)` for several, before any "after undecided"
+  part. A negated test counts too. The test let any AS through, so the
+  acceptance says less about the path than it seems to.
 - **rejected**: every clause says no, and no term is undecided. For each clause,
   the output gives the first test that said no. When a referenced set is missing
   from the registry, the output names it ("missing from the registry"). Such a
@@ -136,7 +142,7 @@ conjuncts. The clauses are then taken in order.
   | `path-too-expensive` | The AS-path regexp exceeded the matcher's work budget for this path (D6). |
   | `path-unbound` | The regexp's PeerAS was not bound. This is a caller's bug: peval always binds it. |
   | `peval` | A term peval could not evaluate for this session, with peval's own reason. For example, `peval: peer router not given` (pass `-local-rtr`/`-peer-rtr`). |
-  | `unevaluable` | peval could not evaluate the whole policy, because it names AS-ANY where rpsl cannot expand it (see "Known limitations"). |
+  | `unevaluable` | peval could not evaluate the whole policy, because it names a set reaching AS-ANY or RS-ANY in filter position (`accept AS-X`, `NOT AS-X`), where rpsl cannot expand it (see "Known limitations"). |
 
 - **no policy**: L has no import term toward X in this family (or, for export,
   X has no export term toward the neighbour). Its routes are not decided. This is
@@ -211,7 +217,11 @@ in a form that needs no Go source to read:
 - a policy is its clauses, each as `{Index, Term, Filter}`, and its undecided
   terms, each as `{Index, Term, Why}`;
 - `Unevaluable` holds peval's error text for an unevaluable report, and is `""`
-  otherwise.
+  otherwise;
+- `Verdict.AnySets` is, on an accepted route, the names (canonical spelling,
+  sorted) of the sets reaching AS-ANY that the accepting conjunct's AS-path
+  tests name, such as `["AS1887:AS-PEERINGS:AS8501"]`, and `null` when there are
+  none; it is always `null` on a rejected or undecided route.
 
 Two kinds of number appear:
 
@@ -228,7 +238,7 @@ One attribute with REFINE or EXCEPT gives several clauses that share one `Index`
 | 0 | Nothing was Rejected. Undecided routes and "no policy" alone exit 0: they are listed, not failures. |
 | 1 | Some route was Rejected, in either direction. |
 | 2 | A bad command line, including options the library refuses (`routecheck.ErrOptions`, such as a session mode run with no `-local` whose capture names no local AS; when the capture holds no record of the session at all, the message says so). |
-| 3 | The run could not complete. Causes: an unreadable file; a capture cut mid-record ("truncated record"), such as a file the daemon is still writing; in session mode, a capture with no record of a session with X (at `-peer-addr`, when given), which is not "X announced nothing" (ruling R23; a 2-byte BGP4MP capture shows a 4-byte X as AS23456, so it holds no record of X); a missing aut-num; peval failing (a limit, a Source error; but not AS-ANY, which is "unevaluable"); an unreachable server; a RIB dump in session mode without `-pre-policy`; a broken `-policy` draft; or an interrupted run. |
+| 3 | The run could not complete. Causes: an unreadable file; a capture cut mid-record ("truncated record"), such as a file the daemon is still writing; in session mode, a capture with no record of a session with X (at `-peer-addr`, when given), which is not "X announced nothing" (ruling R23; a 2-byte BGP4MP capture shows a 4-byte X as AS23456, so it holds no record of X); a missing aut-num; peval failing (a limit, a Source error; but not AS-ANY or RS-ANY in filter position, which is "unevaluable"); an unreachable server; a RIB dump in session mode without `-pre-policy`; a broken `-policy` draft; or an interrupted run. |
 
 ## Which captures qualify for -session
 
@@ -308,19 +318,27 @@ Both spellings of 0xFFFFFF03 are read, in any case:
 
 ## Known limitations
 
-- **AS-ANY in an AS-path set.** A policy whose AS-path regexp names a set that
-  reaches AS-ANY (an as-set whose `members:` is `AS-ANY`) gives "unevaluable"
-  routes: that report's `Unevaluable` holds peval's error, and each of its routes
-  is Undecided with the reason `unevaluable`. Other reports of the run are
-  decided as usual. This waits for rpsl's peval to handle such a term. routecheck
-  gives the set no meaning of its own. Seen in RIPE: `AS1887:AS-Peerings:AS8501`.
+- **AS-ANY in filter position.** A policy that accepts or announces a set
+  reaching AS-ANY or RS-ANY (`accept AS-X`, `NOT AS-X`, where AS-X's `members:`
+  is `AS-ANY`) gives "unevaluable" routes: AS-ANY denotes the whole IRR, which
+  rpsl does not expand. That report's `Unevaluable` holds peval's error, and
+  each of its routes is Undecided with the reason `unevaluable`. Other reports
+  of the run are decided as usual. routecheck gives the set no meaning of its
+  own. The same set inside an AS-path regexp is not a limitation: it matches
+  any one AS, and an accepted route names it (see Verdicts). RIPE's
+  `AS1887:AS-Peerings:AS8501` is such a set, named in AS8308's
+  `import: from AS1887 ... accept <AS1887:AS-Peerings:AS8501$>`. On the data of
+  2026-10-18 that clause accepted 2 of the 39 ipv4 routes seen from AS1887; the
+  other 37 were accepted by the clause before it (`.data/realdata-v0.2.log`,
+  `.data/handcheck-AS8308-v0.2.log`).
 - **Load every registry a policy's sets reach.** A set that is missing from the
   registries you load makes its clause reject routes the registry as a whole
-  would accept (D4: "missing from the registry"). In the RIPE-only real-data run,
+  would accept (D4: "missing from the registry"). In the RIPE-only real-data runs,
   390,727 of the 391,010 export rejections had a failing clause that named a set
-  RIPE does not hold (`.data/realdata-r19.log`). RIPE alone is not enough for most
-  transit policies: load the other registries' dumps too, or use `-irrd` with a
-  server that mirrors them.
+  RIPE does not hold in 0.1.0 (`.data/realdata-r19.log`), and 389,127 of 389,413
+  on the data of 2026-10-18 (`.data/realdata-v0.2.log`). RIPE alone is not
+  enough for most transit policies: load the other registries' dumps too, or
+  use `-irrd` with a server that mirrors them.
 - **Out of scope** (spec §12):
   - ASPA path verification;
   - BMP and RIS Live;

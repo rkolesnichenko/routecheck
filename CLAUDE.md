@@ -38,8 +38,8 @@ Packages, imports strictly downward:
 
 1. **Never guess.** A test that cannot be decided from the data is undecided, with a reason. A
    route is Accepted or Rejected only when every test it rests on answered. A policy that `peval`
-   cannot evaluate is an error for the run, never a verdict. The one exception is AS-ANY (R19),
-   which is reported as "unevaluable", not decided.
+   cannot evaluate is an error for the run, never a verdict. The one exception is AS-ANY or
+   RS-ANY in filter position (R19), which is reported as "unevaluable", not decided.
 2. **No `net` outside the command.** `.`, `pathre`, `verdict`, `observe` and `hygiene` are pure:
    no `net`, no goroutines they don't own, and context-cancellable. Only `internal/cli` opens files
    and sockets (`-irrd`). `check.sh` enforces it.
@@ -178,9 +178,8 @@ Packages, imports strictly downward:
   - `-local` is optional in session mode.
   - JSON is a view: outcomes and RPKI states as words, communities as `"hi:lo"`, clauses as
     `{Index, Term, Filter}`. A test decodes it back with `DisallowUnknownFields`.
-- **R19/R21. Unevaluable.** A `*resolve.AnySetError` from `Eval.Import`/`Export` (AS-ANY where
-  rpsl cannot expand it, such as an as-set with `members: AS-ANY` in filter position, `accept AS-X`; since rpsl v0.30.0 in
-  an AS-path regexp it evaluates as any AS) does not
+- **R19/R21. Unevaluable.** peval returns a `*resolve.AnySetError` for AS-ANY or RS-ANY in filter
+  position: `accept AS-X` or `NOT AS-X` where AS-X reaches AS-ANY (`members: AS-ANY`). It does not
   fail the run. That one report gets:
   - `Report.Unevaluable` = the error's text, set whatever the route count;
   - an empty `Policy`;
@@ -188,7 +187,15 @@ Packages, imports strictly downward:
     error text, Clause and Index -1).
 
   Every other peval error (a limit, ctx, a Source error, a missing aut-num) still fails the run.
-  routecheck gives AS-ANY no meaning of its own: that waits for rpsl's peval.
+  The same set inside an AS-path regexp (`<^AS-X$>`) is not an error: since rpsl v0.30.0 it is a
+  `resolve.ASNSet` whose `Any()` is true, any one AS there (see AnySets).
+- **AnySets.** `Verdict.AnySets` is, on an Accepted verdict only, the canonical names (sorted,
+  deduplicated) of the sets reaching AS-ANY named by the AS-path tests, either polarity, of the
+  conjunct that accepted the route: per conjunct, not per clause. It is nil otherwise, and always
+  nil on Rejected and Undecided. Text: `accepted by clause N (X reaches AS-ANY: any AS)`, or
+  `(X, Y reach AS-ANY: any AS)`, before any "after undecided" part. JSON: `"AnySets"`, `null` when
+  none. pathre asks only `Has`, which is true for every AS of such a set; never read `List`/`Len`
+  of one without `Any()` first.
 - **R23. No session selected.** `SessionInfo.Selected` counts the records selected for X; when it is 0 the CLI exits 3 ("no record of a session with AS X [from ADDR] in the capture ..."), and Check still returns its Result. Without `-local` such a capture names no local AS, so Check returns ErrOptions first and the CLI exits 2 with the same cause in the message (R26). A `-local` that is not the capture's LocalAS is checked as given, with a warning on stderr and in the text; the exit status is unchanged.
 - **Transparent route server.** When the announcements skipped as "not X first" outnumber the
   routes held at the end (all families), the text output says X looks like a transparent route
@@ -270,10 +277,13 @@ in `.data/`, which is never committed.
 
 ## Known limitations (state them, don't paper over them)
 
-- **AS-ANY.** A policy whose AS-path set reaches AS-ANY gives "unevaluable" (Undecided) routes,
-  until rpsl's peval handles it.
-- **Registries.** Load every registry a policy's sets reach. In the RIPE-only real-data run,
-  390,727 of 391,010 export rejections named sets RIPE does not hold.
+- **AS-ANY in filter position.** A policy that accepts or announces a set reaching AS-ANY (or
+  RS-ANY), `accept AS-X` or `NOT AS-X`, gives an "unevaluable" report: every route Undecided (R19).
+  rpsl refuses to enumerate it, and routecheck gives it no meaning of its own. In an AS-path regexp
+  such a set is decided (any one AS) and named in `Verdict.AnySets`.
+- **Registries.** Load every registry a policy's sets reach. In the RIPE-only real-data runs,
+  390,727 of 391,010 export rejections named sets RIPE does not hold in 0.1.0's, and 389,127 of
+  389,413 in 0.2's.
 
 ## Process
 

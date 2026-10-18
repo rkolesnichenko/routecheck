@@ -7,7 +7,11 @@ which answers each vector with rpsl's `routemodel.MatchPath`, a matcher that
 translates the regexp to Go's `regexp` package and is independent of pathre's
 algorithm.
 
-- rpsl commit: `f3da4d56f3300e1c14c8e4108f91aab8914d15a1` (v0.30.0)
+- rpsl commit: `f3da4d56f3300e1c14c8e4108f91aab8914d15a1`, on rpsl's `main` just after the v0.30.0
+  release (`git describe --tags` gives `resolve/v0.30.0-1-gf3da4d5`). It is one commit past the
+  `resolve/v0.30.0` tag and two past `v0.30.0`; those two commits change only `go.mod` and
+  `go.sum` files (`resolve`'s and `examples/bulk-ripe`'s), so `resolve/internal/routemodel` is the
+  same as at both tags.
 - Format version 2. Line 1 is a header: `{"version":2,"generator":...,"rpsl_commit":...,"seed":1}`.
   The reader refuses any other version: version 1 had no `any_sets`, and reading it would take
   a set that reaches AS-ANY for one that matches nothing.
