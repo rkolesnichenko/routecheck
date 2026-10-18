@@ -59,7 +59,7 @@ import (
 // precedence is that of the first object read with it. The sampled pairs come
 // from RIPE's files only (only its aut-nums are candidates for L and X), so
 // loading more registries changes what the checks resolve, never which pairs
-// are checked. Then reads the RIBs once to learn which ASes appear on a
+// are checked. It then reads the RIBs once to learn which ASes appear on a
 // path, and picks a seeded sample of aut-nums L that name an AS X in a
 // literal "import: from X" (or mp-import), X on some path and X's own
 // aut-num in RIPE (the export direction reads it). A second read writes,

@@ -27,8 +27,10 @@ import (
 //	                        AS instead of X's (default X), when X has too few
 //	                        routes to exercise the filter
 //
-// Run each alone, under a memory guard with an 8 GB cap (each loads RIPE or
-// reads a full RIB), as the published figures were:
+// Run each alone, under a memory guard with an 8 GB cap (each loads the
+// registries or reads a full RIB), as the published figures were. They load
+// every registry the MANIFEST pins; add ROUTECHECK_REALDATA_REGISTRIES=ripe to
+// the environment to compare with 0.2.0's figures, which loaded RIPE alone:
 //
 //	GOMAXPROCS=4 memguard.sh 8 1800 env GOWORK=off GOMAXPROCS=4 GOMEMLIMIT=6GiB \
 //	  ROUTECHECK_REALDATA=$PWD/.data/realdata ROUTECHECK_BENCH_LOCAL=AS… ROUTECHECK_BENCH_PEER=AS… [ROUTECHECK_BENCH_ROUTES=AS…] \

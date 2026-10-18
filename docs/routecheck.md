@@ -53,6 +53,30 @@ before any other argument. A stray argument is refused with exit status 2.
 | `-format` | `text` (the default) or `json`. |
 | `-routes` | Text output only. Which routes to list after the summary: `all`, `rejected`, `undecided` or `none` (the default). |
 
+### Loading every registry
+
+A policy's sets can live in any registry, so give `-dump` every registry's file,
+in the precedence order you want. A set or object that two registries hold is
+taken from the one whose dump comes first. The order the real-data run uses is
+RIPE, APNIC, ARIN, AFRINIC, LACNIC, RADB, then RADB's mirrors (altdb, bboi,
+bell, canarie, jpirr, nestegg, nttcom, panix, reach, tc):
+
+```
+routecheck -peer AS… -local AS… -collector RIB.mrt \
+  -dump ripe.db.aut-num.gz -dump ripe.db.as-set.gz … \
+  -dump apnic.db.aut-num.gz … -dump arin.db.gz -dump afrinic.db.gz \
+  -dump lacnic.db.gz -dump radb.db.gz -dump altdb.db.gz …
+```
+
+The files come from `scripts/fetch-data.sh` (RIPE's split files, then
+`--registries` for the other 15; it pins them in `.data/realdata/MANIFEST`) or
+from rpsl's `scripts/fetch-irr-dumps.sh`. RADB's dump on RADB's FTP is
+RPKI-filtered and the mirrors' are not, so route-object answers depend on which
+dump you load. Loading all 16 registries took 35.871 s and a peak RSS of
+3,534 MB, against 7.468 s and 1,130 MB for RIPE alone
+(`.data/load-all.log`, `.data/load-ripe.log`). See "Known limitations" for what
+loading every registry did and did not change.
+
 ## The two modes
 
 **Session mode** (`-session`) gives the exact answer for that session. It
@@ -134,6 +158,12 @@ conjuncts. The clauses are then taken in order.
   from the registry, the output names it ("missing from the registry"). Such a
   route is still rejected (D4), because a router configured from the registry
   rejects it too.
+  That note names the missing sets of a failing clause. It does not say a
+  missing set caused the rejection. With only RIPE loaded, AS29632's export to
+  AS33891 (`to AS33891 announce AS-NETASSIST`) rejected 32 routes of origin
+  AS48031 with such a note. Only AFRINIC and RADB hold route objects for them,
+  so no expansion of AS-NETASSIST from RIPE's data could have contained them
+  (`.data/every-registry-checks.log`).
 - **undecided**: neither of the above. The output gives every reason:
 
   | reason | meaning |
@@ -342,15 +372,32 @@ Both spellings of 0xFFFFFF03 are read, in any case:
   2026-10-18 that clause accepted 2 of the 39 ipv4 routes seen from AS1887; the
   other 37 were accepted by the clause before it (`.data/realdata-v0.2.log`,
   `.data/handcheck-AS8308-v0.2.log`).
-- **Load every registry a policy's sets reach.** A set that is missing from the
-  registries you load makes its clause reject routes the registry as a whole
-  would accept (D4: "missing from the registry"). RIPE alone was loaded in both
-  real-data runs. In 0.1.0's run, 390,727 of the 391,010 export rejections had a
-  failing clause that named a set RIPE does not hold (`.data/realdata-r19.log`),
-  and in 0.2's run, on the data of 2026-10-18, 389,127 of 389,413
-  (`.data/realdata-v0.2.log`). RIPE alone is not enough for most transit
-  policies: load the other registries' dumps too, or use `-irrd` with a server
-  that mirrors them.
+- **Load every registry a policy's sets reach, and some sets are in none.** A
+  set that is missing from the registries you load makes its clause reject
+  routes the registry as a whole would accept (D4: "missing from the
+  registry"). 0.2.0 loaded RIPE alone: 389,127 of its 389,413 export
+  rejections had a failing clause that named a set RIPE does not hold
+  (`.data/realdata-v0.2.log`; 390,727 of 391,010 in 0.1.0,
+  `.data/realdata-r19.log`). Loading all 16 registries changed less than that
+  suggested. On the 50 pairs both runs could check, export rejections went from
+  47,522 to 47,317 (`.data/same-pairs.log`). What remains mostly names sets no
+  loaded registry holds: AS-ISPSERVICES, AS-STEFFANN-IPV4, AS-STEFFANN-IPV6 and
+  AS-TELFORT, at 46,052 routes each, are in none of the 32 dumps
+  (`.data/every-registry-checks.log`). For those, load a source that holds them,
+  or use `-irrd` with a server that does. What loading more registries changes
+  most is the route-object answer: L's observations with a route object went
+  from 528,974 to 1,568,538 of 2,108,128 on the same pairs.
+- **A transit-sized import filter can exceed rpsl's `MaxPrefixes`.** With every
+  registry loaded, 10 of the 60 sampled pairs have an import filter whose
+  expansion passes rpsl's default limit of 1,048,576 prefixes (the largest
+  reached 1,053,142), where RIPE alone gives none
+  (`.data/realdata-every-registry.log`). peval then returns a
+  `*resolve.SetTooLargeError`, which `Check` returns as it returns any policy
+  peval cannot evaluate, and the command exits 3 ("could not complete") with a
+  message such as `routecheck: resolve: expansion of AS-X exceeds MaxPrefixes
+  (1048576): reached 1048960`, naming the set (a filter outside any filter-set
+  has no name in it) and writing no verdict for any route of the run. routecheck
+  has no flag for the limit.
 - **Out of scope** (spec §12):
   - ASPA path verification;
   - BMP and RIS Live;

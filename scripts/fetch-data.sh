@@ -7,8 +7,9 @@
 #   GOMAXPROCS=4 memguard.sh 8 6000 env GOWORK=off GOMAXPROCS=4 GOMEMLIMIT=6GiB \
 #     ROUTECHECK_REALDATA=$PWD/.data/realdata go test -count=1 -timeout 100m -run TestRealData -v .
 #
-# (TestRealData runs alone, under a memory guard with an 8 GB cap: about 15
-# minutes and 2.6 GB.)
+# (TestRealData runs alone, under a memory guard with an 8 GB cap: 3m25s and a
+# peak RSS of 6,215 MB with every registry, 3m31s and 4,741 MB with
+# ROUTECHECK_REALDATA_REGISTRIES=ripe, on 2026-10-18.)
 #
 # It fetches:
 #   - RIPE's split database dumps the policies need: aut-num, as-set,

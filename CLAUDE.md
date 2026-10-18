@@ -260,20 +260,29 @@ Packages, imports strictly downward:
   `cd ../rpsl/resolve && RPSL_ROUTEMODEL_COMMIT=$(git rev-parse HEAD) RPSL_ROUTEMODEL_VECTORS=$PWD/../../routecheck/pathre/testdata/routemodel-vectors.jsonl go test -count=1 -run TestWriteVectors ./internal/routemodel`
 - **Real data (opt-in).** `scripts/fetch-data.sh` downloads into `.data/realdata/` and pins each
   file in `.data/realdata/MANIFEST`. It fetches RIPE's split dumps, the newest route-views2 RIB
-  and RIS rrc00 bview, and NTT's VRPs. Then, alone:
+  and RIS rrc00 bview, and NTT's VRPs. `scripts/fetch-data.sh --registries` adds the 15 other
+  registries (APNIC, ARIN, AFRINIC, LACNIC, RADB and its ten mirrors) to an existing MANIFEST,
+  keeping its other lines, in the precedence order the run loads them. Then, alone:
   `GOMAXPROCS=4 memguard.sh 8 6000 env GOWORK=off GOMAXPROCS=4 GOMEMLIMIT=6GiB ROUTECHECK_REALDATA=$PWD/.data/realdata go test -count=1 -timeout 100m -run TestRealData -v .`
-  (about 15 minutes and 2.6 GB).
+  - It loads every registry the MANIFEST pins, but picks the pairs from RIPE's files only.
+    Measured on 2026-10-18: every registry took 3m25s and a peak RSS of 6,215 MB, which is over the
+    memory guard's 6,144 MB rule, so ask before running it; RIPE alone took 3m31s and 4,741 MB.
+  - `ROUTECHECK_REALDATA_REGISTRIES` (comma-separated registry names, case-insensitive; empty means
+    every pinned registry) loads only those. `ripe` is 0.2.0's load.
+  - `ROUTECHECK_REALDATA_LOAD_ONLY=1` loads the registries, logs a `LOAD:` line and stops before
+    the RIBs (all 16: 35.871 s, peak RSS 3,534 MB).
   - `ROUTECHECK_REALDATA_SAMPLE`, `_REGEXP_SAMPLE` and `_SEED` choose the sample.
   - `ROUTECHECK_CHECK_TIMEOUT` (default 600s) is the per-pair timeout.
   - The benchmarks (`BenchmarkDecide`, `BenchmarkCollector`; `ROUTECHECK_BENCH_LOCAL`, `_PEER`,
-    `_AF` and `_ROUTES`) use the same data. Their commands are in `bench_test.go`.
+    `_AF` and `_ROUTES`) use the same data and load every pinned registry too. Their commands are
+    in `bench_test.go`. Set `ROUTECHECK_REALDATA_REGISTRIES=ripe` to compare with 0.2.0's figures.
 - `scripts/release.sh vX.Y.Z`: see the header of the script. Rehearse with `--dry-run`. Never run
   it without the user's go-ahead: it pushes a tag. Never query the Go proxy for an unpushed tag,
   since the proxy caches the miss.
 
 ## Heavy runs
 
-Real-data runs and benchmarks hold a registry (2 to 3 GB). Run them one at a time, alone, under
+Real-data runs and benchmarks hold the registries (peak RSS 6,215 MB with all 16, 4,741 MB with RIPE alone). Run them one at a time, alone, under
 the memory guard, never beside check.sh or each other. Every figure in a doc or the CHANGELOG
 comes from a command run in this work, with its log named. Otherwise it is unknown. The logs live
 in `.data/`, which is never committed.
@@ -284,9 +293,14 @@ in `.data/`, which is never committed.
   RS-ANY), `accept AS-X` or `NOT AS-X`, gives an "unevaluable" report: every route Undecided (R19).
   rpsl refuses to enumerate it, and routecheck gives it no meaning of its own. In an AS-path regexp
   such a set is decided (any one AS) and named in `Verdict.AnySets`.
-- **Registries.** Load every registry a policy's sets reach. RIPE alone was loaded in both
-  real-data runs: in 0.1.0's run 390,727 of 391,010 export rejections named sets RIPE does not
-  hold, and in 0.2's run 389,127 of 389,413.
+- **Registries.** Load every registry a policy's sets reach. 0.2.0 loaded RIPE alone: 389,127 of
+  its 389,413 export rejections named sets RIPE does not hold. Loading all 16 changed little on
+  the 50 pairs both runs could check: export rejections 47,522 to 47,317. What remains mostly
+  names sets no loaded registry holds (AS-ISPSERVICES, AS-STEFFANN-IPV4, AS-STEFFANN-IPV6,
+  AS-TELFORT: 46,052 routes each). The "missing set" tag names a clause's missing sets; it does
+  not say a missing set caused the rejection.
+- **MaxPrefixes.** With every registry loaded, 10 of 60 pairs have an import filter over rpsl's
+  default 1,048,576 prefixes; the command exits 3 on such a session.
 
 ## Process
 

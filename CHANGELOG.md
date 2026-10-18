@@ -8,6 +8,166 @@ a minor version may change the API.
 
 ## [Unreleased]
 
+### Changed
+
+- `scripts/fetch-data.sh --registries` adds 15 more IRR registries to an
+  existing pinned `MANIFEST`: APNIC, ARIN, AFRINIC, LACNIC, RADB and RADB's
+  mirrors altdb, bboi, bell, canarie, jpirr, nestegg, nttcom, panix, reach and
+  tc, from the URLs of rpsl's `scripts/fetch-irr-dumps.sh`. The lines that are
+  not registry files stay as they were. The script's header lists the files and
+  the precedence order.
+- `TestRealData` loads every registry the `MANIFEST` pins, in that precedence
+  order (RIPE, APNIC, ARIN, AFRINIC, LACNIC, RADB, then the mirrors), where it
+  loaded RIPE alone. It still picks the pairs from RIPE's files only, so
+  loading more registries changes what the checks resolve, never which pairs
+  are checked.
+  - `ROUTECHECK_REALDATA_REGISTRIES` (comma-separated registry names; empty
+    means every pinned registry) loads only those. `ripe` reproduces 0.2.0's
+    load.
+  - `ROUTECHECK_REALDATA_LOAD_ONLY=1` loads the registries, logs a `LOAD:` line
+    and stops before the RIBs.
+  - The test now also tallies the missing sets left (distinct, per direction)
+    and, for each direction, the route-object answers (yes, no, unknown).
+  - The benchmarks load every pinned registry too. Set
+    `ROUTECHECK_REALDATA_REGISTRIES=ripe` to compare them with 0.2.0's figures.
+
+### Measured
+
+These figures come from runs of 2026-10-18 on the same pinned files as 0.2.0's
+(RIPE's 9 split files, route-views2's RIB of 2026-10-18 12:00, rrc00's bview of
+2026-10-18 08:00 and NTT's VRPs), plus the 15 other registries fetched on
+2026-10-18 (`.data/fetch-registries.log`). They ran under the memory guard with
+an 8 GB cap at normal priority, with `GOMAXPROCS=4`, `GOMEMLIMIT=6GiB` and
+`GOWORK=off`. The logs are kept by the maintainer and are not committed.
+
+#### Loading the registries (`.data/load-ripe.log`, `.data/load-all.log`, `.data/every-registry-loads-summary.log`)
+
+| | RIPE alone | all 16 registries |
+|---|---|---|
+| Objects | 659,819 | 4,866,879 |
+| Load time | 7.468 s | 35.871 s |
+| Heap in use after GC | 612 MB | 1,864 MB |
+| Peak RSS | 1,130 MB | 3,534 MB |
+
+- **Objects per source:** RIPE 659,819, APNIC 1,982,793, ARIN 221,880, AFRINIC
+  132,775, LACNIC 25,879, RADB 1,370,610, ALTDB 40,777, BBOI 1,685, BELL
+  29,521, CANARIE 1,888, JPIRR 16,526, NESTEGG 4, NTTCOM 292,911, PANIX 15,
+  REACH 18,028, TC 71,768.
+- **Source order** in the `LOAD:` line is the precedence order: RIPE, APNIC,
+  ARIN, AFRINIC, LACNIC, RADB, ALTDB, BBOI, BELL, CANARIE, JPIRR, NESTEGG,
+  NTTCOM, PANIX, REACH, TC. No `-NONAUTH` source occurs in any dump.
+- **RPKI filtering.** RADB's dump on RADB's FTP is RPKI-filtered (invalid route
+  objects removed) and the mirrors' dumps are not (rpsl's CLAUDE.md), so the
+  route-object figures below depend on which dump is loaded.
+
+#### The memory gate (`.data/every-registry-gate.log`)
+
+The projection for the every-registry run was 4,234 + (3,534 - 1,130) =
+6,638 MB (0.2.0's peak RSS plus the extra load), over the 6,144 MB rule for
+running it. The maintainer decided to run it anyway, under the unchanged guard
+(8 GB cap). The run's peak RSS was 6,215 MB, at memory-pressure level 1 and
+with swap growing by 0 MB.
+
+#### `TestRealData`, RIPE alone and every registry
+
+The sample is the same 60 pairs as 0.2.0's.
+
+| | RIPE only (`.data/realdata-ripe-only.log`) | every registry (`.data/realdata-every-registry.log`) |
+|---|---|---|
+| Outcome | PASS: 60 of 60 pairs checked | PASS: 50 of 60 pairs checked; 10 set too large |
+| Wall time | 3m31s, of which the checks took 29 s | 3m25s, of which the checks took 21 s |
+| Peak RSS | 4,741 MB | 6,215 MB |
+
+With `ROUTECHECK_REALDATA_REGISTRIES=ripe`, every TOTALS figure equals 0.2.0's
+run (`.data/realdata-v0.2.log`) except the wall time and the slowest pair's
+time.
+
+**The 10 pairs over rpsl's default `MaxPrefixes` (1,048,576).** Each is an
+import filter whose set expansion passes the limit once every registry resolves
+its sets, so peval returns a `*resolve.SetTooLargeError` and the test counts the
+pair as "set too large". RIPE alone gives none.
+
+| pair | set | expansion reached |
+|---|---|---|
+| 1 | AS174 \| AS-DELTA | 1,048,663 |
+| 2 | AS-SEABONE | 1,048,960 |
+| 10 and 33 | AS34984:AS-TELLCOM | 1,049,089 |
+| 15 | AS-UAIX | 1,048,718 |
+| 21 | AS-MF-MGSM | 1,049,165 |
+| 24 | AS-TTK | 1,048,583 |
+| 30 | AS-RTD | 1,048,694 |
+| 32 | AS-ORANGERO | 1,048,694 |
+| 53 | AS-DECIX AND NOT <...> | 1,053,142 |
+
+**The comparison on the same 50 pairs** (`.data/same-pairs.log`, made by
+`same-pairs.py` from the per-pair lines of the two logs). The parser reproduces
+the RIPE-only log's TOTALS when run on that log alone. The comparison covers
+the 50 pairs both runs checked.
+
+| same 50 pairs | RIPE only | every registry |
+|---|---|---|
+| Observations | 2,640,901 | 2,640,901 |
+| Import accepted / rejected / undecided | 2,108,348 / 146 / 0 | 2,108,348 / 146 / 0 |
+| Export accepted / rejected / undecided | 2,591,904 / 47,522 / 225 | 2,592,840 / 47,317 / 225 |
+| Export rejected with a missing set | 47,236 | 47,131 |
+| L's observations with a route object | 528,974 of 2,108,128 | 1,568,538 of 2,108,128 |
+
+- **The premise did not hold.** The design expected most of 0.2.0's export
+  rejections to be an artifact of loading RIPE alone. On the 50 pairs both runs
+  checked, loading every registry changes the export rejections from 47,522 to
+  47,317, under 1%. The rejections that remain mostly name sets no loaded
+  registry holds.
+- **Where 0.2.0's rejections were.** 341,891 of its 389,413 export rejections
+  (389,413 - 47,522) are in the 10 pairs the every-registry run could not
+  check.
+- **By pair.** Export rejections fell in 17 of the 50 pairs and rose in one:
+  AS31270 from AS25577, 30 to 37, with a missing set both times. The reason for
+  that rise was not investigated.
+- **Route objects change the most.** L's observations with a route object rose
+  from 528,974 to 1,568,538 of 2,108,128 on the same pairs.
+
+**Every-registry TOTALS over the 50 pairs it checked**
+(`.data/realdata-every-registry.log`):
+
+- import 2,108,348 accepted, 146 rejected, 0 undecided; export 2,592,840
+  accepted, 47,317 rejected, 225 undecided;
+- rejected with a missing set: 3 on import and 47,131 on export;
+- missing sets left: 1 distinct on import and 116 distinct on export;
+- route objects: import yes 1,568,538, no 539,590, unknown 366; export yes
+  1,888,411, no 751,499, unknown 472;
+- the top missing sets on export are AS-ISPSERVICES, AS-STEFFANN-IPV4,
+  AS-STEFFANN-IPV6 and AS-TELFORT, at 46,052 routes each.
+
+For comparison, the RIPE-only run over its 60 pairs
+(`.data/realdata-ripe-only.log`) leaves 1 distinct missing set on import and
+1,245 on export, and has route objects import yes 918,363, no 2,869,144,
+unknown 631; export yes 1,197,092, no 3,800,460, unknown 836. These cover 60
+pairs, not 50, so they are not comparable with the figures above.
+
+#### Hand checks (`.data/every-registry-checks.log`)
+
+- **The top missing sets are in no registry.** AS-ISPSERVICES,
+  AS-STEFFANN-IPV4, AS-STEFFANN-IPV6 and AS-TELFORT are in none of the 32 dumps,
+  by a line-based grep (`grep-sets.sh`). The control works: the same grep finds
+  AS1887:AS-PEERINGS:AS8501 and AS-SEABONE once each, in RIPE. RIPE objects name
+  these sets, but no registry loaded holds them.
+- **A route-level check with the command itself** (`.data/handcheck-AS29632-ripe.log`,
+  `.data/handcheck-AS29632-all.log`). The command was
+  `routecheck -peer AS29632 -collector <AS29632's filtered RIB> -direction export -af ipv4 -routes rejected`,
+  with RIPE's 9 dumps and then with all 32 in precedence order. It reproduces
+  the test's figures for that pair: export rejections 34 with RIPE alone, 2
+  with every registry.
+  - The change is all in "export, AS29632 to AS33891"
+    (`to AS33891 announce AS-NETASSIST`): 32 routes rejected, then 0.
+  - All 32 routes have origin AS48031. AFRINIC and RADB each hold a route object
+    for all 32; no other dump, RIPE's included, holds any
+    (`.data/as33891-route-objects-v2.log`, made by `route-objects.sh`).
+  - So with RIPE alone, no expansion of AS-NETASSIST could have contained them.
+    They were counted as rejected with a missing set in the failing clause only
+    because that clause also named missing sets. The tag names a clause's
+    missing sets; it does not say a missing set caused the rejection.
+  - Peak RSS: 1,356 MB with RIPE's dumps, 3,585 MB with all 32.
+
 ## [0.2.1] - 2026-10-18
 
 ### Changed
