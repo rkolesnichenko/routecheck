@@ -146,8 +146,8 @@ type Report struct {
 	// names AS-ANY or RS-ANY in filter position, where rpsl cannot expand
 	// it (a *resolve.AnySetError, ruling R19), or because a set expansion
 	// went over one of rpsl's limits (a *resolve.SetTooLargeError, ruling
-	// R27), the error's text; empty otherwise. Such a report has an empty Policy, and each of its routes,
-	// if it has any, is Undecided with the one reason
+	// R27), the error's text; empty otherwise. Such a report has an empty
+	// Policy, and each of its routes, if it has any, is Undecided with the one reason
 	// verdict.ReasonUnevaluable. A set reaching AS-ANY in an AS-path regexp
 	// is evaluated instead (verdict.Verdict.AnySets).
 	Unevaluable string

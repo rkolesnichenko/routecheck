@@ -35,10 +35,10 @@ a minor version may change the API.
     `ROUTECHECK_REALDATA_REGISTRIES=ripe` to compare them with 0.2.0's figures.
 - `Check` no longer returns a `*resolve.SetTooLargeError` (any of rpsl's four
   limits: MaxPrefixes, MaxVisited, MaxDepth, MaxConjuncts); that report is
-  unevaluable instead (ruling R27), and the run goes on.
+  unevaluable instead (ruling R27), and the run goes on. As under R19, its
+  `policy not evaluable` line is printed whatever `-routes` asks.
 - The command no longer exits 3 for a set over a limit; the exit status is 0 or
   1 by the Rejected routes.
-- Every unevaluable report prints its `policy not evaluable` line.
 
 ### Measured
 
@@ -102,7 +102,8 @@ time.
 least one filter whose set expansion passes the limit once every registry
 resolves its sets (the table gives the first filter the check reached), so
 peval returns a `*resolve.SetTooLargeError` and the test counts the pair as
-"set too large". RIPE alone gives none. 8 are in X's export toward a large
+"set too large" (at that commit; see "Measured, set limits" for the behaviour
+since R27). RIPE alone gives none. 8 are in X's export toward a large
 neighbour (AS174, AS1299, AS1273, AS9121; pairs 1, 2, 10, 21, 24, 30, 32 and 33), for example AS6762's
 `export: to AS174 announce AS-SEABONE`. 2 are in L's import (pairs 15 and 53),
 for example AS44032's `import: from AS15645 accept AS-UAIX`

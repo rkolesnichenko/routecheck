@@ -428,7 +428,7 @@ Both spellings of 0xFFFFFF03 are read, in any case:
   so there is no need to check the other direction. No flag raises the limit. On
   the data of 2026-10-18 all 60 pairs are checked: 82 report instances, 81
   distinct reports (AS34984's export to AS9121 appears in pairs 10 and 33): 80
-  export, in 9 pairs; 2 import, in 2 pairs; all `MaxPrefixes`, holding 549,847
+  export, in 9 pairs; 2 import, in 2 pairs (one pair, AS44032 from AS15645, has both, so 9 + 2 - 1 = 10); all `MaxPrefixes`, holding 549,847
   routes (`.data/realdata-set-limits.log`,
   `.data/set-limits-pairs-unevaluable.log`). The command on AS9086 from AS6762
   exits 0 (it exited 3 before, `.data/maxprefixes-cli-both.log`) and prints, for

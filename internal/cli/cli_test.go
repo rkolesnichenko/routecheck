@@ -722,7 +722,7 @@ source: TEST
 	// A: only the import is over the limit; the export (announce ANY) is decided.
 	regA := write(t, "regA.txt", []byte(registry("ANY")))
 	code, out, stderr := run(t, argsFor(regA)...)
-	if code != exitOK && code != exitRejected {
+	if code != exitOK {
 		t.Fatalf("A: exit %d; stderr %s\n%s", code, stderr, out)
 	}
 	wantContains(t, "A text", out,
@@ -736,7 +736,7 @@ source: TEST
 
 	// B: JSON; only the import is unevaluable.
 	code, out, stderr = run(t, append(argsFor(regA), "-format", "json")...)
-	if code != exitOK && code != exitRejected {
+	if code != exitOK {
 		t.Fatalf("B: exit %d; stderr %s\n%s", code, stderr, out)
 	}
 	dec := json.NewDecoder(strings.NewReader(out))
@@ -759,7 +759,7 @@ source: TEST
 	// C: the export is over the limit too; both reports are unevaluable.
 	regC := write(t, "regC.txt", []byte(registry("AS-BIG")))
 	code, out, stderr = run(t, argsFor(regC)...)
-	if code == exitFailed {
+	if code != exitOK {
 		t.Fatalf("C: exit %d; stderr %s\n%s", code, stderr, out)
 	}
 	if n := strings.Count(out, "policy not evaluable"); n != 2 {

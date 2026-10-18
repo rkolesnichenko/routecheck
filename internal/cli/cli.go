@@ -30,7 +30,8 @@ const (
 
 // expander is the expansion engine's configuration for the peval.Evaluator.
 // It is a test seam: it is zero (rpsl's defaults) and no flag or environment
-// variable sets it; tests lower a limit through it and restore it.
+// variable sets it; tests lower a limit through it and restore it, so a test
+// that sets it must not call t.Parallel.
 var expander resolve.Expander
 
 // maxExamples is how many routes each group of Rejected or Undecided routes
