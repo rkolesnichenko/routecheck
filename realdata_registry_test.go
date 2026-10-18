@@ -10,7 +10,10 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/rkolesnichenko/routecheck"
+	"github.com/rkolesnichenko/routecheck/verdict"
 	"github.com/rkolesnichenko/rpsl/resolve"
+	"github.com/rkolesnichenko/rpsl/resolve/peval"
 	"github.com/rkolesnichenko/rpsl/types"
 )
 
@@ -144,5 +147,53 @@ func TestLoadRegistryPrecedenceAndSelection(t *testing.T) {
 		if got := res.List(); !slices.Equal(got, c.want) {
 			t.Errorf("ExpandAS(%s) = %v, want %v", c.set, got, c.want)
 		}
+	}
+}
+
+func TestReportTalliesMissingSetsAndRouteObjects(t *testing.T) {
+	ref := func(s string) types.SetRef {
+		r, err := types.ParseSetRef(s)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return r
+	}
+	yes, no := true, false
+	rep := routecheck.Report{Policy: peval.Policy{Clauses: make([]peval.Clause, 1)}, Routes: []routecheck.RouteVerdict{
+		{
+			Verdict: verdict.Verdict{Outcome: verdict.Rejected, Fails: []verdict.Fail{
+				{Missing: []types.SetRef{ref("AS-A")}},
+				{Missing: []types.SetRef{ref("AS-A"), ref("AS-B")}},
+			}},
+			RouteObj: &yes,
+		},
+		{
+			Verdict:  verdict.Verdict{Outcome: verdict.Rejected, Fails: []verdict.Fail{{Missing: []types.SetRef{ref("AS-B")}}}},
+			RouteObj: &no,
+		},
+		{Verdict: verdict.Verdict{Outcome: verdict.Accepted}},
+	}}
+	r := pairResult{
+		reasons: [2]tally{{}, {}}, tooExp: tally{}, unevaluable: tally{}, anySets: tally{},
+		missingSets: [2]tally{{}, {}}, routeObj: [2]tally{{}, {}},
+	}
+	r.report(&rep, 1, "x")
+	if r.rejMissing[1] != 2 {
+		t.Errorf("rejMissing[1] = %d, want 2", r.rejMissing[1])
+	}
+	if want := (tally{"AS-A": 1, "AS-B": 2}); !reflect.DeepEqual(r.missingSets[1], want) {
+		t.Errorf("missingSets[1] = %v, want %v", r.missingSets[1], want)
+	}
+	if want := (tally{"yes": 1, "no": 1, "unknown": 1}); !reflect.DeepEqual(r.routeObj[1], want) {
+		t.Errorf("routeObj[1] = %v, want %v", r.routeObj[1], want)
+	}
+	if len(r.missingSets[0]) != 0 || len(r.routeObj[0]) != 0 {
+		t.Errorf("direction 0 was touched: %v %v", r.missingSets[0], r.routeObj[0])
+	}
+	if got := topN(tally{"AS-B": 2, "AS-A": 1, "AS-C": 2}, 2); got != "AS-B 2, AS-C 2" {
+		t.Errorf("topN = %q", got)
+	}
+	if got := topN(tally{}, 5); got != "" {
+		t.Errorf("topN of empty = %q", got)
 	}
 }

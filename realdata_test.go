@@ -145,6 +145,11 @@ func TestRealData(t *testing.T) {
 	pairs, candidates, reCandidates := pickPairs(reg, seen, sample, reSample, uint64(seed))
 	t.Logf("sample: %d pairs: %d of %d candidate aut-nums, then %d of %d more whose import from X has an AS-path regexp (seed %d)",
 		len(pairs), min(sample, candidates), candidates, len(pairs)-min(sample, candidates), reCandidates, seed)
+	ids := make([]string, len(pairs))
+	for i, p := range pairs {
+		ids[i] = fmt.Sprintf("AS%d-AS%d", p.L, p.X)
+	}
+	t.Logf("PAIRS: %s", strings.Join(ids, " "))
 	if len(pairs) == 0 {
 		t.Fatal("no candidate aut-num: nothing to check")
 	}
@@ -172,7 +177,8 @@ func TestRealData(t *testing.T) {
 		t.Logf("  AS%d: %d entries through it (%s); file %s", x, seen.all[x], strings.Join(per, ", "), sizeOf(files[x]))
 	}
 
-	tot := totals{reasons: [2]tally{{}, {}}, tooExp: tally{}, unevaluable: tally{}, anySets: tally{}}
+	tot := totals{reasons: [2]tally{{}, {}}, tooExp: tally{}, unevaluable: tally{}, anySets: tally{},
+		missingSets: [2]tally{{}, {}}, routeObj: [2]tally{{}, {}}}
 	for i, p := range pairs {
 		r := checkPair(t, reg, vrps, p, files[bgp.ASN(p.X)], timeout)
 		r.log(t, i+1, len(pairs))
@@ -857,8 +863,14 @@ type pairResult struct {
 	// Rejected routes for which a failing clause names a set the registry
 	// does not hold: import, export.
 	rejMissing [2]int
-	examples   []string
-	tooExp     tally // ReasonPathTooExpensive terms
+	// missingSets counts, per direction, the Rejected routes whose failing
+	// clauses name each missing set (a set once per route).
+	missingSets [2]tally
+	// routeObj counts, per direction and report, the routes by the route-object
+	// answer: "yes", "no", "unknown" (RouteVerdict.RouteObj true, false, nil).
+	routeObj [2]tally
+	examples []string
+	tooExp   tally // ReasonPathTooExpensive terms
 	// unevaluable counts the routes of each unevaluable report, by report
 	// and peval's error (ReasonUnevaluable).
 	unevaluable tally
@@ -883,7 +895,8 @@ type pairResult struct {
 // checkPair runs one collector-mode Check and summarizes it.
 func checkPair(tb testing.TB, reg *irrRegistry, vrps *rpki.VRPs, p pair, file string, timeout time.Duration) pairResult {
 	tb.Helper()
-	r := pairResult{p: p, reasons: [2]tally{{}, {}}, tooExp: tally{}, unevaluable: tally{}, anySets: tally{}}
+	r := pairResult{p: p, reasons: [2]tally{{}, {}}, tooExp: tally{}, unevaluable: tally{}, anySets: tally{},
+		missingSets: [2]tally{{}, {}}, routeObj: [2]tally{{}, {}}}
 	counter := &countingSource{Source: reg.src}
 	c := &routecheck.Checker{Eval: peval.Evaluator{Src: reg.src}, Routes: counter}
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
@@ -1031,12 +1044,26 @@ func (r *pairResult) report(rep *routecheck.Report, dir int, label string) {
 				r.anySets[label+": "+s]++
 			}
 		}
+		switch {
+		case rv.RouteObj == nil:
+			r.routeObj[dir]["unknown"]++
+		case *rv.RouteObj:
+			r.routeObj[dir]["yes"]++
+		default:
+			r.routeObj[dir]["no"]++
+		}
 		if rv.Verdict.Outcome == verdict.Rejected {
+			named := map[string]bool{}
 			for _, f := range rv.Verdict.Fails {
-				if len(f.Missing) > 0 {
-					r.rejMissing[dir]++
-					break
+				for _, m := range f.Missing {
+					named[m.String()] = true
 				}
+			}
+			if len(named) > 0 {
+				r.rejMissing[dir]++
+			}
+			for k := range named {
+				r.missingSets[dir][k]++
 			}
 		}
 		if rv.Verdict.Outcome == verdict.Rejected && examples < 2 && len(r.examples) < 6 {
@@ -1158,6 +1185,7 @@ type totals struct {
 	impNoPolicy, expReports, expNoPol   int
 	reasons                             [2]tally
 	rejMissing                          [2]int
+	missingSets, routeObj               [2]tally
 	tooExp                              tally
 	unevaluable                         tally
 	anySetRoutes                        [2]int
@@ -1204,6 +1232,10 @@ func (t *totals) add(r *pairResult) {
 	}
 	t.rejMissing[0] += r.rejMissing[0]
 	t.rejMissing[1] += r.rejMissing[1]
+	for d := range 2 {
+		t.missingSets[d].addAll(r.missingSets[d])
+		t.routeObj[d].addAll(r.routeObj[d])
+	}
 	t.reasons[0].addAll(r.reasons[0])
 	t.reasons[1].addAll(r.reasons[1])
 	t.tooExp.addAll(r.tooExp)
@@ -1230,6 +1262,12 @@ func (t *totals) log(tb testing.TB, wall time.Duration) {
 	tb.Logf("TOTALS: %d observations (family × pair); import: %s (%d families with no policy); export: %d neighbour reports (%d no policy): %s",
 		t.obs, t.imp, t.impNoPolicy, t.expReports, t.expNoPol, t.exp)
 	tb.Logf("TOTALS: rejected with a missing set in a failing clause: import %d, export %d", t.rejMissing[0], t.rejMissing[1])
+	tb.Logf("TOTALS: missing sets left: import %d distinct, export %d distinct", len(t.missingSets[0]), len(t.missingSets[1]))
+	tb.Logf("TOTALS: missing sets by routes, import: %s", topN(t.missingSets[0], 20))
+	tb.Logf("TOTALS: missing sets by routes, export: %s", topN(t.missingSets[1], 20))
+	for d, name := range [2]string{"import", "export"} {
+		tb.Logf("TOTALS: route objects, %s: yes %d, no %d, unknown %d", name, t.routeObj[d]["yes"], t.routeObj[d]["no"], t.routeObj[d]["unknown"])
+	}
 	tb.Logf("TOTALS: undecided reasons, import: %s", t.reasons[0])
 	tb.Logf("TOTALS: undecided reasons, export: %s", t.reasons[1])
 	tb.Logf("TOTALS: path-too-expensive verdicts: %d; routes decided under a policy with an AS-path test: %d", sumTally(t.tooExp), t.pathRoutes)
@@ -1251,6 +1289,21 @@ func (t *totals) log(tb testing.TB, wall time.Duration) {
 	if t.hygCalls != t.hygKeys {
 		tb.Errorf("hygiene read an (origin, family) more than once: %d reads for %d keys", t.hygCalls, t.hygKeys)
 	}
+}
+
+// topN is the n largest entries of t as "key count", comma-separated, by count
+// descending then key ascending; "" for an empty tally.
+func topN(t tally, n int) string {
+	keys := slices.Collect(maps.Keys(t))
+	slices.SortFunc(keys, func(a, b string) int { return cmp.Or(cmp.Compare(t[b], t[a]), cmp.Compare(a, b)) })
+	var b strings.Builder
+	for i, k := range keys[:min(n, len(keys))] {
+		if i > 0 {
+			b.WriteString(", ")
+		}
+		fmt.Fprintf(&b, "%s %d", k, t[k])
+	}
+	return b.String()
 }
 
 func sumTally(t tally) int {
