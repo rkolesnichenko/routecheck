@@ -209,7 +209,7 @@ In A2 the live heap went from 1,859 MiB at the first report mark to 4,232 MiB at
 - **In A2, 21 of the 77 reports are unevaluable.** Their set (`AS-SEABONE` beside each neighbour) reached
   2,097,154 prefixes, over the limit, so each keeps an empty `Policy`. Those 21 reports added 154 MiB in all.
 - **In R2 and V2 the same 21 reports fit under the limit** once RADB's route objects are gone, so each keeps its
-  full expansion: 124 to 134 MiB per report, 2,491 MiB in R2 and 2,510 MiB in V2.
+  full expansion: 110 to 134 MiB per report in R2 (2,491 MiB in all) and 112 to 144 MiB in V2 (2,510 MiB).
 - **The other 55 reports retain about the same** in all three runs: 2,219 MiB in A2, 2,108 in R2 and 2,086 in V2.
 - So the extra memory is the limit no longer stopping 21 expansions, each held until the end. The added data is
   not the cause.
@@ -234,7 +234,7 @@ In A2 the live heap went from 1,859 MiB at the first report mark to 4,232 MiB at
      in flight remain to save.
    - **Risk:** an rpsl-wide change under its own model and fuzz tests, then an rpsl release, then routecheck
      requiring it.
-3. **A smaller `RouteVerdict`** (about 600 bytes per route today: 641 MiB for 978,368 routes, which includes that
+3. **A smaller `RouteVerdict`** (about 690 bytes per route today: 641 MiB for 978,368 routes, which includes that
    report's own expansion). With candidate 1 only one report's verdicts are held at a time, so it matters less.
 4. **A GC setting inside the binary** (for example a lower `GOGC`). It trades CPU for headroom. It is not
    recommended before candidate 1 has been measured.
