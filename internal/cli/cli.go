@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"io"
 	"net/netip"
+	"slices"
 	"strings"
 	"time"
 
@@ -34,10 +35,10 @@ const maxExamples = 5
 
 const synopsis = `routecheck -peer AS (-session FILE [-local AS] | -collector FILE -local AS)
            (-dump FILE | -irrd HOST:PORT [-sources LIST]) [-policy FILE]
-           [-vrps FILE] [-af ipv4|ipv6|both] [-direction import|export|both]
-           [-peer-addr IP] [-at TIME] [-pre-policy]
-           [-local-rtr IP] [-peer-rtr IP] [-max-prefixes N] [-format text|json]
-           [-routes all|rejected|undecided|none]`
+           [-verified-sources LIST] [-vrps FILE] [-af ipv4|ipv6|both]
+           [-direction import|export|both] [-peer-addr IP] [-at TIME]
+           [-pre-policy] [-local-rtr IP] [-peer-rtr IP] [-max-prefixes N]
+           [-format text|json] [-routes all|rejected|undecided|none]`
 
 const about = `Checks the routes a BGP neighbour X (-peer) really announces against the
 registered RPSL policy of the local AS L (-local): which routes L's import
@@ -91,6 +92,7 @@ type config struct {
 	dumps      []string
 	irrd       string
 	sources    []string
+	verified   []string // -verified-sources, upper-cased, in the order given
 	policyFile string
 	vrps       string
 	opts       routecheck.Options
@@ -137,13 +139,18 @@ func Run(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 			return fail(err)
 		}
 	}
-	src, closeSrc, err := loadPolicy(cfg, stderr)
+	reg, err := loadPolicy(ctx, cfg, stderr)
 	if err != nil {
 		return fail(err)
 	}
-	defer closeSrc()
+	defer reg.close()
+	fmt.Fprintln(stderr, "routecheck: "+reg.verifiedNote)
 
-	c := &routecheck.Checker{Eval: peval.Evaluator{Src: src, Expander: resolve.Expander{MaxPrefixes: cfg.maxPrefixes}}, Routes: src}
+	c := &routecheck.Checker{
+		Eval:           peval.Evaluator{Src: reg.src, Expander: resolve.Expander{MaxPrefixes: cfg.maxPrefixes}},
+		Routes:         reg.src,
+		VerifiedRoutes: reg.verified,
+	}
 	results, err := c.Check(ctx, cfg.mode, records(cfg.inputs), cfg.opts)
 	if errors.Is(err, routecheck.ErrOptions) {
 		hint := ""
@@ -234,6 +241,7 @@ func parse(args []string, stdout, stderr io.Writer) (*config, error) {
 	fs.Var(&dumps, "dump", "an IRR dump `file` holding the policies, sets and routes (repeatable)")
 	irrd := fs.String("irrd", "", "a live IRRd `host:port` (port 43 when absent) instead of -dump")
 	sources := fs.String("sources", "", "with -irrd: the registries, comma-separated, in precedence `order` (default: the server's)")
+	verifiedSources := fs.String("verified-sources", "RIPE,APNIC,ARIN,AFRINIC,LACNIC", "the registries whose route objects count as verified, comma-separated (`names`); see docs/routecheck.md")
 	policyFile := fs.String("policy", "", "a local RPSL `file` (a draft) whose aut-nums and inet-rtrs answer first")
 	vrps := fs.String("vrps", "", "a VRP JSON `file` (rpki-client, Routinator) for each route's RPKI state")
 	af := fs.String("af", "both", "address `families` checked: ipv4, ipv6 or both (unicast)")
@@ -309,6 +317,9 @@ func parse(args []string, stdout, stderr io.Writer) (*config, error) {
 			}
 		}
 	}
+	if cfg.verified, err = parseVerifiedSources(*verifiedSources); err != nil {
+		return nil, err
+	}
 	if cfg.opts.AF, err = families(*af); err != nil {
 		return nil, err
 	}
@@ -351,6 +362,27 @@ func parse(args []string, stdout, stderr io.Writer) (*config, error) {
 		return nil, usagef("-routes: %q is not all, rejected, undecided or none", *routes)
 	}
 	return cfg, nil
+}
+
+// parseVerifiedSources reads -verified-sources: comma-separated registry
+// names, trimmed and upper-cased, in the order given. An empty list, an
+// empty name or a name given twice is an error naming it.
+func parseVerifiedSources(s string) ([]string, error) {
+	if strings.TrimSpace(s) == "" {
+		return nil, usagef("-verified-sources: no registry named")
+	}
+	var out []string
+	for _, name := range strings.Split(s, ",") {
+		name = strings.ToUpper(strings.TrimSpace(name))
+		switch {
+		case name == "":
+			return nil, usagef("-verified-sources: an empty name in %q", s)
+		case slices.Contains(out, name):
+			return nil, usagef("-verified-sources: %s given twice", name)
+		}
+		out = append(out, name)
+	}
+	return out, nil
 }
 
 // parseAS reads "AS65001" or "65001".

@@ -101,9 +101,24 @@ func irrdAddr(s string) string {
 	return net.JoinHostPort(strings.TrimSuffix(strings.TrimPrefix(s, "["), "]"), "43")
 }
 
-// loadPolicy builds the policy source the command line names, wrapped in a
-// resolve.Cache (peval reads the same aut-nums and sets for every report),
-// and a function that releases it. It records in cfg.draftSupplies what
+// loaded is what loadPolicy loads.
+type loaded struct {
+	// src is the policy source, wrapped in a resolve.Cache (peval reads the
+	// same aut-nums and sets for every report).
+	src resolve.PolicySource
+	// verified answers route objects from the verified sources present
+	// alone; nil when none is (the marking is off).
+	verified resolve.Source
+	// verifiedNote is the stderr line naming the verified sources present
+	// and absent.
+	verifiedNote string
+	// close releases the sources.
+	close func()
+}
+
+// loadPolicy builds the policy source the command line names and, for the
+// route-object marking, a view of the same registries restricted to the
+// -verified-sources present in them. It records in cfg.draftSupplies what
 // -policy answers first.
 //
 // With -dump the files are parsed (rpsl.Parse, rpsl.Decode) into one
@@ -112,25 +127,32 @@ func irrdAddr(s string) string {
 // object of the first dump's registry wins over another registry's. -policy
 // is read last into the same Corpus (its aut-nums and inet-rtrs only), so
 // they replace any of the same class, primary key and source (its new
-// sources rank last).
+// sources rank last). The verified sources present are the dumps' (never the
+// draft's, which holds no route object), in the order they first appear, and
+// their view is Corpus.SourceOf.
 //
 // With -irrd the server is an irrd.Source with -sources as its precedence.
+// The verified sources present are those within -sources (when given) that
+// the server serves, each probed alone (probeSource), in -verified-sources'
+// order; their view is a second irrd.Source asking for them alone.
 //
 // Either way, -policy's aut-nums and inet-rtrs answer before the registry's,
 // under any source (spec §5): a draft written with another source: than the
 // registry's is still the one checked. Sets and routes always come from the
 // registry (readDraft skips a draft's).
-func loadPolicy(cfg *config, stderr io.Writer) (resolve.PolicySource, func(), error) {
+func loadPolicy(ctx context.Context, cfg *config, stderr io.Writer) (*loaded, error) {
 	var d *draft
 	if cfg.policyFile != "" {
 		var err error
 		if d, err = readDraft(cfg.policyFile, stderr); err != nil {
-			return nil, nil, err
+			return nil, err
 		}
 		cfg.draftSupplies = d.supplies
 	}
 
 	var reg resolve.PolicySource
+	var verified resolve.Source // stays a nil interface when the marking is off
+	var present []string
 	closeReg := func() {}
 	if len(cfg.dumps) > 0 {
 		c := &resolve.Corpus{KeepPolicy: true}
@@ -143,8 +165,18 @@ func loadPolicy(cfg *config, stderr io.Writer) (resolve.PolicySource, func(), er
 				c.Put(o)
 			})
 			if err != nil {
-				return nil, nil, err
+				return nil, err
 			}
+		}
+		// The verified sources present are the dumps' own: a draft's
+		// source: supplies no route object.
+		for _, s := range order {
+			if slices.Contains(cfg.verified, s) {
+				present = append(present, s)
+			}
+		}
+		if len(present) > 0 {
+			verified = c.SourceOf(present...)
 		}
 		if d != nil {
 			for _, o := range d.objs {
@@ -158,13 +190,73 @@ func loadPolicy(cfg *config, stderr io.Writer) (resolve.PolicySource, func(), er
 		}
 		reg = c.Source(order...)
 	} else {
-		s := &irrd.Source{Addr: irrdAddr(cfg.irrd), Sources: cfg.sources}
+		addr := irrdAddr(cfg.irrd)
+		for _, name := range cfg.verified {
+			if len(cfg.sources) > 0 && !slices.Contains(cfg.sources, name) {
+				continue
+			}
+			ok, err := probeSource(ctx, addr, name)
+			if err != nil {
+				return nil, err
+			}
+			if ok {
+				present = append(present, name)
+			}
+		}
+		s := &irrd.Source{Addr: addr, Sources: cfg.sources}
 		reg, closeReg = s, func() { s.Close() }
+		if len(present) > 0 {
+			v := &irrd.Source{Addr: addr, Sources: present}
+			verified, closeReg = v, func() { s.Close(); v.Close() }
+		}
 	}
 	if d != nil {
 		reg = &draftFirst{PolicySource: reg, draft: d.corpus.Source(d.sources...)}
 	}
-	return resolve.NewCache(reg, 0), closeReg, nil
+	return &loaded{
+		src:          resolve.NewCache(reg, 0),
+		verified:     verified,
+		verifiedNote: verifiedNote(cfg.verified, present),
+		close:        closeReg,
+	}, nil
+}
+
+// probeSource reports whether the IRRd at addr serves the source name: a
+// one-source query, refused when the server does not know it. IRRd refuses
+// a whole "!s" list when one name in it is unknown, so the verified sources
+// are probed one at a time and the absent ones left out. Any other failure
+// is an error naming the source.
+func probeSource(ctx context.Context, addr, name string) (bool, error) {
+	s := &irrd.Source{Addr: addr, Sources: []string{name}}
+	defer s.Close()
+	_, err := s.OriginatedRoutes(ctx, 64496, types.AFIv4)
+	switch {
+	case err == nil:
+		return true, nil
+	case errors.Is(err, irrd.ErrQueryRefused):
+		return false, nil
+	}
+	return false, fmt.Errorf("probing the verified source %s: %w", name, err)
+}
+
+// verifiedNote is the stderr line naming the verified sources present (in
+// present's order) and the absent ones (in -verified-sources' order), or
+// saying that none is present and answers are not marked.
+func verifiedNote(verified, present []string) string {
+	if len(present) == 0 {
+		return fmt.Sprintf("route objects: none of the verified sources (%s) is present; answers are not marked", strings.Join(verified, ", "))
+	}
+	note := "route objects: verified sources " + strings.Join(present, ", ")
+	var absent []string
+	for _, v := range verified {
+		if !slices.Contains(present, v) {
+			absent = append(absent, v)
+		}
+	}
+	if len(absent) > 0 {
+		note += "; absent: " + strings.Join(absent, ", ")
+	}
+	return note
 }
 
 // draft is a -policy file, read and checked.
