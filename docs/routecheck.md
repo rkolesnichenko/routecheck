@@ -403,9 +403,11 @@ Both spellings of 0xFFFFFF03 are read, in any case:
   sets" below). What loading more registries changes
   most is the route-object answer: L's observations with a route-object
   answer went from 528,974 to 1,568,538 of 2,108,128 on the same pairs (the
-  denominator is yes + no; 366 more are unknown). How much of that rests on
-  RADB and the mirrors, which do not check resource holders, was not measured;
-  they hold 1,843,733 of the 4,866,879 objects loaded (`.data/load-all.log`).
+  denominator is yes + no; 366 more are unknown). RADB and the mirrors, which
+  do not check resource holders, hold 1,843,733 of the 4,866,879 objects loaded
+  (`.data/load-all.log`). On those 50 pairs, 551,873 of the 1,568,538 "yes"
+  answers (35.18%), or 53.09% of the rise, rest on their route objects alone
+  (see "How much rests on unverified registries" below).
   The 32 routes the hand check followed rest on AFRINIC's route objects, which
   come first among the registries holding them. The export denominator moved a
   little too: with every registry, 731 more export routes were decided on those
@@ -579,6 +581,81 @@ Both spellings of 0xFFFFFF03 are read, in any case:
     - route objects that live only in IDNIC, RIPE-NONAUTH or LEVEL3 (one could
       cover a route counted "real for any IRR filter");
     - any sample other than these 60 pairs.
+- **How much rests on unverified registries.** Measured on 2026-10-19 at
+  `-max-prefixes 2097152`, on the 2026-10-18 dumps (design:
+  `docs/superpowers/specs/2026-10-19-registry-provenance-design.md`).
+  - **Unverified means:** RADB and its ten mirrors (ALTDB, BBOI, BELL, CANARIE,
+    JPIRR, NESTEGG, NTTCOM, PANIX, REACH, TC), as against the five RIRs. This
+    grouping is an assumption: JPIRR, for one, is grouped with RADB without
+    checking how it verifies. Unverified means not checked, not wrong.
+  - **Method:** three runs of the real-data test on the same 60 pairs, compared
+    route by route:
+    - run A, every registry (`.data/provenance-A.log`);
+    - run R, every registry but route objects only from the RIRs; it dropped
+      1,785,072 route objects, 23,655 of them `member-of:` claimants
+      (`.data/provenance-R1.log`);
+    - run V, the RIRs alone (`.data/provenance-V1.log`).
+  - **Pair 2 (AS9086 from AS6762, 2,607,757 routes in A) could not be measured.**
+    It went over the 8 GB memory cap in R and in V. The guard stopped the
+    whole R run on pair 2, after pair 1, at 8,224 MB
+    (`.data/provenance-R-stopped.log`); pair 2 alone was stopped at 8,255 MB
+    in R and 8,249 MB in V (`.data/provenance-R2.log`, `-V2.log`).
+    - The likely cause, not measured: with fewer route objects, its AS-SEABONE
+      expansions may come in under 2,097,152 prefixes, and deciding against
+      them may cost more memory than giving up (the design's settled point 1
+      foresaw this). Both runs were stopped before pair 2 logged a report,
+      and no log gives AS-SEABONE's size in R or V.
+    - R and V ran the other 59 pairs (peak 6,202 and 5,046 MB; A peaked at
+      7,148 MB). Pair 2's routes are "no verdict" in both comparisons, and the
+      shares below leave them out.
+  - **Route-object answers** (`.data/provenance-AR.log`):
+    - Over the routes answered in both runs, 1,660,441 of the 4,549,769 "yes"
+      answers (36.50%) become "no" without the unverified route objects: they
+      rest on those alone. That is 764,122 of 2,102,844 on import (36.34%) and
+      896,319 of 2,446,925 on export (36.63%).
+    - No answer goes from "no" to "yes", as dropping objects cannot add one.
+    - The RPKI state of those 1,660,441 routes: 1,055,319 valid (63.56%),
+      605,079 not found, 43 invalid. "Valid" means a resource holder signed
+      that origin: most of these routes are RPKI-valid.
+    - On the 50 pairs of the earlier caveat: 551,873 of 1,568,538 "yes"
+      answers (35.18%), which is 53.09% of the rise from 528,974. Run A
+      reproduces the 1,568,538 exactly.
+  - **Verdicts:**
+    - Without the unverified route objects (A against R), 5,190 export routes
+      go from accepted to rejected. Their RPKI state is 2,888 valid, 2,288 not
+      found and 14 invalid. Nothing goes from rejected to accepted.
+    - Without anything unverified (A against V, `.data/provenance-AV.log`),
+      5,399 go from accepted to rejected (3,092 valid, 2,293 not found, 14
+      invalid). Another 439 (432 accepted, 7 rejected) have no verdict, because
+      their report loses its policy.
+    - The only other moves are limit effects: 3 routes unevaluable at
+      2,097,152 in A (2 import, 1 export) are accepted once their sets shrink.
+      Apart from those 2, no import verdict moves.
+  - **Hand-checked:** 44.31.178.0/24 from AS211776 and 81.208.192.0/19 from
+    AS14544 are route objects only in `radb.db.gz`. Their route-object answer
+    is "yes" in A and "no" in R, and AS44306's export of each to AS3491 is
+    accepted in A and rejected in R.
+  - **What this means:** on this sample, about a third of routecheck's "yes"
+    route-object answers rest on registries that do not check resource
+    holders. Most of those routes are RPKI-valid. Far fewer verdicts depend
+    on them: 0.15% of the export routes in both runs on these 59 pairs
+    (5,190 of 3,369,730).
+    - These shares are weighted by routes, and the sample is concentrated
+      (`.data/provenance-AR.log`, "concentration"). Three pairs (AS213642
+      from AS3257, AS48354 from AS20485, AS62120 from AS1299) hold 4,123,600
+      of the 4,549,769 "yes" answers in both runs (90.63%). Without them,
+      117,962 of 426,169 become "no" (27.68%). Over the 58 pairs with a "yes"
+      answered in both runs, the median pair's share is 0.00%.
+    - 4,910 of the 5,190 moves from accepted to rejected are in one report:
+      AS31133's export to AS31500 (pair AS41446 from AS31133). 19 pairs have
+      at least one.
+    - So the shares describe these 59 pairs, mostly three of them, not a
+      typical pair.
+  - **Not measured:**
+    - pair 2, and why it needs more memory without the unverified route
+      objects;
+    - whether any unverified object is right;
+    - how JPIRR or any other mirror verifies.
 - **Out of scope** (spec §12):
   - ASPA path verification;
   - BMP and RIS Live;

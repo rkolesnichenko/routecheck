@@ -4,6 +4,7 @@ import (
 	"compress/gzip"
 	"context"
 	"fmt"
+	"io"
 	"net/netip"
 	"os"
 	"path/filepath"
@@ -16,6 +17,7 @@ import (
 	"github.com/rkolesnichenko/routecheck/verdict"
 	"github.com/rkolesnichenko/rpsl/resolve"
 	"github.com/rkolesnichenko/rpsl/resolve/peval"
+	"github.com/rkolesnichenko/rpsl/resolve/rpki"
 	"github.com/rkolesnichenko/rpsl/types"
 )
 
@@ -112,7 +114,7 @@ func TestLoadRegistryPrecedenceAndSelection(t *testing.T) {
 			"as-set: AS-X\nmembers: AS64502\nsource: RADB",
 			"as-set: AS-Y\nmembers: AS64503\nsource: RADB"),
 	}
-	reg := loadRegistry(t, dumps, "")
+	reg := loadRegistry(t, dumps, "", nil)
 
 	if want := map[types.ASN]bool{64496: true}; !reflect.DeepEqual(reg.autnums, want) {
 		t.Errorf("autnums = %v, want %v", reg.autnums, want)
@@ -386,7 +388,7 @@ func TestLoadRegistryExtraDumpRanksLast(t *testing.T) {
 	extra := writeGzip(t, dir, "extra.db.gz",
 		"as-set: AS-NEW\nmembers: AS64504\nsource: LEVEL3",
 		"aut-num: AS64499\nimport: from AS64500 accept ANY\nsource: RIPE")
-	reg := loadRegistry(t, dumps, extra)
+	reg := loadRegistry(t, dumps, extra, nil)
 
 	if want := []string{"RIPE", "RADB", "LEVEL3"}; !slices.Equal(reg.sources, want) {
 		t.Errorf("sources = %v, want %v", reg.sources, want)
@@ -411,5 +413,180 @@ func TestLoadRegistryExtraDumpRanksLast(t *testing.T) {
 	}
 	if got, want := res.List(), []types.ASN{64504}; !slices.Equal(got, want) {
 		t.Errorf("AS-NEW = %v, want %v", got, want)
+	}
+}
+
+func TestParseRoutesFrom(t *testing.T) {
+	got, err := parseRoutesFrom("")
+	if err != nil || got != nil {
+		t.Errorf(`parseRoutesFrom("") = %v, %v, want nil, nil`, got, err)
+	}
+	got, err = parseRoutesFrom("RIPE, apnic")
+	if want := map[string]bool{"ripe": true, "apnic": true}; err != nil || !reflect.DeepEqual(got, want) {
+		t.Errorf(`parseRoutesFrom("RIPE, apnic") = %v, %v, want %v`, got, err, want)
+	}
+	if _, err := parseRoutesFrom("ripe,nope"); err == nil || !strings.Contains(err.Error(), "nope") {
+		t.Errorf(`parseRoutesFrom("ripe,nope") error = %v, want one naming nope`, err)
+	}
+	if _, err := parseRoutesFrom("ripe,,apnic"); err == nil {
+		t.Errorf(`parseRoutesFrom("ripe,,apnic"): no error`)
+	}
+}
+
+func TestLoadRegistryRoutesFrom(t *testing.T) {
+	dir := t.TempDir()
+	dumps := []string{
+		writeGzip(t, dir, "ripe.db.route.gz",
+			"route: 192.0.2.0/24\norigin: AS64496\nsource: RIPE"),
+		writeGzip(t, dir, "radb.db.gz",
+			"route: 198.51.100.0/24\norigin: AS64496\nsource: RADB",
+			"route: 203.0.113.0/24\norigin: AS64497\nmember-of: RS-X\nsource: RADB",
+			"route-set: RS-X\nmbrs-by-ref: ANY\nsource: RADB",
+			"as-set: AS-Y\nmembers: AS64503\nsource: RADB"),
+	}
+	prefixes := func(reg *irrRegistry, as types.ASN) []string {
+		ps, err := reg.src.OriginatedRoutes(context.Background(), as, types.AFIv4)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var out []string
+		for _, p := range ps {
+			out = append(out, p.String())
+		}
+		slices.Sort(out)
+		return out
+	}
+	expandRS := func(reg *irrRegistry) []netip.Prefix {
+		ref, err := types.ParseSetRef("RS-X")
+		if err != nil {
+			t.Fatal(err)
+		}
+		res, err := (&resolve.Expander{Src: reg.src}).ExpandPrefixes(context.Background(), ref)
+		if err != nil {
+			t.Fatalf("ExpandPrefixes(RS-X): %v", err)
+		}
+		return res.List()
+	}
+
+	reg := loadRegistry(t, dumps, "", map[string]bool{"ripe": true})
+	if got, want := prefixes(reg, 64496), []string{"192.0.2.0/24"}; !slices.Equal(got, want) {
+		t.Errorf("AS64496 routes = %v, want %v", got, want)
+	}
+	if got := prefixes(reg, 64497); len(got) != 0 {
+		t.Errorf("AS64497 routes = %v, want none", got)
+	}
+	ref, err := types.ParseSetRef("AS-Y")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res, err := (&resolve.Expander{Src: reg.src}).ExpandAS(context.Background(), ref); err != nil || !slices.Equal(res.List(), []types.ASN{64503}) {
+		t.Errorf("ExpandAS(AS-Y) = %v, %v, want [64503]", res.List(), err)
+	}
+	if got := expandRS(reg); len(got) != 0 {
+		t.Errorf("ExpandPrefixes(RS-X) = %v, want empty", got)
+	}
+	if want := map[string]int{"radb": 2}; !reflect.DeepEqual(reg.droppedRoutes, want) {
+		t.Errorf("droppedRoutes = %v, want %v", reg.droppedRoutes, want)
+	}
+	if reg.droppedClaims != 1 {
+		t.Errorf("droppedClaims = %d, want 1", reg.droppedClaims)
+	}
+
+	all := loadRegistry(t, dumps, "", nil)
+	if got, want := prefixes(all, 64496), []string{"192.0.2.0/24", "198.51.100.0/24"}; !slices.Equal(got, want) {
+		t.Errorf("nil: AS64496 routes = %v, want %v", got, want)
+	}
+	if got := expandRS(all); len(got) != 1 || got[0].String() != "203.0.113.0/24" {
+		t.Errorf("nil: ExpandPrefixes(RS-X) = %v, want [203.0.113.0/24]", got)
+	}
+	if len(all.droppedRoutes) != 0 || all.droppedClaims != 0 {
+		t.Errorf("nil: dropped %v, %d", all.droppedRoutes, all.droppedClaims)
+	}
+}
+
+func TestRouteLineV2(t *testing.T) {
+	yes := true
+	valid := rpki.Valid
+	acc := &routecheck.RouteVerdict{Route: exportRoute(true), RouteObj: &yes, RPKI: &valid,
+		Verdict: verdict.Verdict{Outcome: verdict.Accepted, Reasons: []verdict.Reason{{Kind: verdict.ReasonPeval}}}}
+	if got, want := routeLineV2("k", acc), "k\taccepted\tyes\tvalid\t"; got != want {
+		t.Errorf("accepted: %q, want %q", got, want)
+	}
+	und := &routecheck.RouteVerdict{Route: exportRoute(true),
+		Verdict: verdict.Verdict{Outcome: verdict.Undecided, Reasons: []verdict.Reason{{Kind: verdict.ReasonUnevaluable}, {Kind: verdict.ReasonPeval}, {Kind: verdict.ReasonPeval}}}}
+	if got, want := routeLineV2("k", und), "k\tundecided\tunknown\tnone\tpeval,unevaluable"; got != want {
+		t.Errorf("undecided: %q, want %q", got, want)
+	}
+	no := false
+	inv := rpki.Invalid
+	rej := &routecheck.RouteVerdict{Route: exportRoute(true), RouteObj: &no, RPKI: &inv, Verdict: verdict.Verdict{Outcome: verdict.Rejected}}
+	if got, want := routeLineV2("k", rej), "k\trejected\tno\tinvalid\t"; got != want {
+		t.Errorf("rejected: %q, want %q", got, want)
+	}
+}
+
+func TestRealOutRoutesStream(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "out")
+	o, err := openRealOut(dir, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer o.abort()
+	yes := true
+	valid := rpki.Valid
+	route := func(pfx string) verdict.Route {
+		return verdict.Route{Prefix: netip.MustParsePrefix(pfx), Path: []types.ASN{2}, PathKnown: true}
+	}
+	rep := routecheck.Report{Policy: peval.Policy{Clauses: make([]peval.Clause, 1)}, Routes: []routecheck.RouteVerdict{
+		{Route: route("192.0.2.0/24"), RouteObj: &yes, RPKI: &valid, Verdict: verdict.Verdict{Outcome: verdict.Accepted}},
+		{Route: route("198.51.100.0/24"), Verdict: verdict.Verdict{Outcome: verdict.Undecided, Reasons: []verdict.Reason{{Kind: verdict.ReasonUnevaluable}}}},
+	}}
+	ctx := reportCtx{pair: "AS1-AS2", family: "ipv4.unicast", neighbour: "AS2"}
+	r := newTestPair()
+	r.p = pair{L: 1, X: 2}
+	r.routes = o.routesWriter()
+	r.report(&rep, 0, "x", ctx)
+	r.report(&routecheck.Report{NoPolicy: true, Routes: rep.Routes}, 1, "x", ctx)
+	if err := o.addPair(&r); err != nil {
+		t.Fatal(err)
+	}
+	o.setStatus(pair{L: 5, X: 6}, "not selected")
+	to := newTestPair()
+	to.p = pair{L: 3, X: 4}
+	to.err, to.timeout = context.DeadlineExceeded, true
+	to.routes = o.routesWriter()
+	if err := o.addPair(&to); err != nil {
+		t.Fatal(err)
+	}
+	if len(o.got) != 0 {
+		t.Errorf("realOut holds %d route lines without TRACK", len(o.got))
+	}
+	if err := o.finish(&totals{}, t.Errorf); err != nil {
+		t.Fatal(err)
+	}
+	f, err := os.Open(filepath.Join(dir, "routes.tsv.gz"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer f.Close()
+	zr, err := gzip.NewReader(f)
+	if err != nil {
+		t.Fatal(err)
+	}
+	b, err := io.ReadAll(zr)
+	if err != nil {
+		t.Fatal(err)
+	}
+	pre := "AS1-AS2|import|ipv4.unicast|AS2|"
+	want := pre + "192.0.2.0/24|AS2\taccepted\tyes\tvalid\t\n" + pre + "198.51.100.0/24|AS2\tundecided\tunknown\tnone\tunevaluable\n"
+	if string(b) != want {
+		t.Errorf("routes.tsv.gz = %q, want %q", b, want)
+	}
+	ps, err := os.ReadFile(filepath.Join(dir, "pairs.tsv"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := "AS1-AS2\tchecked\nAS5-AS6\tnot selected\nAS3-AS4\ttimeout\n"; string(ps) != want {
+		t.Errorf("pairs.tsv = %q, want %q", ps, want)
 	}
 }

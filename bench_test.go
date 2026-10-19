@@ -98,7 +98,7 @@ func BenchmarkDecide(b *testing.B) {
 	}
 	s := &decideSetup
 	s.once.Do(func() {
-		reg := loadRegistry(b, rd.dumps, "")
+		reg := loadRegistry(b, rd.dumps, "", nil)
 		ev := peval.Evaluator{Src: reg.src}
 		p, err := ev.Import(context.Background(), peval.Session{Local: local, Peer: peer, AF: af})
 		if err != nil {
