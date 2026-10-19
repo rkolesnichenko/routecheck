@@ -109,6 +109,16 @@ import (
 // default) sets Expander.MaxPrefixes, as the command's -max-prefixes does; the
 // value is logged in a limits: line before the pairs.
 //
+// ROUTECHECK_REALDATA_OUT=DIR writes DIR/missing-sets.tsv (dir, set, routes:
+// the missing-set counts the TOTALS lines show, sorted) and
+// DIR/rejected-missing.tsv (key, outcome, undecided reasons, sets: one line per
+// Rejected route whose failing clauses name a missing set). A key is
+// pair|direction|family|neighbour|prefix|path, see routeKey.
+// ROUTECHECK_REALDATA_TRACK=FILE (a rejected-missing.tsv; needs OUT) also
+// writes DIR/tracked.tsv: a line for each key in FILE, in FILE's order, with
+// this run's outcome for it, or "none" when its pair was not checked (or timed
+// out) in this run.
+//
 // ROUTECHECK_REALDATA_SAMPLE (default 50), ROUTECHECK_REALDATA_REGEXP_SAMPLE
 // (default 10: the pairs added whose import term has an AS-path regexp,
 // which the plain sample may not draw at all) and ROUTECHECK_REALDATA_SEED
@@ -122,6 +132,19 @@ func TestRealData(t *testing.T) {
 	maxPrefixes, err := parseMaxPrefixes(os.Getenv("ROUTECHECK_REALDATA_MAX_PREFIXES"))
 	if err != nil {
 		t.Fatal(err)
+	}
+	outDir := os.Getenv("ROUTECHECK_REALDATA_OUT")
+	trackFile := os.Getenv("ROUTECHECK_REALDATA_TRACK")
+	if trackFile != "" && outDir == "" {
+		t.Fatal("ROUTECHECK_REALDATA_TRACK needs ROUTECHECK_REALDATA_OUT")
+	}
+	var out *realOut
+	if outDir != "" {
+		var err error
+		if out, err = openRealOut(outDir, trackFile); err != nil {
+			t.Fatal(err)
+		}
+		defer out.abort()
 	}
 	start := time.Now()
 
@@ -200,14 +223,181 @@ func TestRealData(t *testing.T) {
 	tot := totals{reasons: [2]tally{{}, {}}, tooExp: tally{}, unevaluable: tally{}, anySets: tally{},
 		missingSets: [2]tally{{}, {}}, routeObj: [2]tally{{}, {}}}
 	for i, p := range pairs {
-		r := checkPair(t, reg, vrps, p, files[bgp.ASN(p.X)], timeout, resolve.Expander{MaxPrefixes: maxPrefixes})
+		r := checkPair(t, reg, vrps, p, files[bgp.ASN(p.X)], timeout, resolve.Expander{MaxPrefixes: maxPrefixes}, out.trackSet())
 		r.log(t, i+1, len(pairs))
+		if r.dupKeys > 0 {
+			t.Errorf("AS%d from AS%d: %d routes share a key with another route of their report", p.L, p.X, r.dupKeys)
+		}
+		if err := out.addPair(&r); err != nil {
+			t.Errorf("AS%d from AS%d: %v", p.L, p.X, err)
+		}
 		if r.err == nil && seen.unclean == 0 && r.through != seen.all[bgp.ASN(p.X)] {
 			t.Errorf("AS%d from AS%d: Through %d, but pass 1 counted %d entries through AS%d", p.L, p.X, r.through, seen.all[bgp.ASN(p.X)], p.X)
 		}
 		tot.add(&r)
 	}
 	tot.log(t, since(start))
+	if out != nil {
+		if err := out.finish(&tot, t.Errorf); err != nil {
+			t.Error(err)
+		}
+	}
+}
+
+// realOut writes the files ROUTECHECK_REALDATA_OUT and _TRACK ask for. A nil
+// *realOut does nothing.
+type realOut struct {
+	dir     string
+	rejF    *os.File
+	rej     *bufio.Writer
+	track   []string        // TRACK's keys, in its order; nil without TRACK
+	trackIn map[string]bool // the same keys
+	got     map[string]string
+	checked map[string]bool // pairs that completed
+	closed  bool
+}
+
+// readTrackKeys is the first column of each non-empty line of a TSV file.
+func readTrackKeys(file string) ([]string, error) {
+	f, err := os.Open(file)
+	if err != nil {
+		return nil, err
+	}
+	defer f.Close()
+	var keys []string
+	sc := bufio.NewScanner(f)
+	sc.Buffer(nil, 1<<20)
+	for sc.Scan() {
+		if k, _, _ := strings.Cut(sc.Text(), "\t"); k != "" {
+			keys = append(keys, k)
+		}
+	}
+	return keys, sc.Err()
+}
+
+// openRealOut makes dir, opens rejected-missing.tsv in it and reads the keys
+// of trackFile ("" for none).
+func openRealOut(dir, trackFile string) (*realOut, error) {
+	o := &realOut{dir: dir, got: map[string]string{}, checked: map[string]bool{}}
+	if trackFile != "" {
+		keys, err := readTrackKeys(trackFile)
+		if err != nil {
+			return nil, fmt.Errorf("ROUTECHECK_REALDATA_TRACK: %w", err)
+		}
+		o.track, o.trackIn = keys, make(map[string]bool, len(keys))
+		for _, k := range keys {
+			o.trackIn[k] = true
+		}
+	}
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return nil, fmt.Errorf("ROUTECHECK_REALDATA_OUT: %w", err)
+	}
+	f, err := os.Create(filepath.Join(dir, "rejected-missing.tsv"))
+	if err != nil {
+		return nil, fmt.Errorf("ROUTECHECK_REALDATA_OUT: %w", err)
+	}
+	o.rejF, o.rej = f, bufio.NewWriter(f)
+	return o, nil
+}
+
+// trackSet is the keys checkPair keeps lines for: TRACK's, or nil.
+func (o *realOut) trackSet() map[string]bool {
+	if o == nil {
+		return nil
+	}
+	return o.trackIn
+}
+
+// addPair writes a completed pair's rejected-missing lines, keeps its tracked
+// lines and frees both.
+func (o *realOut) addPair(r *pairResult) error {
+	if o == nil {
+		return nil
+	}
+	defer func() { r.lines, r.rejLines, r.keys = nil, nil, nil }()
+	if r.err != nil {
+		return nil
+	}
+	o.checked[r.p.id()] = true
+	maps.Copy(o.got, r.lines)
+	for _, l := range r.rejLines {
+		if _, err := o.rej.WriteString(l + "\n"); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// abort closes the files of a run that did not reach finish.
+func (o *realOut) abort() {
+	if o != nil && !o.closed {
+		o.closed = true
+		o.rejF.Close()
+	}
+}
+
+// finish closes rejected-missing.tsv and writes missing-sets.tsv and, with
+// TRACK, tracked.tsv. A tracked key of a completed pair that the run did not
+// produce is reported through errorf (the RIBs are the same: it must exist).
+func (o *realOut) finish(tot *totals, errorf func(string, ...any)) error {
+	o.closed = true
+	if err := o.rej.Flush(); err != nil {
+		o.rejF.Close()
+		return err
+	}
+	if err := o.rejF.Close(); err != nil {
+		return err
+	}
+	var ms strings.Builder
+	for d, name := range [2]string{"import", "export"} {
+		for _, k := range slices.Sorted(maps.Keys(tot.missingSets[d])) {
+			fmt.Fprintf(&ms, "%s\t%s\t%d\n", name, k, tot.missingSets[d][k])
+		}
+	}
+	if err := writeFileChecked(filepath.Join(o.dir, "missing-sets.tsv"), func(w *bufio.Writer) error {
+		_, err := w.WriteString(ms.String())
+		return err
+	}); err != nil {
+		return err
+	}
+	if o.trackIn == nil {
+		return nil
+	}
+	return writeFileChecked(filepath.Join(o.dir, "tracked.tsv"), func(w *bufio.Writer) error {
+		for _, k := range o.track {
+			line, ok := o.got[k]
+			if !ok {
+				pair, _, _ := strings.Cut(k, "|")
+				if o.checked[pair] {
+					errorf("tracked key %q: its pair was checked, but the run has no route with this key", k)
+				}
+				line = k + "\tnone\t\t"
+			}
+			if _, err := w.WriteString(line + "\n"); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+}
+
+// writeFileChecked creates file, runs write on a buffered writer of it and
+// checks the write, the flush and the close.
+func writeFileChecked(file string, write func(*bufio.Writer) error) error {
+	f, err := os.Create(file)
+	if err != nil {
+		return err
+	}
+	w := bufio.NewWriter(f)
+	if err := write(w); err != nil {
+		f.Close()
+		return err
+	}
+	if err := w.Flush(); err != nil {
+		f.Close()
+		return err
+	}
+	return f.Close()
 }
 
 // realData is MANIFEST's files by role.
@@ -916,13 +1106,23 @@ type pairResult struct {
 	memoBound      int
 	memoLabel      string
 	pathRoutes     int // routes decided under a policy with an AS-path test
+
+	// track holds the keys whose lines lines keeps (nil: none). lines is key to
+	// TSV line, for the tracked keys only; rejLines is every Rejected route's
+	// line whose sets are not empty, in report order. dupKeys counts routes
+	// whose key an earlier route of the pair had.
+	track    map[string]bool
+	lines    map[string]string
+	rejLines []string
+	dupKeys  int
+	keys     map[string]struct{} // every key of the pair, to find duplicates
 }
 
 // checkPair runs one collector-mode Check and summarizes it.
-func checkPair(tb testing.TB, reg *irrRegistry, vrps *rpki.VRPs, p pair, file string, timeout time.Duration, exp resolve.Expander) pairResult {
+func checkPair(tb testing.TB, reg *irrRegistry, vrps *rpki.VRPs, p pair, file string, timeout time.Duration, exp resolve.Expander, track map[string]bool) pairResult {
 	tb.Helper()
 	r := pairResult{p: p, reasons: [2]tally{{}, {}}, tooExp: tally{}, unevaluable: tally{}, anySets: tally{},
-		missingSets: [2]tally{{}, {}}, routeObj: [2]tally{{}, {}}}
+		missingSets: [2]tally{{}, {}}, routeObj: [2]tally{{}, {}}, track: track}
 	counter := &countingSource{Source: reg.src}
 	c := &routecheck.Checker{Eval: peval.Evaluator{Src: reg.src, Expander: exp}, Routes: counter}
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
@@ -1022,7 +1222,8 @@ func (r *pairResult) summarize(res *routecheck.Result) famResult {
 				}
 			}
 		}
-		r.report(imp, 0, fmt.Sprintf("AS%d import from AS%d %s", r.p.L, r.p.X, res.AF))
+		r.report(imp, 0, fmt.Sprintf("AS%d import from AS%d %s", r.p.L, r.p.X, res.AF),
+			reportCtx{pair: r.p.id(), family: res.AF.String(), neighbour: fmt.Sprintf("AS%d", r.p.X)})
 	}
 	fr.neighbours = len(res.Export)
 	for i := range res.Export {
@@ -1032,20 +1233,87 @@ func (r *pairResult) summarize(res *routecheck.Result) famResult {
 			continue
 		}
 		fr.exp.add(e)
-		r.report(e, 1, fmt.Sprintf("AS%d export to AS%d %s", r.p.X, e.Toward, res.AF))
+		r.report(e, 1, fmt.Sprintf("AS%d export to AS%d %s", r.p.X, e.Toward, res.AF),
+			reportCtx{pair: r.p.id(), family: res.AF.String(), neighbour: fmt.Sprintf("AS%d", e.Toward)})
 	}
 	return fr
 }
 
+// reportCtx is what a report's route keys are made of besides the route: the
+// pair ("AS<L>-AS<X>"), the family and the neighbour ("AS<n>"). The direction
+// is report's own.
+type reportCtx struct{ pair, family, neighbour string }
+
+// routeKey names one route of one report: pair, direction ("import" or
+// "export"), family, neighbour, prefix and path, joined by "|". The path is
+// the ASNs ("AS1 AS2"), with " ?" appended when it is not known.
+func routeKey(pair, dir, family, neighbour string, r verdict.Route) string {
+	var b strings.Builder
+	b.WriteString(pair + "|" + dir + "|" + family + "|" + neighbour + "|" + r.Prefix.String() + "|")
+	for i, a := range r.Path {
+		if i > 0 {
+			b.WriteByte(' ')
+		}
+		b.WriteString("AS" + strconv.FormatUint(uint64(a), 10))
+	}
+	if !r.PathKnown {
+		b.WriteString(" ?")
+	}
+	return b.String()
+}
+
+// id is the pair as routeKey names it.
+func (p pair) id() string { return fmt.Sprintf("AS%d-AS%d", p.L, p.X) }
+
+// routeLine is the TSV line of one route: key, outcome, the Undecided reason
+// kinds (sorted, comma-joined) and the missing sets of its failing clauses
+// (sorted, deduplicated, comma-joined). sets is those sets, sorted.
+func routeLine(key string, v *verdict.Verdict) (line string, sets []string) {
+	var kinds []string
+	for _, rs := range v.Reasons {
+		kinds = append(kinds, rs.Kind)
+	}
+	slices.Sort(kinds)
+	kinds = slices.Compact(kinds)
+	for _, f := range v.Fails {
+		for _, m := range f.Missing {
+			sets = append(sets, m.String())
+		}
+	}
+	slices.Sort(sets)
+	sets = slices.Compact(sets)
+	return key + "\t" + v.Outcome.String() + "\t" + strings.Join(kinds, ",") + "\t" + strings.Join(sets, ","), sets
+}
+
 // report tallies one report's Undecided reasons, path-too-expensive terms,
-// Rejected examples, filter size and path-memo bound.
-func (r *pairResult) report(rep *routecheck.Report, dir int, label string) {
+// Rejected examples, filter size and path-memo bound, and keeps the lines of
+// the tracked routes and of the Rejected ones that name a missing set.
+func (r *pairResult) report(rep *routecheck.Report, dir int, label string, rc reportCtx) {
 	if rep.NoPolicy {
 		return
 	}
 	examples := 0
+	dirName := [2]string{"import", "export"}[dir]
 	for i := range rep.Routes {
 		rv := &rep.Routes[i]
+		key := routeKey(rc.pair, dirName, rc.family, rc.neighbour, rv.Route)
+		if r.keys == nil {
+			r.keys = map[string]struct{}{}
+		}
+		if _, dup := r.keys[key]; dup {
+			r.dupKeys++
+		}
+		r.keys[key] = struct{}{}
+		line, sets := routeLine(key, &rv.Verdict)
+		if r.track[key] {
+			if r.lines == nil {
+				r.lines = map[string]string{}
+			}
+			r.lines[key] = line
+		}
+		if rv.Verdict.Outcome == verdict.Rejected && len(sets) > 0 {
+			r.rejLines = append(r.rejLines, line)
+		}
 		if rv.Verdict.Outcome == verdict.Undecided {
 			seen := map[string]bool{}
 			for _, rs := range rv.Verdict.Reasons {

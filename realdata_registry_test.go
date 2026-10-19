@@ -3,6 +3,8 @@ package routecheck_test
 import (
 	"compress/gzip"
 	"context"
+	"fmt"
+	"net/netip"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -177,7 +179,7 @@ func TestReportTalliesMissingSetsAndRouteObjects(t *testing.T) {
 		reasons: [2]tally{{}, {}}, tooExp: tally{}, unevaluable: tally{}, anySets: tally{},
 		missingSets: [2]tally{{}, {}}, routeObj: [2]tally{{}, {}},
 	}
-	r.report(&rep, 1, "x")
+	r.report(&rep, 1, "x", reportCtx{pair: "AS1-AS2", family: "ipv4.unicast", neighbour: "AS1"})
 	if r.rejMissing[1] != 2 {
 		t.Errorf("rejMissing[1] = %d, want 2", r.rejMissing[1])
 	}
@@ -195,5 +197,141 @@ func TestReportTalliesMissingSetsAndRouteObjects(t *testing.T) {
 	}
 	if got := topN(tally{}, 5); got != "" {
 		t.Errorf("topN of empty = %q", got)
+	}
+}
+
+func exportRoute(known bool) verdict.Route {
+	return verdict.Route{Prefix: netip.MustParsePrefix("192.0.2.0/24"), Path: []types.ASN{6762, 3356}, PathKnown: known}
+}
+
+func TestRouteKey(t *testing.T) {
+	af := types.AddrFamily{AFI: types.AFIv4, SAFI: types.SAFIUnicast}
+	got := routeKey("AS9086-AS6762", "export", af.String(), "AS174", exportRoute(true))
+	if want := "AS9086-AS6762|export|ipv4.unicast|AS174|192.0.2.0/24|AS6762 AS3356"; got != want {
+		t.Errorf("routeKey = %q, want %q", got, want)
+	}
+	got = routeKey("AS9086-AS6762", "export", af.String(), "AS174", exportRoute(false))
+	if want := "AS9086-AS6762|export|ipv4.unicast|AS174|192.0.2.0/24|AS6762 AS3356 ?"; got != want {
+		t.Errorf("routeKey, path unknown = %q, want %q", got, want)
+	}
+}
+
+func TestRouteKeyUnique(t *testing.T) {
+	rv := routecheck.RouteVerdict{Route: exportRoute(true), Verdict: verdict.Verdict{Outcome: verdict.Accepted}}
+	rep := routecheck.Report{Policy: peval.Policy{Clauses: make([]peval.Clause, 1)}, Routes: []routecheck.RouteVerdict{rv, rv}}
+	r := newTestPair()
+	r.report(&rep, 1, "x", reportCtx{pair: "AS1-AS2", family: "ipv4.unicast", neighbour: "AS3"})
+	if r.dupKeys != 1 {
+		t.Errorf("dupKeys = %d, want 1", r.dupKeys)
+	}
+}
+
+func newTestPair() pairResult {
+	return pairResult{
+		reasons: [2]tally{{}, {}}, tooExp: tally{}, unevaluable: tally{}, anySets: tally{},
+		missingSets: [2]tally{{}, {}}, routeObj: [2]tally{{}, {}},
+	}
+}
+
+func TestTrackedLines(t *testing.T) {
+	ref := func(s string) types.SetRef {
+		r, err := types.ParseSetRef(s)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return r
+	}
+	route := func(pfx string) verdict.Route {
+		return verdict.Route{Prefix: netip.MustParsePrefix(pfx), Path: []types.ASN{2}, PathKnown: true}
+	}
+	rep := routecheck.Report{Policy: peval.Policy{Clauses: make([]peval.Clause, 1)}, Routes: []routecheck.RouteVerdict{
+		{Route: route("192.0.2.0/24"), Verdict: verdict.Verdict{Outcome: verdict.Rejected, Fails: []verdict.Fail{
+			{Missing: []types.SetRef{ref("AS-B")}},
+			{Missing: []types.SetRef{ref("AS-A")}},
+			{Missing: []types.SetRef{ref("AS-A")}},
+		}}},
+		{Route: route("198.51.100.0/24"), Verdict: verdict.Verdict{Outcome: verdict.Undecided, Reasons: []verdict.Reason{
+			{Kind: verdict.ReasonUnevaluable}, {Kind: verdict.ReasonPeval, Why: "x"},
+		}}},
+		{Route: route("203.0.113.0/24"), Verdict: verdict.Verdict{Outcome: verdict.Accepted}},
+	}}
+	r := newTestPair()
+	ctx := reportCtx{pair: "AS1-AS2", family: "ipv4.unicast", neighbour: "AS2"}
+	r.track = map[string]bool{}
+	for _, p := range []string{"192.0.2.0/24", "198.51.100.0/24", "203.0.113.0/24"} {
+		r.track[routeKey(ctx.pair, "import", ctx.family, ctx.neighbour, route(p))] = true
+	}
+	r.report(&rep, 0, "x", ctx)
+	pre := "AS1-AS2|import|ipv4.unicast|AS2|"
+	want := map[string]string{
+		pre + "192.0.2.0/24|AS2":    pre + "192.0.2.0/24|AS2\trejected\t\tAS-A,AS-B",
+		pre + "198.51.100.0/24|AS2": pre + "198.51.100.0/24|AS2\tundecided\tpeval,unevaluable\t",
+		pre + "203.0.113.0/24|AS2":  pre + "203.0.113.0/24|AS2\taccepted\t\t",
+	}
+	if !reflect.DeepEqual(r.lines, want) {
+		t.Errorf("lines = %q, want %q", r.lines, want)
+	}
+	if len(r.rejLines) != 1 || r.rejLines[0] != want[pre+"192.0.2.0/24|AS2"] {
+		t.Errorf("rejLines = %q", r.rejLines)
+	}
+}
+
+func TestReadTrackKeys(t *testing.T) {
+	f := filepath.Join(t.TempDir(), "track.tsv")
+	if err := os.WriteFile(f, []byte("a|b\trejected\t\tAS-A\n\nc|d\taccepted\t\t\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	keys, err := readTrackKeys(f)
+	if err != nil || !slices.Equal(keys, []string{"a|b", "c|d"}) {
+		t.Errorf("readTrackKeys = %q, %v", keys, err)
+	}
+}
+
+func TestRealOutTracked(t *testing.T) {
+	dir := t.TempDir()
+	track := filepath.Join(dir, "track.tsv")
+	// A1-A2's key is checked and found; A3-A4's pair is not checked; A1-A2's
+	// second key is missing from a completed pair.
+	if err := os.WriteFile(track, []byte("AS1-AS2|k1\trejected\t\tAS-A\nAS3-AS4|k2\trejected\t\tAS-A\nAS1-AS2|k3\trejected\t\tAS-A\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	o, err := openRealOut(filepath.Join(dir, "out"), track)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer o.abort()
+	r := newTestPair()
+	r.p = pair{L: 1, X: 2}
+	r.lines = map[string]string{"AS1-AS2|k1": "AS1-AS2|k1\taccepted\t\t"}
+	r.rejLines = []string{"AS1-AS2|r\trejected\t\tAS-A"}
+	if err := o.addPair(&r); err != nil {
+		t.Fatal(err)
+	}
+	if r.lines != nil || r.rejLines != nil {
+		t.Error("addPair did not free the pair's lines")
+	}
+	tot := totals{missingSets: [2]tally{{"AS-B": 2, "AS-A": 1}, {"AS-C": 3}}}
+	var errs []string
+	if err := o.finish(&tot, func(f string, a ...any) { errs = append(errs, fmt.Sprintf(f, a...)) }); err != nil {
+		t.Fatal(err)
+	}
+	read := func(name string) string {
+		b, err := os.ReadFile(filepath.Join(dir, "out", name))
+		if err != nil {
+			t.Fatal(err)
+		}
+		return string(b)
+	}
+	if got, want := read("tracked.tsv"), "AS1-AS2|k1\taccepted\t\t\nAS3-AS4|k2\tnone\t\t\nAS1-AS2|k3\tnone\t\t\n"; got != want {
+		t.Errorf("tracked.tsv = %q, want %q", got, want)
+	}
+	if got, want := read("missing-sets.tsv"), "import\tAS-A\t1\nimport\tAS-B\t2\nexport\tAS-C\t3\n"; got != want {
+		t.Errorf("missing-sets.tsv = %q, want %q", got, want)
+	}
+	if got, want := read("rejected-missing.tsv"), "AS1-AS2|r\trejected\t\tAS-A\n"; got != want {
+		t.Errorf("rejected-missing.tsv = %q, want %q", got, want)
+	}
+	if len(errs) != 1 || !strings.Contains(errs[0], "AS1-AS2|k3") {
+		t.Errorf("errors = %q, want one naming AS1-AS2|k3", errs)
 	}
 }
