@@ -8,6 +8,31 @@ a minor version may change the API.
 
 ## [Unreleased]
 
+### Added (tests only)
+
+- `TestProvenanceCompare` reads a run whose shards interleave (each pair from the shard that checked it).
+
+### Measured, pair 2 in the registry provenance
+
+The registry-provenance comparisons now include pair 2 (AS9086 from AS6762, 2,607,757 routes). R and V are read
+as two shards: every pair but 2 (made at 2d5e24a) and pair 2 alone (made at ae7d034, which v0.6.0 showed gives
+identical results). The logs are `.data/provenance-AR2.log` and `-AV2.log`. Run first without pair 2, the
+extended comparer reproduces the published logs exactly. The self-check reproduces 1,568,538.
+
+| | with pair 2 | as first published, without it |
+|---|---|---|
+| route-object "yes" resting on unverified route objects alone | 2,308,425 of 6,400,790 (36.06%) | 1,660,441 of 4,549,769 (36.50%) |
+| export accepted → rejected, A against R | 8,883 (0.18%) | 5,190 (0.15%) |
+| export accepted → rejected, A against V | 10,604 (0.21%) | 5,399 (0.16%) |
+| the three pairs with the most "yes" answers hold | 80.30% | 90.63% |
+
+- Pair 2's own part is 647,984 of its 1,851,021 "yes" answers (35.01%). That equals v0.5.0's "yes (unverified
+  only)" for the same pair.
+- Pair 2's 400,748 export routes are unevaluable in A, because AS-SEABONE goes over the limit. Without the
+  unverified route objects they are decided: 186,276 accepted and 214,472 rejected in R, and 176,449 and 224,299
+  in V. Every pair-2 rejection fails against missing sets (1,276 distinct in R, 1,039 in V) that the missing-sets
+  lookup never covered.
+
 ## [0.6.0] - 2026-10-19
 
 ### Added

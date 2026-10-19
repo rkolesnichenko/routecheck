@@ -351,6 +351,11 @@ Packages, imports strictly downward:
       (`docs/superpowers/specs/2026-10-19-memory-profile-design.md`, addendum): in R and V the 21 AS-SEABONE reports
       fit under the limit, and all were kept until the check ended; the test also held its rejected lines.
       Caution: the whole 60-pair R and V runs were not rerun after the change.
+      The figures with pair 2 combine shards: R = `.data/provenance/R1` (made at 2d5e24a) and `.data/stream/R2`
+      (ae7d034), V likewise (`.data/provenance-AR2.log`, `-AV2.log`, driven by `.data/provenance-pair2-runs.zsh`).
+      This is sound because v0.6.0's 60-pair run A is byte-identical to `.data/provenance/A`. The controls
+      (`-AR-control.log`, `-AV-control.log`) reproduce the published logs. Pair 2's 400,748 export routes that are
+      unevaluable in A are decided in R and V (214,472 and 224,299 rejected, against sets nobody looked up).
     - `.data/provenance-runs.zsh` and `.data/provenance-shards.zsh` drive the runs.
   - The benchmarks (`BenchmarkDecide`, `BenchmarkCollector`; `ROUTECHECK_BENCH_LOCAL`, `_PEER`,
     `_AF` and `_ROUTES`) use the same data and load every pinned registry too. Their commands
