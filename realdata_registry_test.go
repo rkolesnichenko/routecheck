@@ -264,6 +264,14 @@ func TestTrackedLines(t *testing.T) {
 	for _, p := range []string{"192.0.2.0/24", "198.51.100.0/24", "203.0.113.0/24", "100.64.0.0/10"} {
 		r.track[routeKey(ctx.pair, "import", ctx.family, ctx.neighbour, route(p))] = true
 	}
+	o, err := openRealOut(t.TempDir(), "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer o.abort()
+	if r.spool, err = o.spool(1); err != nil {
+		t.Fatal(err)
+	}
 	r.report(&rep, 0, "x", ctx)
 	pre := "AS1-AS2|import|ipv4.unicast|AS2|"
 	want := map[string]string{
@@ -275,8 +283,15 @@ func TestTrackedLines(t *testing.T) {
 	if !reflect.DeepEqual(r.lines, want) {
 		t.Errorf("lines = %q, want %q", r.lines, want)
 	}
-	if len(r.rejLines) != 1 || r.rejLines[0] != want[pre+"192.0.2.0/24|AS2"] {
-		t.Errorf("rejLines = %q", r.rejLines)
+	if err := r.spool.close(); err != nil {
+		t.Fatal(err)
+	}
+	rej, err := os.ReadFile(r.spool.paths[1])
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(rej) != want[pre+"192.0.2.0/24|AS2"]+"\n" {
+		t.Errorf("spooled rejected lines = %q", rej)
 	}
 }
 
@@ -307,11 +322,14 @@ func TestRealOutTracked(t *testing.T) {
 	r := newTestPair()
 	r.p = pair{L: 1, X: 2}
 	r.lines = map[string]string{"AS1-AS2|k1": "AS1-AS2|k1\taccepted\t\t"}
-	r.rejLines = []string{"AS1-AS2|r\trejected\t\tAS-A"}
+	if r.spool, err = o.spool(1); err != nil {
+		t.Fatal(err)
+	}
+	r.spool.writeRejected("AS1-AS2|r\trejected\t\tAS-A")
 	if err := o.addPair(&r); err != nil {
 		t.Fatal(err)
 	}
-	if r.lines != nil || r.rejLines != nil {
+	if r.lines != nil || r.spool != nil {
 		t.Error("addPair did not free the pair's lines")
 	}
 	tot := totals{missingSets: [2]tally{{"AS-B": 2, "AS-A": 1}, {"AS-C": 3}}}
@@ -544,7 +562,9 @@ func TestRealOutRoutesStream(t *testing.T) {
 	ctx := reportCtx{pair: "AS1-AS2", family: "ipv4.unicast", neighbour: "AS2"}
 	r := newTestPair()
 	r.p = pair{L: 1, X: 2}
-	r.routes = o.routesWriter()
+	if r.spool, err = o.spool(1); err != nil {
+		t.Fatal(err)
+	}
 	r.report(&rep, 0, "x", ctx)
 	r.report(&routecheck.Report{NoPolicy: true, Routes: rep.Routes}, 1, "x", ctx)
 	if err := o.addPair(&r); err != nil {
@@ -554,7 +574,10 @@ func TestRealOutRoutesStream(t *testing.T) {
 	to := newTestPair()
 	to.p = pair{L: 3, X: 4}
 	to.err, to.timeout = context.DeadlineExceeded, true
-	to.routes = o.routesWriter()
+	if to.spool, err = o.spool(3); err != nil {
+		t.Fatal(err)
+	}
+	to.spool.writeRoute("AS3-AS4|timed out")
 	if err := o.addPair(&to); err != nil {
 		t.Fatal(err)
 	}
