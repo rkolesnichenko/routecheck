@@ -6,7 +6,20 @@
 // A Sampler writes dir/series.tsv (one line per sample, flushed per line so
 // a killed run keeps all but the line being written), a heap profile
 // peak-NNN.pb.gz when the in-use heap reaches a new high, a profile at each
-// Mark of the live heap, and final.pb.gz at Stop.
+// Mark of the live heap, and final.pb.gz at Stop. start.txt holds the
+// wall-clock instant (RFC 3339, nanoseconds) that t_ms counts from, to line
+// the series up with an external log.
+//
+// A peak profile (peak-NNN.pb.gz) shows the live heap as of the last
+// completed GC, because pprof's heap profile does not force one; the series
+// line written with it carries that GC's num_gc. Only mark profiles, and the
+// live-heap figure Mark returns, follow a forced GC.
+//
+// A new high inside the 5 s cooldown since the last peak profile, or under
+// 1.05 times the last profiled high, is in the series but gets no profile.
+//
+// Profiles are written to a .tmp name and renamed, so a killed run leaves
+// only whole profiles.
 package memprof
 
 import (
