@@ -11,6 +11,13 @@ a minor version may change the API.
 ### Added (tests only)
 
 - `TestProvenanceCompare` reads a run whose shards interleave (each pair from the shard that checked it).
+- The real-data test combines `ROUTECHECK_REALDATA_ROUTES_FROM` with `_EXTRA` (the extra dump's route objects are
+  dropped like any registry's not named). Tracked keys no longer keep their whole lines, and tracked routes share
+  their set lists: on pair 2 with 252,133 tracked keys, the peak fell from 7,686 to 5,494 MB
+  (`.data/pair2-rejections-control-first.log`, `.data/pair2-rejections-control.log`).
+- `TestMissingSetsClassify` streams its tracked file, and has `_RIR_ONLY` (class names for a run with route objects
+  from the RIRs only), `_A_ROUTES`/`_R_ROUTES` (splits by A's outcome and by the route-object answer) and
+  `_TAKE_NOT_FOUND` (a sensitivity table).
 
 ### Measured, pair 2 in the registry provenance
 
@@ -41,6 +48,22 @@ extended comparer reproduces the published logs exactly, apart from timing, peak
 - Pair 2 alone holds 1,851,021 of the 6,400,790 "yes" answers (28.92%).
 - Not measured: whether the 469 (R) and 471 (V) never-looked-up sets exist anywhere, and whether loading the "found
   elsewhere" sets would flip any of these rejections.
+
+### Measured, pair 2's rejections without RADB
+
+Pair 2's 252,133 export rejections in run R were classified with the missing-sets method
+(`.data/pair2-rejections-classify.log`).
+
+- **The lookup** asked about the 469 sets never looked up: 75 deleted, 392 not found and 2 found elsewhere (both in
+  IDNIC). It sent 938 queries, 2,579 of the cap of 5,000.
+- **No gap:** with the 56 found copies loaded, run B still rejects all 252,133.
+- **All are unknown,** for one reason: every rejection names AS-CONCERTAP, whose lookup is inconclusive. Taking it as
+  not found, all are real for a filter built from RIR route objects.
+- **By route-object answer, A → R:** 88,475 "yes → no" (resting on unverified route objects), 155,541 "no → no",
+  8,080 "yes → yes" and 37 "unknown". Of the 214,472 undecided in A (all ipv4), 82,415 are "yes → no" and 125,607
+  are "no → no".
+- **Controls:** pair 2 in R with nothing extra loaded reproduces R2 byte for byte, and the 33,968 rejected in A too
+  are all "unknown, inconclusive set".
 
 ## [0.6.0] - 2026-10-19
 

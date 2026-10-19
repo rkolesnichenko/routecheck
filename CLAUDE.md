@@ -366,6 +366,9 @@ Packages, imports strictly downward:
       reproduce the published logs. Pair 2's 400,748 export routes that are unevaluable in A are decided
       in R and V (214,472 and 224,299 rejected). Of the sets those rejections name, the missing-sets
       lookup covered 807 of R's 1,276 and 568 of V's 1,039; 469 and 471 were never looked up.
+      Classified since (`.data/pair2-rejections-*.log`, driven by `.data/pair2-rejections-runs.zsh`; the lookup
+      works on the copy `.data/pair2-rejections/lookup`, so `.data/missing-sets/lookup` keeps the published 842
+      sets): no gap; all 252,133 unknown on AS-CONCERTAP alone; 88,475 of them "yes → no" on route objects.
     - `.data/provenance-runs.zsh` and `.data/provenance-shards.zsh` drive the runs.
   - The benchmarks (`BenchmarkDecide`, `BenchmarkCollector`; `ROUTECHECK_BENCH_LOCAL`, `_PEER`,
     `_AF` and `_ROUTES`) use the same data and load every pinned registry too. Their commands
