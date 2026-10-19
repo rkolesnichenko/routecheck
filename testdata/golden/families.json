@@ -1,0 +1,347 @@
+[
+  {
+    "AF": "ipv4.unicast",
+    "Coverage": {
+      "Session": null,
+      "Collector": {
+        "Entries": 6,
+        "Malformed": 0,
+        "Skipped": 0,
+        "Ignored": 0,
+        "Through": 6,
+        "NotSequence": 0,
+        "Direct": 2,
+        "NoNeighbour": 0
+      },
+      "OtherFamilies": 0,
+      "DirectNotChecked": 1,
+      "HintLocalAddr": "",
+      "HintPeerAddr": ""
+    },
+    "Import": {
+      "Toward": "AS64500",
+      "NoPolicy": false,
+      "Unevaluable": "",
+      "Accepted": 2,
+      "Rejected": 1,
+      "Undecided": 0,
+      "RouteObjYes": 2,
+      "RouteObjUnverifiedOnly": 0,
+      "RouteObjNo": 1,
+      "Policy": {
+        "Clauses": [
+          {
+            "Index": 3,
+            "Term": "from AS64500 accept AS64500",
+            "Filter": "{192.0.2.0/24}"
+          },
+          {
+            "Index": 4,
+            "Term": "from AS64500 accept <^AS64500 AS64501$>",
+            "Filter": "<^ AS64500 AS64501 $>"
+          }
+        ],
+        "Undecided": null
+      },
+      "Routes": [
+        {
+          "Evidence": {
+            "Neighbours": [
+              "AS64496",
+              "AS64510"
+            ],
+            "Direct": true,
+            "CollectorPeers": 3,
+            "Time": "2026-10-16T12:00:00Z",
+            "PeerAddr": ""
+          },
+          "RouteObj": true,
+          "RouteObjVerified": null,
+          "Route": {
+            "Prefix": "192.0.2.0/24",
+            "Path": [
+              "AS64500"
+            ],
+            "PathKnown": true,
+            "OriginSet": false,
+            "CommsKnown": false,
+            "Communities": null
+          },
+          "Verdict": {
+            "Clause": 0,
+            "EarlierUndecided": null,
+            "AnySets": null,
+            "Reasons": null,
+            "Outcome": "accepted",
+            "Fails": null
+          },
+          "RPKI": null
+        },
+        {
+          "Evidence": {
+            "Neighbours": [
+              "AS64510"
+            ],
+            "Direct": false,
+            "CollectorPeers": 1,
+            "Time": "2026-10-16T12:00:00Z",
+            "PeerAddr": ""
+          },
+          "RouteObj": true,
+          "RouteObjVerified": null,
+          "Route": {
+            "Prefix": "198.51.100.0/24",
+            "Path": [
+              "AS64500",
+              "AS64501"
+            ],
+            "PathKnown": true,
+            "OriginSet": false,
+            "CommsKnown": false,
+            "Communities": null
+          },
+          "Verdict": {
+            "Clause": 1,
+            "EarlierUndecided": null,
+            "AnySets": null,
+            "Reasons": null,
+            "Outcome": "accepted",
+            "Fails": null
+          },
+          "RPKI": null
+        },
+        {
+          "Evidence": {
+            "Neighbours": [
+              "AS64496"
+            ],
+            "Direct": false,
+            "CollectorPeers": 1,
+            "Time": "2026-10-16T12:00:00Z",
+            "PeerAddr": ""
+          },
+          "RouteObj": false,
+          "RouteObjVerified": null,
+          "Route": {
+            "Prefix": "203.0.113.0/24",
+            "Path": [
+              "AS64500",
+              "AS64502"
+            ],
+            "PathKnown": true,
+            "OriginSet": false,
+            "CommsKnown": false,
+            "Communities": null
+          },
+          "Verdict": {
+            "Clause": 0,
+            "EarlierUndecided": null,
+            "AnySets": null,
+            "Reasons": null,
+            "Outcome": "rejected",
+            "Fails": [
+              {
+                "Clause": 0,
+                "Test": "prefix not in filter",
+                "Missing": null
+              },
+              {
+                "Clause": 1,
+                "Test": "<^ AS64500 AS64501 $>",
+                "Missing": null
+              }
+            ]
+          },
+          "RPKI": null
+        }
+      ]
+    },
+    "Export": [
+      {
+        "Toward": "AS64496",
+        "NoPolicy": false,
+        "Unevaluable": "",
+        "Accepted": 1,
+        "Rejected": 1,
+        "Undecided": 0,
+        "RouteObjYes": 1,
+        "RouteObjUnverifiedOnly": 0,
+        "RouteObjNo": 1,
+        "Policy": {
+          "Clauses": [
+            {
+              "Index": 0,
+              "Term": "to AS64496 announce AS64500",
+              "Filter": "{192.0.2.0/24}"
+            }
+          ],
+          "Undecided": null
+        },
+        "Routes": [
+          {
+            "Evidence": {
+              "Neighbours": [
+                "AS64496",
+                "AS64510"
+              ],
+              "Direct": true,
+              "CollectorPeers": 3,
+              "Time": "2026-10-16T12:00:00Z",
+              "PeerAddr": ""
+            },
+            "RouteObj": true,
+            "RouteObjVerified": null,
+            "Route": {
+              "Prefix": "192.0.2.0/24",
+              "Path": [
+                "AS64500"
+              ],
+              "PathKnown": true,
+              "OriginSet": false,
+              "CommsKnown": false,
+              "Communities": null
+            },
+            "Verdict": {
+              "Clause": 0,
+              "EarlierUndecided": null,
+              "AnySets": null,
+              "Reasons": null,
+              "Outcome": "accepted",
+              "Fails": null
+            },
+            "RPKI": null
+          },
+          {
+            "Evidence": {
+              "Neighbours": [
+                "AS64496"
+              ],
+              "Direct": false,
+              "CollectorPeers": 1,
+              "Time": "2026-10-16T12:00:00Z",
+              "PeerAddr": ""
+            },
+            "RouteObj": false,
+            "RouteObjVerified": null,
+            "Route": {
+              "Prefix": "203.0.113.0/24",
+              "Path": [
+                "AS64500",
+                "AS64502"
+              ],
+              "PathKnown": true,
+              "OriginSet": false,
+              "CommsKnown": false,
+              "Communities": null
+            },
+            "Verdict": {
+              "Clause": 0,
+              "EarlierUndecided": null,
+              "AnySets": null,
+              "Reasons": null,
+              "Outcome": "rejected",
+              "Fails": [
+                {
+                  "Clause": 0,
+                  "Test": "prefix not in filter",
+                  "Missing": null
+                }
+              ]
+            },
+            "RPKI": null
+          }
+        ]
+      },
+      {
+        "Toward": "AS64510",
+        "NoPolicy": true,
+        "Unevaluable": "",
+        "Accepted": 0,
+        "Rejected": 0,
+        "Undecided": 0,
+        "RouteObjYes": 0,
+        "RouteObjUnverifiedOnly": 0,
+        "RouteObjNo": 0,
+        "Policy": {
+          "Clauses": null,
+          "Undecided": null
+        },
+        "Routes": null
+      }
+    ]
+  },
+  {
+    "AF": "ipv6.unicast",
+    "Coverage": {
+      "Session": null,
+      "Collector": {
+        "Entries": 6,
+        "Malformed": 0,
+        "Skipped": 0,
+        "Ignored": 0,
+        "Through": 6,
+        "NotSequence": 0,
+        "Direct": 2,
+        "NoNeighbour": 0
+      },
+      "OtherFamilies": 0,
+      "DirectNotChecked": 1,
+      "HintLocalAddr": "",
+      "HintPeerAddr": ""
+    },
+    "Import": {
+      "Toward": "AS64500",
+      "NoPolicy": false,
+      "Unevaluable": "",
+      "Accepted": 1,
+      "Rejected": 0,
+      "Undecided": 0,
+      "RouteObjYes": 1,
+      "RouteObjUnverifiedOnly": 0,
+      "RouteObjNo": 0,
+      "Policy": {
+        "Clauses": [
+          {
+            "Index": 5,
+            "Term": "from AS64500 accept AS64500",
+            "Filter": "{2001:db8:1::/48}"
+          }
+        ],
+        "Undecided": null
+      },
+      "Routes": [
+        {
+          "Evidence": {
+            "Neighbours": null,
+            "Direct": true,
+            "CollectorPeers": 1,
+            "Time": "2026-10-16T12:00:00Z",
+            "PeerAddr": ""
+          },
+          "RouteObj": true,
+          "RouteObjVerified": null,
+          "Route": {
+            "Prefix": "2001:db8:1::/48",
+            "Path": [
+              "AS64500"
+            ],
+            "PathKnown": true,
+            "OriginSet": false,
+            "CommsKnown": false,
+            "Communities": null
+          },
+          "Verdict": {
+            "Clause": 0,
+            "EarlierUndecided": null,
+            "AnySets": null,
+            "Reasons": null,
+            "Outcome": "accepted",
+            "Fails": null
+          },
+          "RPKI": null
+        }
+      ]
+    },
+    "Export": []
+  }
+]

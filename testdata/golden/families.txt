@@ -1,0 +1,39 @@
+routecheck: collector mode: local AS64496, peer AS64500
+routes: testdata/collector/families.mrt
+policy: -dump testdata/irr/golden-policy.txt
+note: collector mode: these are routes AS64500 announced to someone. AS64500 may not
+  announce all of them to AS64496 (a peer gets AS64500's customer cone, a customer
+  gets everything), and may announce routes to AS64496 that no collector sees.
+  A rejected route reads "if AS64500 sends this, AS64496's policy rejects it",
+  not "AS64500 sends this to AS64496".
+collector: 6 RIB entries read, 6 through AS64500 (2 on AS64500's own feed to a collector)
+
+ipv4.unicast
+  warning: 1 route seen on AS64500's own feed to a collector: that sighting is checked toward no neighbour (one also seen announced to a neighbour is checked toward it)
+  import, AS64496 from AS64500: 3 routes: 2 accepted, 1 rejected, 0 undecided; route objects 2 yes, 1 no
+    clause 1 (import attribute 4): from AS64500 accept AS64500
+    clause 2 (import attribute 5): from AS64500 accept <^AS64500 AS64501$>
+    rejected, by the first failing test of clause 1:
+      prefix not in filter: 1 route
+        203.0.113.0/24  AS64500 AS64502  [to AS64496; 1 collector peer]
+    routes (all):
+      192.0.2.0/24  AS64500  [to AS64496 AS64510; direct feed; 3 collector peers]  accepted by clause 1  route object yes
+      198.51.100.0/24  AS64500 AS64501  [to AS64510; 1 collector peer]  accepted by clause 2  route object yes
+      203.0.113.0/24  AS64500 AS64502  [to AS64496; 1 collector peer]  rejected: clause 1: prefix not in filter; clause 2: <^ AS64500 AS64501 $>  route object no
+  export, AS64500 to AS64496: 2 routes: 1 accepted, 1 rejected, 0 undecided; route objects 1 yes, 1 no
+    clause 1 (export attribute 1): to AS64496 announce AS64500
+    rejected, by the first failing test of clause 1:
+      prefix not in filter: 1 route
+        203.0.113.0/24  AS64500 AS64502  [to AS64496; 1 collector peer]
+    routes (all):
+      192.0.2.0/24  AS64500  [to AS64496 AS64510; direct feed; 3 collector peers]  accepted by clause 1  route object yes
+      203.0.113.0/24  AS64500 AS64502  [to AS64496; 1 collector peer]  rejected: clause 1: prefix not in filter  route object no
+  export, AS64500 to AS64510: no policy: AS64500 has no export term toward AS64510 in this family; its routes are not decided
+
+ipv6.unicast
+  warning: 1 route seen on AS64500's own feed to a collector: that sighting is checked toward no neighbour (one also seen announced to a neighbour is checked toward it)
+  import, AS64496 from AS64500: 1 route: 1 accepted, 0 rejected, 0 undecided; route objects 1 yes, 0 no
+    clause 1 (import attribute 6): from AS64500 accept AS64500
+    routes (all):
+      2001:db8:1::/48  AS64500  [direct feed; 1 collector peer]  accepted by clause 1  route object yes
+  export, AS64500: no neighbour seen

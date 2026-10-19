@@ -293,6 +293,62 @@ func TestFailures(t *testing.T) {
 	wantContains(t, "stderr", stderr, truncated+": ", "truncated")
 }
 
+// TestFailureAfterSomeReports: a check that fails after it has handed over a
+// report (X's aut-num is missing, so the export report fails after the
+// import report is done) writes nothing to stdout, no route-object note, and
+// exits 3, in either format.
+func TestFailureAfterSomeReports(t *testing.T) {
+	srv := serve(t, `aut-num: AS64496
+import: from AS64500 accept AS64500
+source: TEST
+
+route: 192.0.2.0/24
+origin: AS64500
+source: TEST
+`)
+	args := []string{"-local", "AS64496", "-peer", "AS64500", "-session", capture, "-irrd", srv, "-sources", "TEST", "-af", "ipv4"}
+
+	// The import report alone is produced.
+	if code, out, stderr := run(t, append(slices.Clone(args), "-direction", "import")...); code == exitFailed ||
+		!strings.Contains(out, "import, AS64496 from AS64500: ") {
+		t.Fatalf("-direction import: exit %d; stderr %s\n%s", code, stderr, out)
+	}
+	// And CheckEach hands it over before the export report fails.
+	cfg, err := parse(args, io.Discard, io.Discard)
+	if err != nil {
+		t.Fatal(err)
+	}
+	reg, err := loadPolicy(context.Background(), cfg, io.Discard)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer reg.close()
+	c := &routecheck.Checker{Eval: peval.Evaluator{Src: reg.src}, Routes: reg.src, VerifiedRoutes: reg.verified}
+	var handed []routecheck.Direction
+	_, err = c.CheckEach(context.Background(), cfg.mode, records(cfg.inputs), cfg.opts,
+		func(_ *routecheck.Result, dir routecheck.Direction, _ *routecheck.Report) error {
+			handed = append(handed, dir)
+			return nil
+		})
+	if err == nil || !slices.Equal(handed, []routecheck.Direction{routecheck.DirImport}) {
+		t.Fatalf("CheckEach: handed %v, err %v; want the import report, then an error", handed, err)
+	}
+
+	for _, format := range []string{"text", "json"} {
+		code, stdout, stderr := run(t, append(slices.Clone(args), "-format", format)...)
+		if code != exitFailed {
+			t.Errorf("%s: exit %d, want %d; stderr %s", format, code, exitFailed, stderr)
+		}
+		if stdout != "" {
+			t.Errorf("%s: stdout %q, want nothing", format, stdout)
+		}
+		wantContains(t, format+" stderr", stderr, "not found")
+		if strings.Contains(stderr, "route objects:") {
+			t.Errorf("%s: the route-object note on a failed run:\n%s", format, stderr)
+		}
+	}
+}
+
 // closedPort returns a localhost address nothing listens on: a port bound
 // and released.
 func closedPort(t *testing.T) string {
