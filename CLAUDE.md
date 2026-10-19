@@ -340,10 +340,12 @@ Packages, imports strictly downward:
     - Under OUT, the test also streams `routes.tsv.gz` (one line per route of every report with a
       policy) and writes `pairs.tsv` (each pair's status).
     - `TestProvenanceCompare` (`ROUTECHECK_PROVENANCE_A`, `_B`, `_LABEL`, `_EXCLUDE`) compares two runs
-      offline; a run's shards may interleave (each pair is read from the shard that checked it). It peaked at 2,645 MB (`.data/provenance-AR.log`). It logs the shares over routes
-      answered in both runs, their concentration over pairs (the shares are route-weighted: three pairs
-      hold 90.63% of A-R's "yes" answers in both runs), and the totals-only check over the pairs both
-      runs checked.
+      offline; a run's shards may interleave (each pair is read from the shard that checked it). It
+      peaked at 2,645 MB (`.data/provenance-AR.log`). It logs the shares over routes
+      answered in both runs, their concentration over pairs (the shares are route-weighted: without
+      pair 2, three pairs hold 90.63% of A-R's "yes" answers in both runs; with pair 2, three pairs
+      hold 80.30%, `.data/provenance-AR2.log`), and the totals-only check over the pairs both runs
+      checked.
     - Pair 2 (AS9086 from AS6762) with fewer route objects, history: before the streaming change the whole R run
       stopped on it at 8,224 MB, and it alone at 8,255 MB in R and 8,249 MB in V (`.data/provenance-R2.log`,
       `-V2.log`). Now pair 2 alone completes at 5,337 MB in R (`.data/stream-R2.log`) and 4,526 MB in V
@@ -353,9 +355,13 @@ Packages, imports strictly downward:
       Caution: the whole 60-pair R and V runs were not rerun after the change.
       The figures with pair 2 combine shards: R = `.data/provenance/R1` (made at 2d5e24a) and `.data/stream/R2`
       (ae7d034), V likewise (`.data/provenance-AR2.log`, `-AV2.log`, driven by `.data/provenance-pair2-runs.zsh`).
-      This is sound because v0.6.0's 60-pair run A is byte-identical to `.data/provenance/A`. The controls
-      (`-AR-control.log`, `-AV-control.log`) reproduce the published logs. Pair 2's 400,748 export routes that are
-      unevaluable in A are decided in R and V (214,472 and 224,299 rejected, against sets nobody looked up).
+      Mixing versions is sound for the shared code: v0.6.0's 60-pair run A is byte-identical to
+      `.data/provenance/A`. That run never takes the RIR-only route-object path R uses; what covers it is
+      the cross-check that R2's pair-2 yes → no (253,107 import, 394,877 export) equals v0.5.0's marking
+      for the same pair, a different code path. The controls (`-AR-control.log`, `-AV-control.log`)
+      reproduce the published logs. Pair 2's 400,748 export routes that are unevaluable in A are decided
+      in R and V (214,472 and 224,299 rejected). Of the sets those rejections name, the missing-sets
+      lookup covered 807 of R's 1,276 and 568 of V's 1,039; 469 and 471 were never looked up.
     - `.data/provenance-runs.zsh` and `.data/provenance-shards.zsh` drive the runs.
   - The benchmarks (`BenchmarkDecide`, `BenchmarkCollector`; `ROUTECHECK_BENCH_LOCAL`, `_PEER`,
     `_AF` and `_ROUTES`) use the same data and load every pinned registry too. Their commands

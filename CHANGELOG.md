@@ -17,7 +17,7 @@ a minor version may change the API.
 The registry-provenance comparisons now include pair 2 (AS9086 from AS6762, 2,607,757 routes). R and V are read
 as two shards: every pair but 2 (made at 2d5e24a) and pair 2 alone (made at ae7d034, which v0.6.0 showed gives
 identical results). The logs are `.data/provenance-AR2.log` and `-AV2.log`. Run first without pair 2, the
-extended comparer reproduces the published logs exactly. The self-check reproduces 1,568,538.
+extended comparer reproduces the published logs exactly, apart from timing, peak memory and source line numbers. The self-check reproduces 1,568,538.
 
 | | with pair 2 | as first published, without it |
 |---|---|---|
@@ -30,8 +30,17 @@ extended comparer reproduces the published logs exactly. The self-check reproduc
   only)" for the same pair.
 - Pair 2's 400,748 export routes are unevaluable in A, because AS-SEABONE goes over the limit. Without the
   unverified route objects they are decided: 186,276 accepted and 214,472 rejected in R, and 176,449 and 224,299
-  in V. Every pair-2 rejection fails against missing sets (1,276 distinct in R, 1,039 in V) that the missing-sets
-  lookup never covered.
+  in V. (The comparison's cells are 186,277 and 176,450; each holds 1 limit-effect route from another pair, shown by
+  `.data/provenance-AR.log` and `-AV.log` as "unevaluable → accepted 1": 186,277 − 1 = 186,276 and
+  176,450 − 1 = 176,449.)
+- Every pair-2 rejection fails against missing sets (1,276 distinct in R, 1,039 in V). The missing-sets lookup
+  covered most of them: 807 of R's 1,276 and 568 of V's 1,039 were among the 842 looked up; 469 and 471 were not.
+  In R, 739 sets are named by all 252,133 rejections, and all 739 were looked up (367 deleted, 347 not found,
+  24 found elsewhere, 1 inconclusive: AS-CONCERTAP). In V, 712 sets are named by all 263,472 rejections, 476 of them
+  looked up.
+- Pair 2 alone holds 1,851,021 of the 6,400,790 "yes" answers (28.92%).
+- Not measured: whether the 469 (R) and 471 (V) never-looked-up sets exist anywhere, and whether loading the "found
+  elsewhere" sets would flip any of these rejections.
 
 ## [0.6.0] - 2026-10-19
 

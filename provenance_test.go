@@ -1238,6 +1238,44 @@ func TestRunReaderInterleaved(t *testing.T) {
 	}
 }
 
+// A checked pair with no lines in the middle of a run still hands zipPairs an
+// empty, non-nil map: zipPairs advances a run's reader only after a pair with a
+// non-nil map, so a nil one would stall the run and drop every later pair's
+// routes.
+func TestZipEmptyPairInMiddle(t *testing.T) {
+	const p1, p2, p3, p4 = "AS1-AS2", "AS3-AS4", "AS5-AS6", "AS7-AS8"
+	order := []string{p1, p2, p3, p4}
+	l := []string{
+		provTestLine(p1, "import", 1), provTestLine(p3, "import", 1), provTestLine(p3, "export", 1),
+		provTestLine(p4, "import", 1),
+	}
+	allChecked := map[string]string{p1: "checked", p2: "checked", p3: "checked", p4: "checked"}
+	a := writeProvShard(t, order, allChecked, l...)
+	s1 := writeProvShard(t, order, map[string]string{p1: "checked", p2: "not selected", p3: "checked", p4: "not selected"}, l[0], l[1], l[2])
+	s2 := writeProvShard(t, order, map[string]string{p1: "not selected", p2: "checked", p3: "not selected", p4: "checked"}, l[3])
+	ar, err := newRunReader([]string{a}, order)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer ar.Close()
+	br, err := newRunReader([]string{s1, s2}, order)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer br.Close()
+	var got []string
+	err = zipPairs(order, ar, br, allChecked, allChecked, func(p string, am, bm map[string]provRoute) error {
+		got = append(got, fmt.Sprintf("%s %d %d", p, len(am), len(bm)))
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := "[AS1-AS2 1 1 AS3-AS4 0 0 AS5-AS6 2 2 AS7-AS8 1 1]"; fmt.Sprint(got) != want {
+		t.Errorf("zip gave %v, want %s", got, want)
+	}
+}
+
 func TestRunReaderStrayPair(t *testing.T) {
 	const p1, p2 = "AS1-AS2", "AS3-AS4"
 	order := []string{p1, p2}
