@@ -76,6 +76,7 @@ func TestParseRADB(t *testing.T) {
 		{"cut short", radbFound(x)[:len(x)/2], "bad", nil},
 		{"none cut short", radbNone[:20], "bad", nil},
 		{"error", "%% ERROR: Unknown source FOO\n\n\n", "bad", nil},
+		{"error beside none", "%% ERROR: Unknown source FOO\n" + radbNone, "bad", nil},
 		{"another class", radbFound("aut-num: AS1\nsource: RADB\n"), "bad", nil},
 		{"found, CRLF", strings.ReplaceAll(radbFound(x), "\n", "\r\n"), "found", []string{x}},
 		{"none, CRLF", strings.ReplaceAll(radbNone, "\n", "\r\n"), "none", nil},
@@ -379,17 +380,31 @@ func TestWhoisCutShort(t *testing.T) {
 	}
 }
 
+func TestNamingChecksClass(t *testing.T) {
+	asX := asSet("as-x", "RADB")
+	rsX := "route-set:      AS-X\nmembers:        192.0.2.0/24\nsource:         RADB\n"
+	name, err := types.ParseSetName("AS-X")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := naming([]string{rsX, asX, asSet("AS-Y", "RADB")}, name); !slices.Equal(got, []string{asX}) {
+		t.Errorf("naming(AS-X) = %q, want the as-set alone", got)
+	}
+}
+
 func TestCachedAnswerRechecked(t *testing.T) {
 	dir := t.TempDir()
 	f := &fakeWhois{answer: func(string, string) string { return radbNone }}
 	r := testRun(t, dir, f.dial, 100, nil)
+	routeSetD := "route-set:      AS-D\nmembers:        192.0.2.0/24\nsource:         RADB\n"
 	cached := map[string]string{
 		"RADB::AS-A": radbNone[:20],                        // cut short
 		"RADB::AS-B": radbFound(asSet("AS-OTHER", "RADB")), // names another set
 		"RADB::AS-C": radbNone,                             // conclusive
+		"RADB::AS-D": radbFound(routeSetD),                 // names the set in another class
 	}
 	var refs []types.SetRef
-	for _, s := range []string{"RADB::AS-A", "RADB::AS-B", "RADB::AS-C"} {
+	for _, s := range []string{"RADB::AS-A", "RADB::AS-B", "RADB::AS-C", "RADB::AS-D"} {
 		refs = append(refs, mustRef(t, s))
 		if err := os.WriteFile(filepath.Join(dir, "cache", "radb", cacheName(s)+".txt"), []byte(cached[s]), 0o644); err != nil {
 			t.Fatal(err)
@@ -407,11 +422,12 @@ func TestCachedAnswerRechecked(t *testing.T) {
 	want := []string{
 		"radb.test:43 -r -s RADB -T " + setClasses + " AS-A",
 		"radb.test:43 -r -s RADB -T " + setClasses + " AS-B",
+		"radb.test:43 -r -s RADB -T " + setClasses + " AS-D",
 	}
 	if !slices.Equal(f.queries, want) {
 		t.Errorf("queries = %q, want %q", f.queries, want)
 	}
-	for _, s := range []string{"RADB::AS-A", "RADB::AS-B"} {
+	for _, s := range []string{"RADB::AS-A", "RADB::AS-B", "RADB::AS-D"} {
 		file := filepath.Join(dir, "cache", "radb", cacheName(s))
 		if b, err := os.ReadFile(file + ".txt"); err != nil || string(b) != radbNone {
 			t.Errorf("%s: cache holds %q (%v), want the new answer", s, b, err)
@@ -594,7 +610,7 @@ func TestQueryCap(t *testing.T) {
 // ROUTECHECK_MISSINGSETS_LIVE=1:
 //
 //	ROUTECHECK_MISSINGSETS_LIVE=1 ROUTECHECK_MISSINGSETS_DIR=$PWD/.data/missing-sets \
-//	  ROUTECHECK_MISSINGSETS_IN=$PWD/.data/run-a/missing-sets.tsv ROUTECHECK_REALDATA=$PWD/.data/realdata \
+//	  ROUTECHECK_MISSINGSETS_IN=$PWD/.data/missing-sets/A/missing-sets.tsv ROUTECHECK_REALDATA=$PWD/.data/realdata \
 //	  go test -count=1 -timeout 6h -run TestMissingSetsLookup -v .
 func TestMissingSetsLookup(t *testing.T) {
 	if os.Getenv("ROUTECHECK_MISSINGSETS_LIVE") != "1" {
@@ -878,13 +894,17 @@ func paragraphs(text string) (objs []string, other bool) {
 	return objs, other
 }
 
+// radbError is an IRRd error line.
+var radbError = regexp.MustCompile(`(?m)^%% ?ERROR`)
+
 // parseRADB reads RADB's answer to radbQuery: "found" with its set objects,
 // "none", or "bad" for anything else, an answer not ending in a blank line
-// (cut short) among them. Whether an object names the set is the caller's.
+// (cut short) or holding an IRRd "%% ERROR" line (even beside "No entries
+// found") among them. Whether an object names the set is the caller's.
 func parseRADB(text string) (objs []string, kind string) {
 	objs, other := paragraphs(text)
 	switch {
-	case !strings.HasSuffix(strings.ReplaceAll(text, "\r\n", "\n"), "\n\n") || other:
+	case !strings.HasSuffix(strings.ReplaceAll(text, "\r\n", "\n"), "\n\n") || other || radbError.MatchString(text):
 		return nil, "bad"
 	case len(objs) > 0:
 		return objs, "found"
@@ -1184,11 +1204,13 @@ func writeAtomic(file, text string) error {
 	return err
 }
 
-// naming is the objects whose class line names name.
+// naming is the objects whose class line names name in name's own class: a
+// route-set named AS-X is not a copy of the as-set AS-X.
 func naming(objs []string, name types.SetName) []string {
 	var out []string
 	for _, o := range objs {
-		if m := setClassLine.FindStringSubmatch(o); m != nil && canonSet(m[2]) == name.String() {
+		if m := setClassLine.FindStringSubmatch(o); m != nil && strings.EqualFold(m[1], name.Class().String()) &&
+			canonSet(m[2]) == name.String() {
 			out = append(out, o)
 		}
 	}

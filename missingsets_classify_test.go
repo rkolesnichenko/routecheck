@@ -5,6 +5,7 @@ import (
 	"maps"
 	"os"
 	"path/filepath"
+	"regexp"
 	"slices"
 	"strings"
 	"testing"
@@ -33,7 +34,8 @@ var unknownReasons = []string{
 
 // trackedLine is one line of a tracked.tsv: the route's key, its outcome in
 // run B ("accepted", "rejected", "undecided" or "none"), the Undecided reason
-// kinds (comma-joined) and the missing sets run A named.
+// kinds (comma-joined) and the missing sets of run B's failing clauses (empty
+// unless B rejected the route against one).
 type trackedLine struct {
 	Key, Outcome, Detail string
 	Sets                 []string
@@ -224,18 +226,59 @@ func TestMergeTracked(t *testing.T) {
 func TestReadTracked(t *testing.T) {
 	dir := t.TempDir()
 	good := filepath.Join(dir, "good.tsv")
-	os.WriteFile(good, []byte("k1\trejected\t\tAS-A,AS-B\nk2\tundecided\tpeval,unevaluable\t\n"), 0o644)
+	if err := os.WriteFile(good, []byte("k1\trejected\t\tAS-A,AS-B\nk2\tundecided\tpeval,unevaluable\t\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
 	got, err := readTracked(good)
 	if err != nil || len(got) != 2 || len(got[0].Sets) != 2 || got[1].Sets != nil || got[1].Detail != "peval,unevaluable" {
 		t.Errorf("readTracked = %+v, %v", got, err)
 	}
 	bad := filepath.Join(dir, "bad.tsv")
-	os.WriteFile(bad, []byte("k1\trejected\t\t\nk2\tmaybe\t\t\n"), 0o644)
+	if err := os.WriteFile(bad, []byte("k1\trejected\t\t\nk2\tmaybe\t\t\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
 	if _, err := readTracked(bad); err == nil || !strings.Contains(err.Error(), "bad.tsv:2") {
 		t.Errorf("malformed line: err = %v, want one naming bad.tsv:2", err)
 	}
 	if _, err := readTracked(filepath.Join(dir, "missing.tsv")); err == nil {
 		t.Error("missing file read")
+	}
+}
+
+// pairID is a pair's id as a route key starts with it: AS<L>-AS<X>.
+var pairID = regexp.MustCompile(`^AS[0-9]+-AS[0-9]+$`)
+
+// parseSubset reads ROUTECHECK_MISSINGSETS_SUBSET: pair ids, comma-separated
+// (empty items skipped). An id that is not AS<L>-AS<X> is an error naming it:
+// it could match no route key. A well-formed id may match no tracked route (a
+// checked pair with no rejection against a missing set), so that is logged, not
+// an error.
+func parseSubset(s string) (map[string]bool, error) {
+	out := map[string]bool{}
+	for _, p := range strings.Split(s, ",") {
+		if p == "" {
+			continue
+		}
+		if !pairID.MatchString(p) {
+			return nil, fmt.Errorf("subset pair %q is not AS<L>-AS<X>", p)
+		}
+		out[p] = true
+	}
+	return out, nil
+}
+
+func TestParseSubset(t *testing.T) {
+	got, err := parseSubset("AS197229-AS20771,,AS9086-AS6762")
+	if err != nil || len(got) != 2 || !got["AS197229-AS20771"] || !got["AS9086-AS6762"] {
+		t.Errorf("parseSubset = %v, %v; want the two pairs", got, err)
+	}
+	if got, err := parseSubset(""); err != nil || len(got) != 0 {
+		t.Errorf("parseSubset(\"\") = %v, %v; want no pairs", got, err)
+	}
+	for _, bad := range []string{"AS9086-AS6762,AS9086_AS6762", "9086-6762", "AS9086-AS6762|export", " AS1-AS2", "AS1-AS2-AS3"} {
+		if _, err := parseSubset(bad); err == nil {
+			t.Errorf("parseSubset(%q) took a malformed pair id", bad)
+		}
 	}
 }
 
@@ -297,12 +340,11 @@ func TestMissingSetsClassify(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	subset := map[string]bool{}
-	for _, p := range strings.Split(subsetEnv, ",") {
-		if p != "" {
-			subset[p] = true
-		}
+	subset, err := parseSubset(subsetEnv)
+	if err != nil {
+		t.Fatal(err)
 	}
+	subsetRoutes := map[string]int{}
 	type scope struct {
 		title string
 		dirs  map[string]*classTable
@@ -318,6 +360,9 @@ func TestMissingSetsClassify(t *testing.T) {
 		f := strings.Split(r.Key, "|")
 		if len(f) < 2 {
 			t.Fatalf("key %q has no direction", r.Key)
+		}
+		if subset[f[0]] {
+			subsetRoutes[f[0]]++
 		}
 		for i, in := range []bool{true, subset[f[0]]} {
 			if !in {
@@ -336,6 +381,9 @@ func TestMissingSetsClassify(t *testing.T) {
 				}
 			}
 		}
+	}
+	for _, p := range slices.Sorted(maps.Keys(subset)) {
+		t.Logf("subset pair %s: %d tracked routes", p, subsetRoutes[p])
 	}
 	for _, s := range scopes {
 		for _, d := range slices.Sorted(maps.Keys(s.dirs)) {

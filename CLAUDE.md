@@ -292,11 +292,17 @@ Packages, imports strictly downward:
     feeding the pair selection. `ROUTECHECK_REALDATA_PAIRS` (such as `1-20,31`) checks only those pairs.
     At 2,097,152 with OUT it peaked at 6,991 MB, and with an extra dump of 54 sets at 7,480 MB
     (`.data/missing-sets-A.log`, `.data/missing-sets-round4-B.log`): ask before running it.
+    That tracked.tsv was 503 MB, about 4.7 KB per line, 4.6 KB of it the sets column
+    (`.data/missing-sets/B4/tracked.tsv`), and the tracked lines are held in memory until the run ends:
+    likely most of the 6,991 to 7,480 MB growth (not measured apart). A larger closure could reach
+    the 8 GB cap; measure first. The per-report duplicate-key check runs on every real-data run;
+    the peak of a plain run (no OUT) since it was added was not measured.
   - The missing-sets measurement (CHANGELOG, "Measured, missing sets"):
     - `TestMissingSetsLookup` is live and opt-in (`ROUTECHECK_MISSINGSETS_LIVE=1`, `_DIR`, `_IN`, plus
       `ROUTECHECK_REALDATA`). It queries whois.radb.net and whois.ripe.net, one query at a time, cached,
       at most 5,000 queries in all. Never run it without the user's go-ahead.
-    - `TestMissingSetsClassify` (`_DIR`, `_TRACKED`, `_SUBSET`) is offline.
+    - `TestMissingSetsClassify` (`_DIR`, `_TRACKED`, `_SUBSET`) is offline. `_SUBSET` takes pair ids
+      (`AS<L>-AS<X>`); a malformed one fails, and each id's count of tracked routes is logged.
     - `.data/missing-sets-rounds.zsh` drives the rounds.
   - The benchmarks (`BenchmarkDecide`, `BenchmarkCollector`; `ROUTECHECK_BENCH_LOCAL`, `_PEER`,
     `_AF` and `_ROUTES`) use the same data and load every pinned registry too. Their commands
