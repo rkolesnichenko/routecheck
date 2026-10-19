@@ -151,108 +151,131 @@ work starts by measuring.
 ## Addendum: phase 1 findings (2026-10-19)
 
 **Runs.** Four runs on head 2343eae, one at a time under the guard, with the runner `.data/memprof-runs.zsh`; its
-summary is `.data/memprof-runs.log`, each run's log is `.data/memprof-<run>.log`, and its files are in
-`.data/memprof/<run>/`.
+summary is `.data/memprof-runs.log`, each run's log `.data/memprof-<run>.log`, its files `.data/memprof/<run>/`.
+All figures are MiB: the guard's "MB" and pprof's "MB" are MiB (pprof's 298.58 "MB" of verdicts in report 1 is
+978,368 × 320 B = 298.57 MiB).
 
-| run | result | peak RSS (guard, MiB) | live heap after load | live heap at the last report mark |
+| run | result | peak RSS (guard) | live after load (`series.tsv`) | live at the last report mark |
 |---|---|---|---|---|
-| cmd: the command, AS9086 from AS6762, every registry, 2,097,152 | completed, exit 1 as before | 6,557 | (no mark) | (no marks inside `Run`); in-use heap peaked at 5,881 MiB, 61 s into a 65 s run |
-| A2: pair 2 alone, every registry | completed | 6,462 | 1,365 MiB | 4,232 MiB |
-| R2: pair 2 alone, route objects from the RIRs only | stopped by the guard at 8,207 | 8,207 | 1,207 MiB | 6,301 MiB |
-| V2: pair 2 alone, the RIRs only | stopped by the guard at 8,209 | 8,209 | 775 MiB | 5,866 MiB |
+| cmd: the command, AS9086 from AS6762, every registry, 2,097,152 | completed, exit 1 as before | 6,557 | (no marks) | (no marks); in use peaked at 5,881, 61 s into 65 s |
+| A2: pair 2 alone, every registry | completed | 6,462 | 1,365 | 4,232 |
+| R2: pair 2 alone, route objects from the RIRs only | stopped by the guard | 8,207 | 1,207 | 6,301 |
+| V2: pair 2 alone, the RIRs only | stopped by the guard | 8,209 | 775 | 5,866 |
 
-**Units.** The guard's MB and the series (`series.tsv`) are MiB. pprof's MB in the owner table below is 10^6 bytes.
+- **cmd ran as a `go test`**, and the guard sums RSS over the process tree, so its 6,557 includes the test driver
+  and does not compare with v0.5.0's binary (6,421, `.data/verified-counts-2097152.log`).
+- **A2 ran under profiling:** 80 forced GCs (its mark lines), 13.65 s spent on the 77 report marks (`memprof-runs.log`), and a 40 s check
+  against 27.239 s unprofiled (`.data/provenance-A.log`).
+- **Shapes** (`series.tsv`, in use): cmd climbs for 40 s, then swings between 3,561 and 5,881 to the end, with 22
+  GCs in 24 s. A2, R2, V2 load, run the RIB passes (at most 3,573, 3,150, 2,256), climb report by report (to
+  5,315, 7,017, 6,437), then rise again after the last report mark (to 5,564, 7,423, 7,639).
 
-**Results unchanged.**
-- cmd's `stdout.txt` equals the v0.5.0 run's output (`.data/verified-counts-2097152.log`) line for line, except the
-  two header lines that print the input paths: this run passed them as absolute paths.
-- A2's pair-2 lines equal `.data/provenance-A.log`'s.
-
-**R2 and V2 finished their checks.** All 77 report marks were logged, and so was the per-pair mark-cost line, which
-is written after `Check` returns. The guard stopped them afterwards, while the test was writing its outputs, with
-every report still held.
+**Results unchanged.** cmd's `stdout.txt` equals the v0.5.0 output line for line, apart from the two header lines
+that print the input paths (absolute here) and the log's stderr and guard lines. A2's pair-2 lines equal
+`.data/provenance-A.log`'s, apart from the time and heap figures on the pair line.
 
 ### Where the memory is
 
-**The heap grows across the reports, as a climb, not one spike.** Each report keeps what it allocated until the
-whole check ends, because `Check` returns every `Report` together and each `Report` holds:
-- its `Policy`, with the expanded prefix sets of its filters;
-- its `RouteVerdict`s.
+**During the check, the heap climbs across the reports** (live 1,859 to 4,232 in A2, 1,702 to 6,301 in R2, first
+to last report mark): `Check` returns every `Report` together, each holding its `Policy` (the expanded prefix sets
+of its filters) and its `RouteVerdict`s.
 
-In A2 the live heap went from 1,859 MiB at the first report mark to 4,232 MiB at the last. In R2 it went from
-1,702 to 6,301 MiB.
+**After the check, the real-data test adds its own owner.** `pairResult.report` (realdata_test.go ~1590–1606)
+builds a `routeLine` for each Rejected route that names missing sets and keeps them all in `r.rejLines` until
+`addPair`. Each line repeats the whole set list: A2's `out/rejected-missing.tsv` is 33,968 lines, 400,398,974
+bytes, all naming the same 748 sets, which make 397,221,792 of the bytes. This is what grew when R2 and V2 were
+stopped:
+- Both had finished `Check` (all 77 report marks and the mark-cost line written after it are in their logs).
+  `pprof -base mark-079 peak-020` (R2): `routeLine` +682, `missingSetNames` +36, `pairResult.report` +93; V2's
+  `mark-079`→`peak-018`: +1,166, +52, +96. Every report was still held.
+- The pass had written at least 1,059,363 of the pair's 2,607,757 routes to R2's `out/routes.tsv.gz` (into report
+  7, AS6762 to AS2914, IPv4; 35,915 Rejected), and at least 1,159,369 to V2's (into report 12, AS3333; 92,334
+  Rejected). The total is A2's complete `routes.tsv.gz`.
+- The whole of `rejLines` is unknown; at the rate seen it would be roughly 3–4 GiB (estimate, over the 21
+  reports' 400,748 routes in `memprof-A2.log` and about A2's 33,968 IPv6 lines).
 
-**The owners.** pprof in-use space, attributed by the plan's owner patterns:
-- cmd: the highest peak profile, `cmd/peak-011.pb.gz`;
-- A2, R2, V2: the highest mark profile (taken right after a forced GC), `mark-077-…-autnum-75` for A2 and
-  `mark-079-…-autnum-77` for R2 and V2.
+**The owners.** pprof in-use space with `-nodefraction=0`, so rows sum to the total: cmd's highest peak profile
+`peak-011.pb.gz` (as of the last GC), and the last report mark of A2, R2, V2, `mark-079-…-autnum-77` (after a
+forced GC).
 
-| owner (pprof MB) | cmd | A2 | R2 | V2 |
+| owner (MiB) | cmd | A2 | R2 | V2 |
 |---|---|---|---|---|
-| set expansion (`resolve.(*RangeSet).add`; held by `Report.Policy`) | 1,258 (28%) | 1,481 (35%) | 3,824 (61%) | 3,847 (65%) |
-| reports and verdicts (`famRun.report`, `unevaluable`, `verdict`) | 1,136 (25%) | 869 (21%) | 839 (13%) | 845 (14%) |
-| registry (`ast`, `object`, `lexer`, `Corpus.build`, parsing) | 1,351 (30%) | 1,145 (27%) | 1,007 (16%) | 641 (11%) |
-| route-object cache (`hygiene`) | 390 (9%) | 253 (6%) | 144 (2%) | 135 (2%) |
-| RPKI VRPs | 0 | 148 (4%) | 149 (2%) | 144 (2%) |
-| caches (`resolve.Cache`), observations | 48 | 48 | 26 | 29 |
-| other (largest: `strings.Builder` 108–131) | 224 (5%) | 129 (3%) | 131 (2%) | 109 (2%) |
+| set expansion (`RangeSet.add`; held by `Report.Policy`) | 1,258 (28%) | 1,481 (35%) | 3,824 (61%) | 3,847 (65%) |
+| reports and verdicts (`famRun.report`, `unevaluable`, `perNeighbour`, `Compiled.Decide`) | 811 (18%) | 823 (20%) | 802 (13%) | 815 (14%) |
+| compiled filter of the report in flight (`verdict.Compile`) | 328 (7%) | 0 | 0 | 0 |
+| registry (`ast`, `object`, `lexer`, `policy`, `Corpus`, `MemSource`; aut-num text) | 1,528 (34%) | 1,298 (31%) | 1,194 (19%) | 780 (13%) |
+| route-object lookups (`hygiene`, `resolve.Cache`) | 467 (10%) | 331 (8%) | 214 (3%) | 207 (4%) |
+| RPKI VRPs (cmd ran without `-rpki`) | 0 | 148 (4%) | 149 (2%) | 144 (2%) |
+| observations (`Check-range1` 46, `observe`, per-family index) | 101 (2%) | 97 (2%) | 88 (1%) | 95 (2%) |
+| other | 2 | 8 | 13 | 9 |
 | **profile total** | 4,496 | 4,187 | 6,286 | 5,896 |
 
-- **GC headroom.** In A2 the peak RSS (6,462 MiB) is 2,230 MiB above the largest live heap measured (4,232 MiB).
-- **The largest single report** is L's IPv4 import: 978,368 route verdicts. It added 641 MiB in A2 and 504 MiB in R2
-  (live heap from mark 1 to mark 2).
-- **RangeSet's cost per entry.** rpsl's `RangeSet` is a `map[types.PrefixRange]struct{}`, about 60 bytes per range.
-  A frozen, sorted form would be several times smaller (estimate, not measured).
+The aut-num text is the `strings.Builder` under `ast.(*Object).String` that `KeepPolicy` keeps (`-peek`).
+- **GC headroom.** A2's peak RSS is 2,230 above its largest mark (4,232), but not all of that is headroom: its
+  highest in-use heap, 5,564 at 220 s, came after the last report mark (216.4 s), where only report 77 (no policy)
+  and the post-`Check` pass that builds `rejLines` (382 as file bytes in A2) remain, and has no profile (under
+  1.05× the last profiled high).
+- **Report 1, L's IPv4 import, is `from AS6762 accept ANY`** (cmd's `stdout.txt`): no expansion. It added 641 in A2
+  (`series.tsv`); `pprof -base mark-003 mark-004` splits it into `famRun.report` 298.6 (978,368 verdicts × 320 B,
+  `unsafe.Sizeof(RouteVerdict)`), route-object lookups 330.6 (`hygiene.fetch` 222.5, `MemSource.OriginatedRoutes`
+  68.5, `Cache.lookup` 24.0, 15.6 more) and `perNeighbour` 14.4. The lookups stay for the whole `Check`.
+- **RangeSet** is a `map[types.PrefixRange]struct{}`. A `PrefixRange` is 40 B (`unsafe.Sizeof`: a 32 B
+  `netip.Prefix`, two `uint8`, padding), so the map is about 60 B per entry (estimate) and a sorted slice 40 B,
+  about 1.5× smaller; only a packed encoding is several times smaller. The measured cost per entry is unknown (no
+  log counts a retained set's entries); R2's report 8 retained 112.2 for at most 2,097,152 entries, so at least
+  56 B per entry if that is one set.
 
 ### Why pair 2 needs more memory without RADB
 
-- **In A2, 21 of the 77 reports are unevaluable.** Their set (`AS-SEABONE` beside each neighbour) reached
-  2,097,154 prefixes, over the limit, so each keeps an empty `Policy`. Those 21 reports added 154 MiB in all.
-- **In R2 and V2 the same 21 reports fit under the limit** once RADB's route objects are gone, so each keeps its
-  full expansion: 110 to 134 MiB per report in R2 (2,491 MiB in all) and 112 to 144 MiB in V2 (2,510 MiB).
-- **The other 55 reports retain about the same** in all three runs: 2,219 MiB in A2, 2,108 in R2 and 2,086 in V2.
-- So the extra memory is the limit no longer stopping 21 expansions, each held until the end. The added data is
-  not the cause.
-- The same `AS-SEABONE` expansion is built once per report, 21 times in R2. That costs time, not retained memory.
-- Method: the reports were mapped to marks through the order the command prints them (cmd's `stdout.txt`).
-  Report k retains the live heap from mark k to mark k+1.
+Report k retains the live heap from mark k to mark k+1 (`series.tsv`), in the order cmd's `stdout.txt` prints the
+reports; report 77 has no mark after it, so 76 are measured.
+- **In A2, 21 reports are unevaluable**: their set (`AS-SEABONE` beside each neighbour) reached 2,097,154
+  prefixes, so each keeps an empty `Policy`. They retained 154 in all.
+- **In R2 and V2 the same 21 fit under the limit** and each keeps its expansion: 110 to 134 per report in R2 (2,491
+  in all), 112 to 144 in V2 (2,510). Each includes its verdicts: report 7's 65,223 routes are 19.9 of its 133.6.
+- **The other 54 retain about the same**: 2,477 in A2, 2,366 in R2, 2,345 in V2. Report 45 is left out: its −258
+  is the IPv4 observations released at the family's end (`-base mark-047 mark-048`: `Check-range1` −220). Among
+  the 54, 13 IPv6 exports with the same filter, `AS-SEABONE-V6`, retain 91 to 122 each (1,465 to 1,492 in all).
+  So the check holds more because 21 expansions are no longer stopped, not because of the added data; the
+  `rejLines` pass then came on top.
+- **Each report retains its own copy**; `Expander.Memo` is unset (realdata_test.go:315, internal/cli/cli.go:149).
+  A memo might share expansions, but `AS174 | AS-SEABONE` and `AS701 | AS-SEABONE` are different filters, so
+  whether copies would be shared, even for the 13 identical ones, is unknown: a phase-2 check, not a saving.
 
 ### Candidate reductions
 
-1. **Stream the reports (routecheck, an API change: v0.6.0).**
-   - `Check` hands each finished `Report` to the caller, through a callback or an iterator, and keeps none. The
-     CLI writes each report as it arrives, as text or JSON, so every output byte stays the same. The real-data
-     test consumes reports the same way.
-   - **Estimated saving:** everything retained across reports. That is 2,373 MiB in A2 and about 4,600 MiB in R2
-     and V2 (live heap from the first to the last report mark), less the one report in flight, which is at most
-     641 MiB here.
-   - **Risk:** an API change, and the CLI's output must be byte-identical (the goldens and the cmd comparison
-     above hold it). It touches only routecheck.
-2. **A compact `RangeSet` (rpsl, a release).**
-   - The set is frozen into a sorted slice once its expansion is done; `Has` becomes a binary search.
-   - **Estimated saving:** part of the set-expansion owner. With candidate 1 in place, only the sets of the report
-     in flight remain to save.
-   - **Risk:** an rpsl-wide change under its own model and fuzz tests, then an rpsl release, then routecheck
-     requiring it.
-3. **A smaller `RouteVerdict`** (about 690 bytes per route today: 641 MiB for 978,368 routes, which includes that
-   report's own expansion). With candidate 1 only one report's verdicts are held at a time, so it matters less.
-4. **A GC setting inside the binary** (for example a lower `GOGC`). It trades CPU for headroom. It is not
-   recommended before candidate 1 has been measured.
+1. **Stream the reports (routecheck, an API change: v0.6.0).** `Check` hands each finished `Report` to the caller
+   (callback or iterator) and keeps none; the CLI writes each as it arrives, so every output byte stays the same,
+   and the real-data test consumes them the same way. **Saving:** what the reports hold at the last mark,
+   `RangeSet.add` + `famRun.report` + `famRun.unevaluable`: 2,302 in A2, 4,614 in R2, 4,644 in V2 (2,065 in cmd's
+   `peak-011`), less the report in flight (up to 299 of verdicts, or 110–144 for an `AS-SEABONE` report). The
+   route-object lookups (331, 214, 207) are not freed. **Risk:** an API change with byte-identical output (the
+   goldens and the cmd comparison hold it); routecheck only.
+2. **Write `rejLines` as they are produced (the real-data test only, no API).** Each line goes to a per-pair
+   temporary file that `addPair` appends, or the set list is held once; `rejected-missing.tsv` stays byte-identical.
+   **Saving:** at least 682 in R2 and 1,166 in V2 at the stop, roughly 3–4 GiB in all (estimate); about 382 in A2 (file bytes).
+3. **A compact `RangeSet` (rpsl, a release).** Frozen into a sorted slice once expanded; `Has` becomes a binary
+   search. **Saving:** about a third of the set-expansion owner (estimate); with candidate 1, of the report in
+   flight only. **Risk:** an rpsl-wide change under its model and fuzz tests, an rpsl release, then routecheck
+   requiring it.
+4. **A smaller `RouteVerdict`** (320 B; pair 2's 2,607,757 verdicts are 796). With candidate 1, at most one
+   report's (299 here).
+5. **A GC setting inside the binary** (a lower `GOGC`): CPU for headroom. Not before 1 and 2 are measured.
 
 ### The targets
 
-- **Pair 2 completes in runs R and V under 8 GB:** reachable with candidate 1. The live heap would be about the
-  registry and caches (1.2–1.7 GiB) plus one report.
-- **The 60-pair run A at or below 6,144 MB:** likely with candidate 1. Pair 2 alone peaks at 6,462 MiB today, and
-  almost all of its live growth is retained reports.
-- **The command run at or below 5,120 MB:** uncertain with candidate 1 alone.
-  - The live heap would fall to about the registry, the route-object cache and one report, roughly 2.5–3 GB
-    (estimate).
-  - But with GOGC=100 the heap may still grow to twice that between collections, under the guard's
-    `GOMEMLIMIT=6GiB`.
-  - It must be measured after candidate 1. If it is missed, candidate 2 or 4 is the next step.
+- **Pair 2 completes in R and V under 8 GB:** reachable with candidates 1 and 2 together; 1 alone leaves
+  `rejLines`. Live heap: the pair's start (1,363 in R2, 931 in V2), the lookups and observations (302 in each) and
+  one report with its compiled filter (up to 299 + 144 + 328): about 1.2–2.4 GiB (estimate).
+- **The 60-pair run A at or below 6,144 MB (the design's wording; MiB):** likely with 1 and 2. Pair 2 alone peaks at 6,462 under profiling;
+  its reports hold 2,302 at the last mark, and its highest in-use heap came after the check (unprofiled).
+- **The command at or below 5,120 MB, measured on the binary:** uncertain with 1 alone. The live heap would be
+  about the registry (1,528), lookups (467), observations (101) and one report with its compiled filter (up to
+  299 + 144 + 328): roughly 2.0–2.8 GiB (estimate). With GOGC=100 under the guard's `GOMEMLIMIT=6GiB` the heap may
+  still reach twice that; today it swings by 2.3 GiB with a GC a second. If missed, candidate 3 or 5 is next.
 
 ### Recommendation
 
-Build candidate 1 first, in routecheck alone, and measure all three targets. Decide on candidate 2 (rpsl) or 4 only
-if the command target is still missed.
+Build candidate 1 in routecheck and candidate 2 in the real-data test, check whether a filter memo would share the
+repeated expansions, and measure all three targets, the command on the binary. Decide on candidate 3 (rpsl) or 5
+only if the command target is still missed.
