@@ -13,8 +13,10 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"runtime"
 	"slices"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -291,6 +293,201 @@ func TestFailures(t *testing.T) {
 	// A truncated capture is named as such.
 	_, _, stderr := run(t, "-local", "AS64496", "-peer", "AS64500", "-session", truncated, "-dump", registry)
 	wantContains(t, "stderr", stderr, truncated+": ", "truncated")
+}
+
+// TestFailureAfterSomeReports: a check that fails after it has handed over a
+// report (X's aut-num is missing, so the export report fails after the
+// import report is done) writes nothing to stdout, no route-object note, and
+// exits 3, in either format.
+func TestFailureAfterSomeReports(t *testing.T) {
+	srv := serve(t, `aut-num: AS64496
+import: from AS64500 accept AS64500
+source: TEST
+
+route: 192.0.2.0/24
+origin: AS64500
+source: TEST
+`)
+	args := []string{"-local", "AS64496", "-peer", "AS64500", "-session", capture, "-irrd", srv, "-sources", "TEST", "-af", "ipv4"}
+
+	// The import report alone is produced.
+	if code, out, stderr := run(t, append(slices.Clone(args), "-direction", "import")...); code == exitFailed ||
+		!strings.Contains(out, "import, AS64496 from AS64500: ") {
+		t.Fatalf("-direction import: exit %d; stderr %s\n%s", code, stderr, out)
+	}
+	// And CheckEach hands it over before the export report fails.
+	cfg, err := parse(args, io.Discard, io.Discard)
+	if err != nil {
+		t.Fatal(err)
+	}
+	reg, err := loadPolicy(context.Background(), cfg, io.Discard)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer reg.close()
+	var handed []routecheck.Direction
+	_, err = newChecker(cfg, reg).CheckEach(context.Background(), cfg.mode, records(cfg.inputs), cfg.opts,
+		func(_ *routecheck.Result, dir routecheck.Direction, _ *routecheck.Report) error {
+			handed = append(handed, dir)
+			return nil
+		})
+	if err == nil || !slices.Equal(handed, []routecheck.Direction{routecheck.DirImport}) {
+		t.Fatalf("CheckEach: handed %v, err %v; want the import report, then an error", handed, err)
+	}
+
+	for _, format := range []string{"text", "json"} {
+		code, stdout, stderr := run(t, append(slices.Clone(args), "-format", format)...)
+		if code != exitFailed {
+			t.Errorf("%s: exit %d, want %d; stderr %s", format, code, exitFailed, stderr)
+		}
+		if stdout != "" {
+			t.Errorf("%s: stdout %q, want nothing", format, stdout)
+		}
+		wantContains(t, format+" stderr", stderr, "not found")
+		if strings.Contains(stderr, "route objects:") {
+			t.Errorf("%s: the route-object note on a failed run:\n%s", format, stderr)
+		}
+	}
+}
+
+// TestJSONMatchesWholeView: the JSON Run assembles from reports rendered one
+// at a time is encodeJSON's encoding of the whole view of Check's results,
+// with every direction and family choice (Import or Export null, an empty
+// Export).
+func TestJSONMatchesWholeView(t *testing.T) {
+	var cases [][]string
+	for _, g := range append(slices.Clone(goldens), streamGoldens...) {
+		for _, more := range [][]string{nil, {"-direction", "import"}, {"-direction", "export"}, {"-af", "ipv6"}} {
+			if g.name == "collector" && len(more) > 0 && more[0] == "-direction" {
+				continue // import only: AS4766 has no aut-num for an export check
+			}
+			cases = append(cases, append(slices.Clone(g.args), more...))
+		}
+	}
+	for _, args := range cases {
+		t.Run(strings.Join(args, " "), func(t *testing.T) {
+			code, out, stderr := run(t, append(slices.Clone(args), "-format", "json")...)
+			if code == exitFailed || code == exitUsage {
+				t.Fatalf("exit %d; stderr %s", code, stderr)
+			}
+			cfg, err := parse(args, io.Discard, io.Discard)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if cfg.vrps != "" {
+				if cfg.opts.VRPs, err = readVRPs(cfg.vrps); err != nil {
+					t.Fatal(err)
+				}
+			}
+			reg, err := loadPolicy(context.Background(), cfg, io.Discard)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer reg.close()
+			results, err := newChecker(cfg, reg).Check(context.Background(), cfg.mode, records(cfg.inputs), cfg.opts)
+			if err != nil {
+				t.Fatal(err)
+			}
+			view := make([]jsonResult, len(results))
+			for i, r := range results {
+				view[i] = jsonResult{Result: r}
+				view[i].Result.Import, view[i].Result.Export = nil, nil
+				if r.Import != nil {
+					rep := viewReport("import", *r.Import)
+					view[i].Import = &rep
+				}
+				if r.Export != nil {
+					view[i].Export = make([]jsonReport, len(r.Export))
+					for j, e := range r.Export {
+						view[i].Export[j] = viewReport("export", e)
+					}
+				}
+			}
+			var want bytes.Buffer
+			if err := encodeJSON(&want, view); err != nil {
+				t.Fatal(err)
+			}
+			if out != want.String() {
+				t.Errorf("Run's JSON differs from the whole view's encoding:\n got %s\nwant %s", out, want.String())
+			}
+		})
+	}
+	// No Results at all: an empty array.
+	var b bytes.Buffer
+	if err := writeJSON(&b, nil, newOutput(&config{format: "json"})); err != nil || b.String() != "[]\n" {
+		t.Errorf("no results: %q, %v", b.String(), err)
+	}
+}
+
+// TestOutputKeepsNoReport: what Run keeps of a report (output.add) holds no
+// reference to it, in either format: at each report CheckEach hands over,
+// the routes of every earlier report have been collected, while the check
+// is still running.
+func TestOutputKeepsNoReport(t *testing.T) {
+	var families []string
+	for _, g := range streamGoldens {
+		if g.name == "families" {
+			families = g.args
+		}
+	}
+	for _, format := range []string{"text", "json"} {
+		t.Run(format, func(t *testing.T) {
+			cfg, err := parse(append(slices.Clone(families), "-format", format), io.Discard, io.Discard)
+			if err != nil {
+				t.Fatal(err)
+			}
+			reg, err := loadPolicy(context.Background(), cfg, io.Discard)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer reg.close()
+			out := newOutput(cfg)
+			var ran atomic.Int64
+			set, checked := 0, 0
+			_, err = newChecker(cfg, reg).CheckEach(context.Background(), cfg.mode, records(cfg.inputs), cfg.opts,
+				func(res *routecheck.Result, dir routecheck.Direction, rep *routecheck.Report) error {
+					if set > 0 {
+						if !finalized(&ran, int64(set)) {
+							t.Errorf("%d of the %d earlier reports' routes were collected; the rest are still held", ran.Load(), set)
+						}
+						checked = set
+					}
+					if err := out.add(res, dir, rep); err != nil {
+						return err
+					}
+					if len(rep.Routes) > 0 {
+						set++
+						runtime.SetFinalizer(&rep.Routes[0], func(*routecheck.RouteVerdict) { ran.Add(1) })
+					}
+					return nil
+				})
+			if err != nil {
+				t.Fatal(err)
+			}
+			// IPv4's import and export toward AS64496 have routes, and
+			// IPv6's import comes after both.
+			if checked < 2 {
+				t.Fatalf("%d earlier reports with routes checked at the last report; the test needs 2", checked)
+			}
+			if len(out.families) != 2 || out.families[0].imp == nil || len(out.families[0].exports) != 2 {
+				t.Errorf("output kept %d families", len(out.families))
+			}
+		})
+	}
+}
+
+// finalized runs the collector up to 10 times, yielding and pausing between,
+// until ran reaches want; it reports whether it did.
+func finalized(ran *atomic.Int64, want int64) bool {
+	for range 10 {
+		runtime.GC()
+		runtime.Gosched()
+		if ran.Load() >= want {
+			return true
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	return ran.Load() >= want
 }
 
 // closedPort returns a localhost address nothing listens on: a port bound

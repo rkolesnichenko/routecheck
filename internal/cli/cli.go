@@ -1,6 +1,6 @@
 // Package cli is the routecheck command: flags, loading the registry, the
-// VRPs and the MRT inputs, calling routecheck.Checker.Check, and writing its
-// results as text or JSON (spec §8). cmd/routecheck is its shim.
+// VRPs and the MRT inputs, calling routecheck.Checker.CheckEach, and writing
+// its results as text or JSON (spec §8). cmd/routecheck is its shim.
 package cli
 
 import (
@@ -145,12 +145,8 @@ func Run(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 	}
 	defer reg.close()
 
-	c := &routecheck.Checker{
-		Eval:           peval.Evaluator{Src: reg.src, Expander: resolve.Expander{MaxPrefixes: cfg.maxPrefixes}},
-		Routes:         reg.src,
-		VerifiedRoutes: reg.verified,
-	}
-	results, err := c.Check(ctx, cfg.mode, records(cfg.inputs), cfg.opts)
+	out := newOutput(cfg)
+	results, err := newChecker(cfg, reg).CheckEach(ctx, cfg.mode, records(cfg.inputs), cfg.opts, out.add)
 	if errors.Is(err, routecheck.ErrOptions) {
 		hint := ""
 		if !cfg.localGiven {
@@ -175,8 +171,8 @@ func Run(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 			return fail(fmt.Errorf("no record of a session with %s%s in the capture (a 2-byte capture shows a 4-byte AS as AS23456)", cfg.opts.Peer, from))
 		}
 	}
-	// The route-object note, once, only when Check gave answers (and, in
-	// session mode, the capture holds the session), before the report.
+	// The route-object note, once, only when the check gave answers (and,
+	// in session mode, the capture holds the session), before the report.
 	fmt.Fprintln(stderr, "routecheck: "+reg.verifiedNote)
 	if s := sessionInfo(results); s != nil {
 		if w := localMismatch(cfg, s); w != "" {
@@ -184,24 +180,98 @@ func Run(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 		}
 	}
 	if cfg.format == "json" {
-		err = writeJSON(stdout, results)
+		err = writeJSON(stdout, results, out)
 	} else {
-		err = writeText(stdout, cfg, results)
+		err = writeText(stdout, cfg, results, out)
 	}
 	if err != nil {
 		return fail(err)
 	}
-	for _, r := range results {
-		if r.Import != nil && r.Import.Rejected > 0 {
-			return exitRejected
-		}
-		for _, e := range r.Export {
-			if e.Rejected > 0 {
-				return exitRejected
-			}
-		}
+	if out.rejected {
+		return exitRejected
 	}
 	return exitOK
+}
+
+// newChecker is the Checker Run checks with: the registry's policies and
+// routes, rpsl's limits but for -max-prefixes.
+func newChecker(cfg *config, reg *loaded) *routecheck.Checker {
+	return &routecheck.Checker{
+		Eval:           peval.Evaluator{Src: reg.src, Expander: resolve.Expander{MaxPrefixes: cfg.maxPrefixes}},
+		Routes:         reg.src,
+		VerifiedRoutes: reg.verified,
+	}
+}
+
+// output is what Run keeps of the reports CheckEach hands over, until the
+// check is done and the output can be written: each report rendered (text,
+// or JSON without indentation) and the few facts the output reads besides.
+// It keeps no Report, so that each can be freed once rendered.
+type output struct {
+	cfg      *config
+	families []*family // in CheckEach's order
+	// hint is whether a report has an undecided term for want of a router
+	// address (peval.WhyLocalRouter, peval.WhyPeerRouter).
+	hint bool
+	// rejected is whether a report has a Rejected route.
+	rejected bool
+}
+
+// family is one address family's reports, rendered.
+type family struct {
+	af      types.AddrFamily
+	imp     []byte   // the import report; nil when none was handed over
+	exports [][]byte // the export reports, in order
+	// held is the route count of the family's first report that is not
+	// NoPolicy (what heldRoutes reads), when heldKnown.
+	held      int
+	heldKnown bool
+}
+
+func newOutput(cfg *config) *output { return &output{cfg: cfg} }
+
+// add is CheckEach's callback: it renders rep and keeps the facts.
+func (o *output) add(res *routecheck.Result, dir routecheck.Direction, rep *routecheck.Report) error {
+	var f *family
+	if n := len(o.families); n > 0 && o.families[n-1].af == res.AF {
+		f = o.families[n-1]
+	} else {
+		f = &family{af: res.AF}
+		o.families = append(o.families, f)
+	}
+	o.rejected = o.rejected || rep.Rejected > 0
+	for _, u := range rep.Policy.Undecided {
+		o.hint = o.hint || u.Why == peval.WhyLocalRouter || u.Why == peval.WhyPeerRouter
+	}
+	if !f.heldKnown && !rep.NoPolicy {
+		f.held, f.heldKnown = len(rep.Routes), true
+	}
+	var b []byte
+	var err error
+	if o.cfg.format == "json" {
+		b, err = renderJSON(dir, rep)
+	} else {
+		b = renderText(o.cfg, res, dir, rep)
+	}
+	if err != nil {
+		return err
+	}
+	if dir == routecheck.DirImport {
+		f.imp = b
+	} else {
+		f.exports = append(f.exports, b)
+	}
+	return nil
+}
+
+// family is af's reports; an empty family when none was handed over.
+func (o *output) family(af types.AddrFamily) *family {
+	for _, f := range o.families {
+		if f.af == af {
+			return f
+		}
+	}
+	return &family{af: af}
 }
 
 // sessionInfo is the session-mode coverage, the same in every Result; nil in

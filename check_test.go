@@ -7,9 +7,11 @@ import (
 	"fmt"
 	"net/netip"
 	"reflect"
+	"runtime"
 	"slices"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -347,17 +349,22 @@ func TestCheckSessionExport(t *testing.T) {
 	}
 }
 
-func TestCheckCollectorExportPerNeighbour(t *testing.T) {
-	c := checker(registry(t, autL, autX))
-	recs := [][]byte{
+// collectorRecs is the collector dump most collector tests use, all IPv4
+// unicast: X's own route, seen announced to N1 and N2 and on X's direct
+// feed; a route to Y, seen announced to N1 only; and a route to Z on the
+// direct feed only.
+func collectorRecs() [][]byte {
+	return [][]byte{
 		pitRec(at(0), cpeer(1, asN2), cpeer(2, asN1), cpeer(3, asX)),
-		// X's own route, seen announced to N1 and N2 and on X's direct feed.
 		ribRec(at(0), "192.0.2.0/24", ent(0, asN2, asX), ent(1, asN1, asX), ent(2, asX)),
-		// a route to Y, seen announced to N1 only
 		ribRec(at(0), "198.51.100.0/24", ent(1, asN1, asX, asY)),
-		// a route to Z on the direct feed only
 		ribRec(at(0), "203.0.113.0/24", ent(2, asX, asZ)),
 	}
+}
+
+func TestCheckCollectorExportPerNeighbour(t *testing.T) {
+	c := checker(registry(t, autL, autX))
+	recs := collectorRecs()
 	res := run(t, c, routecheck.ModeCollector, recs, routecheck.Options{
 		Local: types.ASN(asL), Peer: types.ASN(asX), AF: []types.AddrFamily{af(t, "ipv4.unicast")},
 	})
@@ -449,18 +456,22 @@ source: TEST
 	}
 }
 
-func TestCheckFamilies(t *testing.T) {
-	c := checker(registry(t, autL, autX))
-	recs := [][]byte{
+// familiesCapture is a session capture over three families: IPv4 unicast
+// (also in MP_REACH_NLRI), IPv6 unicast, and IPv4 multicast, where L
+// accepts anything and its unicast policy would reject the prefix.
+func familiesCapture() [][]byte {
+	return [][]byte{
 		established(at(0)),
 		upd(at(1), nlri("192.0.2.0/24"), attrs4(seq(asX))),
-		// IPv4 unicast in MP_REACH_NLRI: still ipv4.unicast
 		upd(at(2), nil, mp(v4u, []bgp.ASN{asX, asY}, "198.51.100.0/24")),
 		upd(at(3), nil, mp(v6u, []bgp.ASN{asX}, "2001:db8:1::/48")),
-		// IPv4 multicast: L accepts anything there, and its unicast policy
-		// would reject this prefix
 		upd(at(4), nil, mp(v4m, []bgp.ASN{asX, asZ}, "203.0.113.0/24")),
 	}
+}
+
+func TestCheckFamilies(t *testing.T) {
+	c := checker(registry(t, autL, autX))
+	recs := familiesCapture()
 	o := routecheck.Options{Local: types.ASN(asL), Peer: types.ASN(asX), Directions: routecheck.DirImport}
 	type want struct {
 		af     string
@@ -1368,5 +1379,225 @@ func TestVerifiedLookupError(t *testing.T) {
 	})
 	if !errors.Is(err, errSource) || res != nil {
 		t.Errorf("Check = %v, %v; want errSource", res, err)
+	}
+}
+
+// handed is one report CheckEach handed over, with its family and direction.
+type handed struct {
+	af  types.AddrFamily
+	dir routecheck.Direction
+	rep routecheck.Report
+}
+
+// checkEach runs CheckEach, collecting every report f is handed.
+func checkEach(c *routecheck.Checker, mode routecheck.Mode, recs [][]byte, o routecheck.Options) ([]routecheck.Result, []handed, error) {
+	var got []handed
+	res, err := c.CheckEach(context.Background(), mode, records(recs), o, func(res *routecheck.Result, dir routecheck.Direction, rep *routecheck.Report) error {
+		got = append(got, handed{res.AF, dir, *rep})
+		return nil
+	})
+	return res, got, err
+}
+
+// reportsOf lists Check's reports in CheckEach's order, and its results
+// with the reports removed as CheckEach returns them.
+func reportsOf(results []routecheck.Result) ([]handed, []routecheck.Result) {
+	var reps []handed
+	var bare []routecheck.Result
+	for _, r := range results {
+		if r.Import != nil {
+			reps = append(reps, handed{r.AF, routecheck.DirImport, *r.Import})
+		}
+		for _, rep := range r.Export {
+			reps = append(reps, handed{r.AF, routecheck.DirExport, rep})
+		}
+		r.Import = nil
+		if r.Export != nil {
+			r.Export = []routecheck.Report{}
+		}
+		bare = append(bare, r)
+	}
+	return reps, bare
+}
+
+// Check is built on CheckEach, so this checks assembly and order; that
+// Check's results are v0.5.0's rests on the other Check tests and the CLI
+// goldens.
+func TestCheckEachMatchesCheck(t *testing.T) {
+	c := checker(registry(t, autL, autX))
+	v4 := []types.AddrFamily{af(t, "ipv4.unicast")}
+	all := []types.AddrFamily{af(t, "ipv4.unicast"), af(t, "ipv4.multicast"), af(t, "ipv6.unicast"), af(t, "ipv6.multicast")}
+	l, x := types.ASN(asL), types.ASN(asX)
+	tests := []struct {
+		name string
+		mode routecheck.Mode
+		recs [][]byte
+		o    routecheck.Options
+	}{
+		{"session import", routecheck.ModeSession, capture(), routecheck.Options{Peer: x, AF: v4, Directions: routecheck.DirImport}},
+		{"session export", routecheck.ModeSession, capture(), routecheck.Options{Local: l, Peer: x, AF: v4, Directions: routecheck.DirExport}},
+		{"session both, default families", routecheck.ModeSession, capture(), routecheck.Options{Local: l, Peer: x}},
+		{"collector both", routecheck.ModeCollector, collectorRecs(), routecheck.Options{Local: l, Peer: x, AF: v4}},
+		{"collector export, default families", routecheck.ModeCollector, collectorRecs(), routecheck.Options{Peer: x, Directions: routecheck.DirExport}},
+		{"collector import", routecheck.ModeCollector, collectorRecs(), routecheck.Options{Local: l, Peer: x, AF: v4, Directions: routecheck.DirImport}},
+		{"families, import", routecheck.ModeSession, familiesCapture(), routecheck.Options{Local: l, Peer: x, AF: all, Directions: routecheck.DirImport}},
+		{"families, both", routecheck.ModeSession, familiesCapture(), routecheck.Options{Local: l, Peer: x, AF: all}},
+	}
+	for _, tt := range tests {
+		want, err := c.Check(context.Background(), tt.mode, records(tt.recs), tt.o)
+		if err != nil {
+			t.Fatalf("%s: Check: %v", tt.name, err)
+		}
+		res, got, err := checkEach(c, tt.mode, tt.recs, tt.o)
+		if err != nil {
+			t.Fatalf("%s: CheckEach: %v", tt.name, err)
+		}
+		wantReps, wantRes := reportsOf(want)
+		if len(wantReps) == 0 {
+			t.Fatalf("%s: Check gave no report", tt.name)
+		}
+		if !reflect.DeepEqual(got, wantReps) {
+			t.Errorf("%s: reports handed over:\n got %+v\nwant %+v", tt.name, got, wantReps)
+		}
+		if !reflect.DeepEqual(res, wantRes) {
+			t.Errorf("%s: results:\n got %+v\nwant %+v", tt.name, res, wantRes)
+		}
+	}
+}
+
+func TestCheckEachEmptyExport(t *testing.T) {
+	// The collector dump is IPv4 only: over IPv6 X has no neighbour.
+	c := checker(registry(t, autL, autX))
+	o := routecheck.Options{Local: types.ASN(asL), Peer: types.ASN(asX)}
+	v6 := af(t, "ipv6.unicast")
+	res, got, err := checkEach(c, routecheck.ModeCollector, collectorRecs(), o)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(res) != 2 || res[1].AF != v6 {
+		t.Fatalf("results: %+v", res)
+	}
+	for _, r := range res {
+		if r.Export == nil || len(r.Export) != 0 || r.Import != nil {
+			t.Errorf("%s: Import %v, Export %#v; want nil and empty non-nil", r.AF, r.Import, r.Export)
+		}
+	}
+	for _, h := range got {
+		if h.af == v6 && h.dir == routecheck.DirExport {
+			t.Errorf("an export report over IPv6: %+v", h.rep)
+		}
+	}
+	if n := len(got); n != 4 { // v4: import, N1, N2; v6: import
+		t.Errorf("%d reports handed over, want 4", n)
+	}
+	want := run(t, c, routecheck.ModeCollector, collectorRecs(), o)
+	if len(want) != 2 || want[1].Export == nil || len(want[1].Export) != 0 {
+		t.Errorf("Check's IPv6 Export: %#v, want empty non-nil", want[1].Export)
+	}
+}
+
+var errStop = errors.New("stop here")
+
+func TestCheckEachCallbackError(t *testing.T) {
+	c := checker(registry(t, autL, autX))
+	calls := 0
+	res, err := c.CheckEach(context.Background(), routecheck.ModeCollector, records(collectorRecs()), routecheck.Options{
+		Local: types.ASN(asL), Peer: types.ASN(asX),
+	}, func(*routecheck.Result, routecheck.Direction, *routecheck.Report) error {
+		calls++
+		if calls == 2 {
+			return errStop
+		}
+		return nil
+	})
+	if err != errStop || res != nil {
+		t.Errorf("CheckEach: %v, %+v; want errStop as is and nil results", err, res)
+	}
+	if calls != 2 {
+		t.Errorf("f called %d times, want 2", calls)
+	}
+}
+
+// finalized runs the collector up to 10 times, yielding and pausing between,
+// until ran reaches want; it reports whether it did.
+func finalized(ran *atomic.Int64, want int64) bool {
+	for range 10 {
+		runtime.GC()
+		runtime.Gosched()
+		if ran.Load() >= want {
+			return true
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	return ran.Load() >= want
+}
+
+// checkEachKeepingNothing runs CheckEach over the collector dump with an f
+// that keeps nothing, setting a finalizer on each report's routes that
+// counts into ran. At each call it checks that the routes of every earlier
+// report have been collected already, while the check is still running;
+// it returns how many finalizers it set. Everything it builds is out of
+// reach once it returns.
+func checkEachKeepingNothing(t *testing.T, ran *atomic.Int64) int {
+	t.Helper()
+	c := checker(registry(t, autL, autX))
+	set, reports, checked := 0, 0, 0
+	_, err := c.CheckEach(context.Background(), routecheck.ModeCollector, records(collectorRecs()), routecheck.Options{
+		Local: types.ASN(asL), Peer: types.ASN(asX), AF: []types.AddrFamily{af(t, "ipv4.unicast")},
+	}, func(_ *routecheck.Result, _ routecheck.Direction, rep *routecheck.Report) error {
+		reports++
+		if set > 0 {
+			if !finalized(ran, int64(set)) {
+				t.Errorf("report %d: %d of the %d earlier reports' routes were collected; CheckEach still holds the rest", reports, ran.Load(), set)
+			}
+			checked = set
+		}
+		if len(rep.Routes) > 0 {
+			set++
+			runtime.SetFinalizer(&rep.Routes[0], func(*routecheck.RouteVerdict) { ran.Add(1) })
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	// The import report and the one toward N1 have routes, and N2's comes
+	// after both: the last call sees two earlier reports released.
+	if reports < 3 || checked < 2 {
+		t.Fatalf("%d reports, %d earlier ones with routes checked at the last call; the test needs at least 3 and 2", reports, checked)
+	}
+	return set
+}
+
+func TestCheckEachReleasesReports(t *testing.T) {
+	var ran atomic.Int64
+	set := checkEachKeepingNothing(t, &ran)
+	if !finalized(&ran, int64(set)) {
+		t.Errorf("%d of %d reports' routes were collected; the rest are still held", ran.Load(), set)
+	}
+}
+
+func TestDirectNotCheckedBeforeReports(t *testing.T) {
+	c := checker(registry(t, autL, autX))
+	for _, dirs := range []routecheck.Direction{routecheck.DirBoth, routecheck.DirExport} {
+		o := routecheck.Options{Local: types.ASN(asL), Peer: types.ASN(asX), AF: []types.AddrFamily{af(t, "ipv4.unicast")}, Directions: dirs}
+		want := run(t, c, routecheck.ModeCollector, collectorRecs(), o)[0].Coverage.DirectNotChecked
+		if want != 2 {
+			t.Fatalf("directions %d: Check's DirectNotChecked = %d, want 2", dirs, want)
+		}
+		calls := 0
+		_, err := c.CheckEach(context.Background(), routecheck.ModeCollector, records(collectorRecs()), o,
+			func(res *routecheck.Result, _ routecheck.Direction, _ *routecheck.Report) error {
+				if calls++; calls == 1 && res.Coverage.DirectNotChecked != want {
+					t.Errorf("directions %d: DirectNotChecked at the first report = %d, want %d", dirs, res.Coverage.DirectNotChecked, want)
+				}
+				if res.Import != nil || res.Export != nil {
+					t.Errorf("directions %d: res holds reports: Import %v, Export %v", dirs, res.Import, res.Export)
+				}
+				return nil
+			})
+		if err != nil || calls == 0 {
+			t.Fatalf("directions %d: CheckEach: %v after %d calls", dirs, err, calls)
+		}
 	}
 }

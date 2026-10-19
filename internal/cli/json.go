@@ -1,6 +1,8 @@
 package cli
 
 import (
+	"bufio"
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -94,25 +96,109 @@ type jsonFail struct {
 	Missing []string
 }
 
-// writeJSON writes the results' view as one JSON document.
-func writeJSON(w io.Writer, results []routecheck.Result) error {
-	view := make([]jsonResult, len(results))
-	for i, r := range results {
-		view[i] = jsonResult{Result: r}
-		// The embedded originals are shadowed: not held twice.
-		view[i].Result.Import, view[i].Result.Export = nil, nil
-		if r.Import != nil {
-			rep := viewReport("import", *r.Import)
-			view[i].Import = &rep
-		}
-		if r.Export != nil {
-			view[i].Export = make([]jsonReport, len(r.Export))
-			for j, e := range r.Export {
-				view[i].Export[j] = viewReport("export", e)
-			}
-		}
+// writeJSON writes the results' view as one JSON document: the bytes
+// encodeJSON would write for []jsonResult, the view of Check's results.
+// results are CheckEach's, without reports; the reports are out's, held
+// compact (renderJSON). Each is indented here at its depth, inside the
+// array and Result objects written around them; the Result's own fields
+// before Import (AF, Coverage) are its view's encoding with no reports,
+// whose Import and Export, always its last two fields, are cut off.
+func writeJSON(w io.Writer, results []routecheck.Result, out *output) error {
+	if len(results) == 0 {
+		_, err := io.WriteString(w, "[]\n")
+		return err
 	}
-	return encodeJSON(w, view)
+	const noReports = ",\n    \"Import\": null,\n    \"Export\": null\n  }"
+	bw := bufio.NewWriter(w)
+	var buf bytes.Buffer
+	indent := func(compact []byte, prefix string) error {
+		buf.Reset()
+		return json.Indent(&buf, compact, prefix, "  ")
+	}
+	// The Results' own fields first, so that a failure there writes nothing.
+	heads := make([][]byte, len(results))
+	for i, r := range results {
+		head := jsonResult{Result: r}
+		head.Result.Import, head.Result.Export = nil, nil
+		compact, err := compactJSON(head)
+		if err != nil {
+			return err
+		}
+		if err := indent(compact, "  "); err != nil {
+			return err
+		}
+		fields, ok := bytes.CutSuffix(buf.Bytes(), []byte(noReports))
+		if !ok {
+			return fmt.Errorf("internal error: a Result's JSON does not end in its Import and Export: %s", buf.Bytes())
+		}
+		heads[i] = bytes.Clone(fields)
+	}
+	bw.WriteString("[\n")
+	for i, r := range results {
+		bw.WriteString("  ")
+		bw.Write(heads[i])
+
+		f := out.family(r.AF)
+		bw.WriteString(",\n    \"Import\": ")
+		if f.imp == nil {
+			bw.WriteString("null")
+		} else {
+			if err := indent(f.imp, "    "); err != nil {
+				return err
+			}
+			bw.Write(buf.Bytes())
+		}
+		bw.WriteString(",\n    \"Export\": ")
+		switch {
+		case r.Export == nil:
+			bw.WriteString("null")
+		case len(f.exports) == 0:
+			bw.WriteString("[]")
+		default:
+			bw.WriteString("[\n")
+			for j, e := range f.exports {
+				if err := indent(e, "      "); err != nil {
+					return err
+				}
+				bw.WriteString("      ")
+				bw.Write(buf.Bytes())
+				if j < len(f.exports)-1 {
+					bw.WriteString(",")
+				}
+				bw.WriteString("\n")
+			}
+			bw.WriteString("    ]")
+		}
+		bw.WriteString("\n  }")
+		if i < len(results)-1 {
+			bw.WriteString(",")
+		}
+		bw.WriteString("\n")
+	}
+	bw.WriteString("]\n")
+	return bw.Flush() // the first write error, if any
+}
+
+// renderJSON is rep's view, encoded without indentation; dir is its
+// direction.
+func renderJSON(dir routecheck.Direction, rep *routecheck.Report) ([]byte, error) {
+	word := "import"
+	if dir == routecheck.DirExport {
+		word = "export"
+	}
+	return compactJSON(viewReport(word, *rep))
+}
+
+// compactJSON is v as encodeJSON writes it, without indentation and the
+// final newline (json.Indent of it at a depth is encodeJSON's text there).
+func compactJSON(v any) ([]byte, error) {
+	var b bytes.Buffer
+	enc := json.NewEncoder(&b)
+	enc.SetEscapeHTML(false) // AS-path regexps are written <...>
+	if err := enc.Encode(v); err != nil {
+		return nil, err
+	}
+	return bytes.Clone(bytes.TrimSuffix(b.Bytes(), []byte("\n"))), nil
 }
 
 func encodeJSON(w io.Writer, v any) error {

@@ -202,6 +202,17 @@ Packages, imports strictly downward:
   sources are present (`-dump`: loaded; `-irrd`: each probed alone with `!g`, a refusal is absent, any other
   error exit 3); none present turns the marking off. Once on, a verified lookup error fails the run like
   `RouteObj`'s. The stderr note is printed after Check succeeds; scripts/release.sh pins its "none" form.
+- **R29. Reports are handed over, not kept.** `Checker.CheckEach` hands each finished report to the caller and keeps
+  no reference to it. `Check` is CheckEach plus collecting. The command (`internal/cli`) keeps only each report's
+  rendered output and a few flags, and writes stdout only once the check has succeeded, so a failed run still has
+  empty stdout and no route-object note. The real-data test spools each pair's lines to `.pair-<i>.*` files under
+  OUT, appended only for a checked pair. The finalizer tests (`TestCheckEachReleasesReports`,
+  `TestOutputKeepsNoReport`) hold that reports are released during the run.
+  The finalizer tests cover a report's Routes; the release of its Policy (expansions) is shown by the profile (live
+  heap flat at about 2,211 MiB across report marks in `.data/memprof2/A2`), not by a test.
+  Spool disk use: pair 2's `rejected-missing.tsv` is 5,067,157,084 bytes in R2 and 3,765,723,970 in V2
+  (`ls -l .data/stream/R2/ .data/stream/V2/`); while a pair's spool is appended, the OUT volume briefly holds about
+  twice that plus the uncompressed routes spool.
 - **AnySets.** `Verdict.AnySets` is, on an Accepted verdict only, the canonical names (sorted,
   deduplicated) of the sets reaching AS-ANY named by the AS-path tests, either polarity, of the
   conjunct that accepted the route: per conjunct, not per clause. It is nil otherwise, and always
@@ -292,6 +303,18 @@ Packages, imports strictly downward:
     the RIBs (all 16: 35.871 s, peak RSS 3,534 MB, `.data/load-all.log`).
   - `ROUTECHECK_REALDATA_SAMPLE`, `_REGEXP_SAMPLE` and `_SEED` choose the sample.
   - `ROUTECHECK_CHECK_TIMEOUT` (default 600s) is the per-pair timeout.
+  - `ROUTECHECK_REALDATA_MEMPROF=DIR` profiles the heap with `internal/memprof` into DIR (`series.tsv`
+    every second, a profile at each new high) and marks it (forced GC, profile of the live heap, a
+    `MEMPROF: <label> live <MiB> MiB` log line) at `load`, `pair-<i>-start`/`-end` (i as `PAIRS`
+    selects it) and each fetch of the pair's L or X aut-num (`pair-<i>-autnum-<n>-AS<asn>`): per address
+    family (IPv4, then IPv6), L's import report first, then X's export report toward each neighbour in
+    ascending ASN order, each report starting with exactly one marked fetch (peval fetches the policy
+    owner's aut-num once per evaluation). The marks run inside the per-pair timeout and count against
+    `ROUTECHECK_CHECK_TIMEOUT`: raise it when profiling a large pair; a `MEMPROF: pair-<i> marks <n> in
+    <duration>` line says what they took. Unset, the run is as before.
+  - `ROUTECHECK_MEMPROF_OUT=DIR` with `ROUTECHECK_MEMPROF_ARGS="<command line>"` (split on spaces) makes
+    `TestMemProfileCommand` (internal/cli) run the command in process under the same sampler, stdout and
+    stderr in DIR as files, and log `exit <code>` and `MEMPROF: after-run live <MiB> MiB`; exit 0 and 1 pass.
   - `ROUTECHECK_REALDATA_OUT=DIR` writes `missing-sets.tsv` and `rejected-missing.tsv` (every route
     rejected with a missing set). With `ROUTECHECK_REALDATA_TRACK=FILE` (a `rejected-missing.tsv`) it
     also writes `tracked.tsv`: this run's verdict for each of FILE's routes, `none` when the pair was not
@@ -321,10 +344,13 @@ Packages, imports strictly downward:
       answered in both runs, their concentration over pairs (the shares are route-weighted: three pairs
       hold 90.63% of A-R's "yes" answers in both runs), and the totals-only check over the pairs both
       runs checked.
-    - With fewer route objects, pair 2 (AS9086 from AS6762) goes over the 8 GB cap: the whole R run
-      stopped on it at 8,224 MB, and it alone at 8,255 MB in R and 8,249 MB in V. Likely (not
-      measured) its AS-SEABONE expansions then fit under 2,097,152 and are decided; the runs stopped
-      before it logged a report. Shard it out (`ROUTECHECK_REALDATA_PAIRS=1,3-60`).
+    - Pair 2 (AS9086 from AS6762) with fewer route objects, history: before the streaming change the whole R run
+      stopped on it at 8,224 MB, and it alone at 8,255 MB in R and 8,249 MB in V (`.data/provenance-R2.log`,
+      `-V2.log`). Now pair 2 alone completes at 5,337 MB in R (`.data/stream-R2.log`) and 4,526 MB in V
+      (`.data/stream-V2.log`). Cause, measured by the memory profile
+      (`docs/superpowers/specs/2026-10-19-memory-profile-design.md`, addendum): in R and V the 21 AS-SEABONE reports
+      fit under the limit, and all were kept until the check ended; the test also held its rejected lines.
+      Caution: the whole 60-pair R and V runs were not rerun after the change.
     - `.data/provenance-runs.zsh` and `.data/provenance-shards.zsh` drive the runs.
   - The benchmarks (`BenchmarkDecide`, `BenchmarkCollector`; `ROUTECHECK_BENCH_LOCAL`, `_PEER`,
     `_AF` and `_ROUTES`) use the same data and load every pinned registry too. Their commands

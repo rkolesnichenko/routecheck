@@ -18,8 +18,13 @@
   `golden.mrt` is AS64500's side of a session with AS64496 that starts
   mid-session (no transition to Established); `nopolicy.mrt` is AS64511's,
   from Established on.
+- `collector/families.mrt`: a synthetic route-collector RIB dump over both
+  unicast families, written by `internal/mrtgen` and held to its generator
+  like `session/*.mrt`: AS64500 seen announcing to AS64496 and AS64510 over
+  IPv4, and only on its own feed over IPv6.
 - `golden/`: the command's text and JSON output for each golden
-  (`TestGoldens`; `ROUTECHECK_GOLDEN_UPDATE=1` rewrites them).
+  (`TestGoldens`, `TestStreamingMatchesGoldens`;
+  `ROUTECHECK_GOLDEN_UPDATE=1` rewrites them).
 - `mrt/`: a slice of a real RouteViews RIB, below.
 
 ## RouteViews

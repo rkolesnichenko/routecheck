@@ -8,6 +8,48 @@ a minor version may change the API.
 
 ## [Unreleased]
 
+### Added
+
+- `Checker.CheckEach` runs the same check as `Check` but hands each finished `Report` to a function and keeps none,
+  so a caller can let each report go. The family's `Result` comes with it, complete before its first report. The
+  returned `Result`s carry no reports. `Check` is `CheckEach` plus collecting, with the same results as before.
+
+### Changed
+
+- The command and the real-data test take reports through `CheckEach`.
+  - The command keeps only each report's rendered output. Its text and JSON output, stderr and exit status are
+    byte-identical to v0.5.0, also on failure.
+  - The real-data test writes each pair's `routes.tsv.gz` and `rejected-missing.tsv` lines to per-pair temporary
+    files, appended only for a pair that was checked. Its per-report work now counts against the per-pair timeout.
+- `Coverage.DirectNotChecked` is counted before a family's first report. Its value is unchanged.
+
+### Added (tests only)
+
+- `internal/memprof`, a heap sampler for tests only. The real-data test profiles with it under
+  `ROUTECHECK_REALDATA_MEMPROF`, and `TestMemProfileCommand` profiles the command in-process. Neither ships in
+  the binary.
+
+### Measured, memory
+
+The memory profile and its findings: `docs/superpowers/specs/2026-10-19-memory-profile-design.md` (the addendum).
+After this change, on the 2026-10-18 files, under the memory guard (8 GB cap, `GOMAXPROCS=4`, `GOMEMLIMIT=6GiB`;
+MB = MiB):
+
+| run | before | after | log |
+|---|---|---|---|
+| the command, AS9086 from AS6762, every registry, `-max-prefixes 2097152` | 6,421 MB | 5,959 MB | `.data/stream-cli-2097152.log` |
+| the real-data test's 60 pairs, `ROUTECHECK_REALDATA_OUT` | 7,148 MB | 6,635 MB | `.data/stream-A.log` |
+| pair 2 alone, route objects from the RIRs only | stopped at 8,255 MB | 5,337 MB | `.data/stream-R2.log` |
+| pair 2 alone, the RIRs only | stopped at 8,249 MB | 4,526 MB | `.data/stream-V2.log` |
+
+- Output unchanged: the command's equals the v0.5.0 run's (`.data/verified-counts-2097152.log`, built at 6309e36 on the branch v0.5.0 was released from; the later code change, 13d47d3, validates `-verified-sources` names and moves the route-object note after the session check, and does not touch this collector run). The 60 pairs' TOTALS equal the earlier run's, and so do its
+  decompressed `routes.tsv.gz`, `rejected-missing.tsv`, `missing-sets.tsv` and `pairs.tsv`.
+- What remains is mostly the heap's room between collections (inferred: the 60-pair run was not profiled; the
+  explanation rests on pair 2 alone and the command's profile). Pair 2's live heap is measured only at report
+  boundaries (marks, after a forced GC): at most 2,212 MB there, against 4,232 MB before (`.data/memprof/A2`). Its
+  in-use heap peaked at 4,359 MB during the first (import) report, 179 s in (`.data/memprof2/A2/series.tsv`).
+- The design's targets for the command (5,120 MB) and the 60 pairs (6,144 MB) are not met.
+
 ## [0.5.0] - 2026-10-19
 
 ### Added
