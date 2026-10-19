@@ -741,3 +741,8 @@ order; each report starts with exactly one marked fetch). The marks run inside
 the per-pair timeout and count against `ROUTECHECK_CHECK_TIMEOUT`: raise it
 when profiling a large pair. A `MEMPROF: pair-<i> marks <n> in <duration>` line
 says what they took.
+
+`ROUTECHECK_MEMPROF_OUT=DIR` and `ROUTECHECK_MEMPROF_ARGS` (the command line, separated by spaces)
+make `TestMemProfileCommand` run the command in process under the same sampler: profiles, `stdout.txt`
+and `stderr.txt` go to DIR, and the test logs `exit <code>` and `MEMPROF: after-run live <MiB> MiB`.
+Exit 0 and 1 pass; 2 and 3 fail the test.

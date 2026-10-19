@@ -301,6 +301,9 @@ Packages, imports strictly downward:
     owner's aut-num once per evaluation). The marks run inside the per-pair timeout and count against
     `ROUTECHECK_CHECK_TIMEOUT`: raise it when profiling a large pair; a `MEMPROF: pair-<i> marks <n> in
     <duration>` line says what they took. Unset, the run is as before.
+  - `ROUTECHECK_MEMPROF_OUT=DIR` with `ROUTECHECK_MEMPROF_ARGS="<command line>"` (split on spaces) makes
+    `TestMemProfileCommand` (internal/cli) run the command in process under the same sampler, stdout and
+    stderr in DIR as files, and log `exit <code>` and `MEMPROF: after-run live <MiB> MiB`; exit 0 and 1 pass.
   - `ROUTECHECK_REALDATA_OUT=DIR` writes `missing-sets.tsv` and `rejected-missing.tsv` (every route
     rejected with a missing set). With `ROUTECHECK_REALDATA_TRACK=FILE` (a `rejected-missing.tsv`) it
     also writes `tracked.tsv`: this run's verdict for each of FILE's routes, `none` when the pair was not
