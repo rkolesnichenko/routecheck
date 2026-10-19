@@ -4,6 +4,7 @@ import (
 	"compress/gzip"
 	"context"
 	"fmt"
+	"io"
 	"net/netip"
 	"os"
 	"path/filepath"
@@ -16,6 +17,7 @@ import (
 	"github.com/rkolesnichenko/routecheck/verdict"
 	"github.com/rkolesnichenko/rpsl/resolve"
 	"github.com/rkolesnichenko/rpsl/resolve/peval"
+	"github.com/rkolesnichenko/rpsl/resolve/rpki"
 	"github.com/rkolesnichenko/rpsl/types"
 )
 
@@ -499,5 +501,92 @@ func TestLoadRegistryRoutesFrom(t *testing.T) {
 	}
 	if len(all.droppedRoutes) != 0 || all.droppedClaims != 0 {
 		t.Errorf("nil: dropped %v, %d", all.droppedRoutes, all.droppedClaims)
+	}
+}
+
+func TestRouteLineV2(t *testing.T) {
+	yes := true
+	valid := rpki.Valid
+	acc := &routecheck.RouteVerdict{Route: exportRoute(true), RouteObj: &yes, RPKI: &valid,
+		Verdict: verdict.Verdict{Outcome: verdict.Accepted, Reasons: []verdict.Reason{{Kind: verdict.ReasonPeval}}}}
+	if got, want := routeLineV2("k", acc), "k\taccepted\tyes\tvalid\t"; got != want {
+		t.Errorf("accepted: %q, want %q", got, want)
+	}
+	und := &routecheck.RouteVerdict{Route: exportRoute(true),
+		Verdict: verdict.Verdict{Outcome: verdict.Undecided, Reasons: []verdict.Reason{{Kind: verdict.ReasonUnevaluable}, {Kind: verdict.ReasonPeval}, {Kind: verdict.ReasonPeval}}}}
+	if got, want := routeLineV2("k", und), "k\tundecided\tunknown\tnone\tpeval,unevaluable"; got != want {
+		t.Errorf("undecided: %q, want %q", got, want)
+	}
+	no := false
+	inv := rpki.Invalid
+	rej := &routecheck.RouteVerdict{Route: exportRoute(true), RouteObj: &no, RPKI: &inv, Verdict: verdict.Verdict{Outcome: verdict.Rejected}}
+	if got, want := routeLineV2("k", rej), "k\trejected\tno\tinvalid\t"; got != want {
+		t.Errorf("rejected: %q, want %q", got, want)
+	}
+}
+
+func TestRealOutRoutesStream(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "out")
+	o, err := openRealOut(dir, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer o.abort()
+	yes := true
+	valid := rpki.Valid
+	route := func(pfx string) verdict.Route {
+		return verdict.Route{Prefix: netip.MustParsePrefix(pfx), Path: []types.ASN{2}, PathKnown: true}
+	}
+	rep := routecheck.Report{Policy: peval.Policy{Clauses: make([]peval.Clause, 1)}, Routes: []routecheck.RouteVerdict{
+		{Route: route("192.0.2.0/24"), RouteObj: &yes, RPKI: &valid, Verdict: verdict.Verdict{Outcome: verdict.Accepted}},
+		{Route: route("198.51.100.0/24"), Verdict: verdict.Verdict{Outcome: verdict.Undecided, Reasons: []verdict.Reason{{Kind: verdict.ReasonUnevaluable}}}},
+	}}
+	ctx := reportCtx{pair: "AS1-AS2", family: "ipv4.unicast", neighbour: "AS2"}
+	r := newTestPair()
+	r.p = pair{L: 1, X: 2}
+	r.routes = o.routesWriter()
+	r.report(&rep, 0, "x", ctx)
+	r.report(&routecheck.Report{NoPolicy: true, Routes: rep.Routes}, 1, "x", ctx)
+	if err := o.addPair(&r); err != nil {
+		t.Fatal(err)
+	}
+	o.setStatus(pair{L: 5, X: 6}, "not selected")
+	to := newTestPair()
+	to.p = pair{L: 3, X: 4}
+	to.err, to.timeout = context.DeadlineExceeded, true
+	to.routes = o.routesWriter()
+	if err := o.addPair(&to); err != nil {
+		t.Fatal(err)
+	}
+	if len(o.got) != 0 {
+		t.Errorf("realOut holds %d route lines without TRACK", len(o.got))
+	}
+	if err := o.finish(&totals{}, t.Errorf); err != nil {
+		t.Fatal(err)
+	}
+	f, err := os.Open(filepath.Join(dir, "routes.tsv.gz"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer f.Close()
+	zr, err := gzip.NewReader(f)
+	if err != nil {
+		t.Fatal(err)
+	}
+	b, err := io.ReadAll(zr)
+	if err != nil {
+		t.Fatal(err)
+	}
+	pre := "AS1-AS2|import|ipv4.unicast|AS2|"
+	want := pre + "192.0.2.0/24|AS2\taccepted\tyes\tvalid\t\n" + pre + "198.51.100.0/24|AS2\tundecided\tunknown\tnone\tunevaluable\n"
+	if string(b) != want {
+		t.Errorf("routes.tsv.gz = %q, want %q", b, want)
+	}
+	ps, err := os.ReadFile(filepath.Join(dir, "pairs.tsv"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := "AS1-AS2\tchecked\nAS5-AS6\tnot selected\nAS3-AS4\ttimeout\n"; string(ps) != want {
+		t.Errorf("pairs.tsv = %q, want %q", ps, want)
 	}
 }

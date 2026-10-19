@@ -3,6 +3,7 @@ package routecheck_test
 import (
 	"bufio"
 	"cmp"
+	"compress/gzip"
 	"context"
 	"encoding/binary"
 	"errors"
@@ -118,6 +119,13 @@ import (
 // writes DIR/tracked.tsv: a line for each key in FILE, in FILE's order, with
 // this run's outcome for it, or "none" when its pair was not checked (or timed
 // out) in this run.
+// OUT also writes DIR/routes.tsv.gz (gzip; key, outcome, route object
+// "yes"/"no"/"unknown", RPKI state or "none", the Undecided reason kinds: one
+// line for every route of every report with a policy, written as the report is
+// read and held nowhere, pairs in PAIRS order, one pair's lines together; a
+// pair that timed out or failed writes none) and DIR/pairs.tsv (pair, status
+// "checked", "timeout", "error" or "not selected": every pair of PAIRS, in
+// its order), which an offline comparison of runs reads.
 //
 // ROUTECHECK_REALDATA_EXTRA=FILE is an RPSL dump (gzip or plain) loaded after
 // every MANIFEST dump, as the registry "extra": its objects keep their own
@@ -270,9 +278,10 @@ func TestRealData(t *testing.T) {
 	for i, p := range pairs {
 		if !selected[i+1] {
 			t.Logf("pair %d/%d: not selected", i+1, len(pairs))
+			out.setStatus(p, "not selected")
 			continue
 		}
-		r := checkPair(t, reg, vrps, p, files[bgp.ASN(p.X)], timeout, resolve.Expander{MaxPrefixes: maxPrefixes}, out.trackSet())
+		r := checkPair(t, reg, vrps, p, files[bgp.ASN(p.X)], timeout, resolve.Expander{MaxPrefixes: maxPrefixes}, out.trackSet(), out.routesWriter())
 		r.log(t, i+1, len(pairs))
 		if r.dupKeys > 0 {
 			t.Errorf("AS%d from AS%d: %d routes share a key with another route of their report", p.L, p.X, r.dupKeys)
@@ -299,12 +308,19 @@ type realOut struct {
 	dir     string
 	rejF    *os.File
 	rej     *bufio.Writer
+	routesF *os.File // routes.tsv.gz; routes buffers routesZ, which gzips into it
+	routesZ *gzip.Writer
+	routes  *bufio.Writer
+	status  []pairStatus    // every pair of the loop, in PAIRS order
 	track   []string        // TRACK's keys, in its order; nil without TRACK
 	trackIn map[string]bool // the same keys
 	got     map[string]string
 	checked map[string]bool // pairs that completed
 	closed  bool
 }
+
+// pairStatus is one line of pairs.tsv.
+type pairStatus struct{ pair, status string }
 
 // readTrackKeys is the first column of each non-empty line of a TSV file.
 func readTrackKeys(file string) ([]string, error) {
@@ -346,7 +362,30 @@ func openRealOut(dir, trackFile string) (*realOut, error) {
 		return nil, fmt.Errorf("ROUTECHECK_REALDATA_OUT: %w", err)
 	}
 	o.rejF, o.rej = f, bufio.NewWriter(f)
+	if o.routesF, err = os.Create(filepath.Join(dir, "routes.tsv.gz")); err != nil {
+		f.Close()
+		return nil, fmt.Errorf("ROUTECHECK_REALDATA_OUT: %w", err)
+	}
+	o.routesZ = gzip.NewWriter(o.routesF)
+	o.routes = bufio.NewWriter(o.routesZ)
 	return o, nil
+}
+
+// routesWriter is where a pair's report writes its routes.tsv.gz lines; nil for
+// a nil *realOut.
+func (o *realOut) routesWriter() *bufio.Writer {
+	if o == nil {
+		return nil
+	}
+	return o.routes
+}
+
+// setStatus records a pair's pairs.tsv status; call it once per pair, in
+// PAIRS order.
+func (o *realOut) setStatus(p pair, status string) {
+	if o != nil {
+		o.status = append(o.status, pairStatus{p.id(), status})
+	}
 }
 
 // trackSet is the keys checkPair keeps lines for: TRACK's, or nil.
@@ -364,8 +403,19 @@ func (o *realOut) addPair(r *pairResult) error {
 		return nil
 	}
 	defer func() { r.lines, r.rejLines = nil, nil }()
+	switch {
+	case r.timeout:
+		o.setStatus(r.p, "timeout")
+	case r.err != nil:
+		o.setStatus(r.p, "error")
+	default:
+		o.setStatus(r.p, "checked")
+	}
 	if r.err != nil {
 		return nil
+	}
+	if r.routesErr != nil {
+		return fmt.Errorf("routes.tsv.gz: %w", r.routesErr)
 	}
 	o.checked[r.p.id()] = true
 	maps.Copy(o.got, r.lines)
@@ -382,6 +432,7 @@ func (o *realOut) abort() {
 	if o != nil && !o.closed {
 		o.closed = true
 		o.rejF.Close()
+		o.routesF.Close()
 	}
 }
 
@@ -395,6 +446,28 @@ func (o *realOut) finish(tot *totals, errorf func(string, ...any)) error {
 		return err
 	}
 	if err := o.rejF.Close(); err != nil {
+		o.routesF.Close()
+		return err
+	}
+	if err := o.routes.Flush(); err != nil {
+		o.routesF.Close()
+		return fmt.Errorf("routes.tsv.gz: %w", err)
+	}
+	if err := o.routesZ.Close(); err != nil {
+		o.routesF.Close()
+		return fmt.Errorf("routes.tsv.gz: %w", err)
+	}
+	if err := o.routesF.Close(); err != nil {
+		return fmt.Errorf("routes.tsv.gz: %w", err)
+	}
+	var ps strings.Builder
+	for _, s := range o.status {
+		ps.WriteString(s.pair + "\t" + s.status + "\n")
+	}
+	if err := writeFileChecked(filepath.Join(o.dir, "pairs.tsv"), func(w *bufio.Writer) error {
+		_, err := w.WriteString(ps.String())
+		return err
+	}); err != nil {
 		return err
 	}
 	var ms strings.Builder
@@ -1253,13 +1326,18 @@ type pairResult struct {
 	lines    map[string]string
 	rejLines []string
 	dupKeys  int
+
+	// routes is the writer of routes.tsv.gz (nil: none); report writes each
+	// route's line to it as it goes. The first write error is routesErr.
+	routes    *bufio.Writer
+	routesErr error
 }
 
 // checkPair runs one collector-mode Check and summarizes it.
-func checkPair(tb testing.TB, reg *irrRegistry, vrps *rpki.VRPs, p pair, file string, timeout time.Duration, exp resolve.Expander, track map[string]bool) pairResult {
+func checkPair(tb testing.TB, reg *irrRegistry, vrps *rpki.VRPs, p pair, file string, timeout time.Duration, exp resolve.Expander, track map[string]bool, routes *bufio.Writer) pairResult {
 	tb.Helper()
 	r := pairResult{p: p, reasons: [2]tally{{}, {}}, tooExp: tally{}, unevaluable: tally{}, anySets: tally{},
-		missingSets: [2]tally{{}, {}}, routeObj: [2]tally{{}, {}}, track: track}
+		missingSets: [2]tally{{}, {}}, routeObj: [2]tally{{}, {}}, track: track, routes: routes}
 	counter := &countingSource{Source: reg.src}
 	c := &routecheck.Checker{Eval: peval.Evaluator{Src: reg.src, Expander: exp}, Routes: counter}
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
@@ -1419,6 +1497,12 @@ func missingSetNames(v *verdict.Verdict) []string {
 // Undecided verdict (sorted, comma-joined; empty for any other outcome, whose
 // Reasons are not the cause of it) and sets, comma-joined.
 func routeLine(key string, v *verdict.Verdict, sets []string) string {
+	return key + "\t" + v.Outcome.String() + "\t" + undecidedKinds(v) + "\t" + strings.Join(sets, ",")
+}
+
+// undecidedKinds is the reason kinds of an Undecided verdict, sorted,
+// deduplicated and comma-joined; empty for any other outcome.
+func undecidedKinds(v *verdict.Verdict) string {
 	var kinds []string
 	if v.Outcome == verdict.Undecided {
 		for _, rs := range v.Reasons {
@@ -1427,7 +1511,22 @@ func routeLine(key string, v *verdict.Verdict, sets []string) string {
 		slices.Sort(kinds)
 		kinds = slices.Compact(kinds)
 	}
-	return key + "\t" + v.Outcome.String() + "\t" + strings.Join(kinds, ",") + "\t" + strings.Join(sets, ",")
+	return strings.Join(kinds, ",")
+}
+
+// routeLineV2 is the routes.tsv.gz line of one route: key, outcome, the
+// route-object answer ("yes", "no", "unknown"), the RPKI state ("none"
+// without VRPs) and the Undecided reason kinds.
+func routeLineV2(key string, rv *routecheck.RouteVerdict) string {
+	obj := "unknown"
+	if rv.RouteObj != nil {
+		obj = map[bool]string{true: "yes", false: "no"}[*rv.RouteObj]
+	}
+	state := "none"
+	if rv.RPKI != nil {
+		state = rv.RPKI.String()
+	}
+	return key + "\t" + rv.Verdict.Outcome.String() + "\t" + obj + "\t" + state + "\t" + undecidedKinds(&rv.Verdict)
 }
 
 // report tallies one report's Undecided reasons, path-too-expensive terms,
@@ -1447,6 +1546,9 @@ func (r *pairResult) report(rep *routecheck.Report, dir int, label string, rc re
 			r.dupKeys++
 		}
 		keys[key] = struct{}{}
+		if r.routes != nil && r.routesErr == nil {
+			_, r.routesErr = r.routes.WriteString(routeLineV2(key, rv) + "\n")
+		}
 		tracked := r.track[key]
 		var sets []string
 		if rv.Verdict.Outcome == verdict.Rejected {
