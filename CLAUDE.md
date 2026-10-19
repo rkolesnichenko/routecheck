@@ -193,7 +193,8 @@ Packages, imports strictly downward:
   MaxPrefixes, MaxVisited, MaxDepth, MaxConjuncts) takes R19's path for that report only: the same
   `Unevaluable`, empty `Policy` and `unevaluable` reason. The run goes on, and the exit status is
   R19's (0 or 1 by the Rejected routes, never 3 for it). There is no new reason kind. The CLI's
-  `expander` variable (internal/cli) is a test-only seam for lowering a limit; no flag sets it.
+  `-max-prefixes N` (internal/cli) sets `Expander.MaxPrefixes`; absent, it is the zero `Expander`
+  (rpsl's default); 0 and negatives are refused (a negative is unlimited in rpsl).
 - **AnySets.** `Verdict.AnySets` is, on an Accepted verdict only, the canonical names (sorted,
   deduplicated) of the sets reaching AS-ANY named by the AS-path tests, either polarity, of the
   conjunct that accepted the route: per conjunct, not per clause. It is nil otherwise, and always
@@ -278,6 +279,8 @@ Packages, imports strictly downward:
     4,741 MB (`.data/realdata-ripe-only.log`).
   - `ROUTECHECK_REALDATA_REGISTRIES` (comma-separated registry names, case-insensitive; empty means
     every pinned registry) loads only those. `ripe` is 0.2.0's load.
+  - `ROUTECHECK_REALDATA_MAX_PREFIXES` (a positive integer; unset means rpsl's default) sets
+    `Expander.MaxPrefixes` as `-max-prefixes` does; the test logs a `limits:` line.
   - `ROUTECHECK_REALDATA_LOAD_ONLY=1` loads the registries, logs a `LOAD:` line and stops before
     the RIBs (all 16: 35.871 s, peak RSS 3,534 MB, `.data/load-all.log`).
   - `ROUTECHECK_REALDATA_SAMPLE`, `_REGEXP_SAMPLE` and `_SEED` choose the sample.
@@ -320,9 +323,17 @@ in `.data/`, which is never committed.
   unchecked data. Which registry supplied each newly resolved object was not measured.
 - **MaxPrefixes.** With every registry loaded, 10 of 60 pairs have at least one filter over rpsl's default
   1,048,576 prefixes. That report is unevaluable (R27) and the run goes on; no workaround is
-  needed and no flag raises the limit. All 60 pairs are checked: 82 report instances, 81 distinct reports
+  needed; `-max-prefixes N` lifts it and the default stays rpsl's. All 60 pairs are checked at rpsl's default limit: 82 report instances, 81 distinct reports
   (AS34984's export to AS9121 appears in pairs 10 and 33): 80 export, in 9 pairs; 2 import, in 2 pairs (one pair, AS44032 from AS15645, has both, so 9 + 2 - 1 = 10);
   549,847 routes (`.data/realdata-set-limits.log`, `.data/set-limits-pairs-unevaluable.log`).
+  Cost of `-max-prefixes` (Apple M3 Max, 36 GiB, peak RSS under the 8 GB guard, 2026-10-18): AS9086 from AS6762
+  completes at 2,097,152 (6,511 MB, vs 5,848 MB at the default); 4,194,304 was stopped by the guard at
+  8,411 MB; 8M and 16M not tried; AS6762's ipv4 export (`AS-SEABONE`) is still over at 2,097,152.
+  Every-registry run at 2,097,152 (`.data/realdata-max-prefixes.log`): 24 unevaluable reports (from 81), 3 pairs,
+  400,751 routes (from 549,847); of the 149,096 decided, 89,701 accepted and 59,395 rejected, all 59,395 "with a
+  missing set in a failing clause" (rejections against incomplete filters, not proven violations); the 50
+  other pairs are identical but for the timing header (`.data/max-prefixes-same-pairs.log`); 6,565 MB, 4m38s (6,482 MB, 3m45s).
+  Unmeasured: limits between 2,097,152 and 4,194,304, above 4,194,304, AS-SEABONE's full size.
 
 ## Process
 

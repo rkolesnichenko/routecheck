@@ -50,7 +50,8 @@ them as a security-relevant bug.
 - **Memory is bounded by the routes through X, not by the input.** MRT input is
   streamed. Only X's routes are held: one Adj-RIB-Out in session mode, and the
   deduplicated observations through X in collector mode. The verdict path memo
-  is capped at 64 MiB of keys, and past the cap it is cleared.
+  is capped at 64 MiB of keys, and past the cap it is cleared. Set expansion is bounded
+  by rpsl's limits; `-max-prefixes` raises one, at the user's choice and memory.
 - **Malformed input is counted, never silently used.** A malformed UPDATE is
   handled as RFC 7606 says: treat-as-withdraw, or a session reset. A malformed RIB
   entry is skipped. Each is counted and reported. A decoded attribute the decoder
