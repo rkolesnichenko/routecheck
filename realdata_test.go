@@ -123,6 +123,12 @@ import (
 // every MANIFEST dump, as the registry "extra": its objects keep their own
 // source:, so a source not seen before ranks last, and it never feeds the
 // selection maps (the pairs stay those of RIPE's files).
+// ROUTECHECK_REALDATA_ROUTES_FROM (comma-separated, case-insensitive registry
+// names; default every registry) keeps route and route6 objects only from
+// those registries' dumps: every other registry still supplies its sets,
+// aut-nums and the rest, but its routes (and their member-of: claims) are
+// dropped, and a routes from: line logs the count dropped. It cannot be used
+// with ROUTECHECK_REALDATA_EXTRA.
 // ROUTECHECK_REALDATA_PAIRS=SEL (1-based indices into the PAIRS: list, such as
 // 1-20,31; default all) checks only those pairs; the others are logged as
 // "not selected", added to no total and written as "none" in tracked.tsv.
@@ -158,7 +164,14 @@ func TestRealData(t *testing.T) {
 
 	t0 := time.Now()
 	extra := os.Getenv("ROUTECHECK_REALDATA_EXTRA")
-	reg := loadRegistry(t, rd.dumps, extra)
+	routesFrom, err := parseRoutesFrom(os.Getenv("ROUTECHECK_REALDATA_ROUTES_FROM"))
+	if err != nil {
+		t.Fatalf("ROUTECHECK_REALDATA_ROUTES_FROM: %v", err)
+	}
+	if routesFrom != nil && extra != "" {
+		t.Fatal("ROUTECHECK_REALDATA_ROUTES_FROM with ROUTECHECK_REALDATA_EXTRA is not supported")
+	}
+	reg := loadRegistry(t, rd.dumps, extra, routesFrom)
 	loadTime := since(t0)
 	var per []string
 	for _, s := range reg.sources {
@@ -170,6 +183,21 @@ func TestRealData(t *testing.T) {
 	}
 	t.Logf("registry: %d objects from %d dumps of %d registries (%s), sources in precedence order %s, objects per source %s; %d RIPE aut-nums, %d naming a literal import peer (%d with an AS-path regexp toward one), in %s (heap in use %s)",
 		reg.objects, nDumps, len(reg.registries), strings.Join(reg.registries, ","), strings.Join(reg.sources, ","), strings.Join(per, ", "), len(reg.autnums), len(reg.imports), len(reg.reImports), loadTime, heapInUse())
+	if routesFrom == nil {
+		t.Logf("routes from: every registry")
+	} else {
+		var names, dropped []string
+		for _, n := range registryOrder {
+			if routesFrom[n] {
+				names = append(names, n)
+			}
+			if reg.droppedRoutes[n] > 0 {
+				dropped = append(dropped, fmt.Sprintf("%s=%d", n, reg.droppedRoutes[n]))
+			}
+		}
+		t.Logf("routes from: %s; dropped route objects per registry %s; dropped member-of claimants %d",
+			strings.Join(names, ","), strings.Join(dropped, ", "), reg.droppedClaims)
+	}
 	if maxPrefixes == 0 {
 		t.Logf("limits: MaxPrefixes rpsl's default")
 	} else {
@@ -569,6 +597,30 @@ type irrRegistry struct {
 	sources    []string           // the precedence passed to Corpus.Source: first appearance of source: in file order
 	perSource  map[string]int     // objects kept per source (upper case)
 	registries []string           // the registries loaded, in order
+	// droppedRoutes counts, per registry, the route and route6 objects
+	// loadRegistry skipped because routesFrom did not name it; droppedClaims
+	// counts those carrying member-of:. Both are empty without routesFrom.
+	droppedRoutes map[string]int
+	droppedClaims int
+}
+
+// parseRoutesFrom reads ROUTECHECK_REALDATA_ROUTES_FROM: comma-separated,
+// case-insensitive registry names, each in registryOrder. "" is nil, meaning
+// route objects are kept from every registry. A name not in registryOrder,
+// or an empty item, is an error naming it.
+func parseRoutesFrom(s string) (map[string]bool, error) {
+	if strings.TrimSpace(s) == "" {
+		return nil, nil
+	}
+	set := map[string]bool{}
+	for _, w := range strings.Split(s, ",") {
+		w = strings.ToLower(strings.TrimSpace(w))
+		if !slices.Contains(registryOrder, w) {
+			return nil, fmt.Errorf("%q is not a registry (one of %s)", w, strings.Join(registryOrder, ", "))
+		}
+		set[w] = true
+	}
+	return set, nil
 }
 
 // parsePairSelection reads ROUTECHECK_REALDATA_PAIRS: comma-separated 1-based
@@ -613,11 +665,14 @@ func parsePairSelection(s string, n int) (map[int]bool, error) {
 // feed the selection maps, so adding registries never changes the pairs. A
 // non-empty extra is one more dump (gzip or plain, any file name) read last as
 // the registry "extra": its objects keep their own source:, and it never feeds
-// the selection maps either.
-func loadRegistry(tb testing.TB, dumps []string, extra string) *irrRegistry {
+// the selection maps either. A non-nil routesFrom keeps route and route6
+// objects only from the registries it names (parseRoutesFrom): any other
+// route object is skipped before the Corpus sees it, so its member-of: claim
+// goes too, and is counted in droppedRoutes and droppedClaims.
+func loadRegistry(tb testing.TB, dumps []string, extra string, routesFrom map[string]bool) *irrRegistry {
 	tb.Helper()
 	c := &resolve.Corpus{KeepPolicy: true}
-	reg := &irrRegistry{imports: map[types.ASN][]types.ASN{}, reImports: map[types.ASN][]types.ASN{}, autnums: map[types.ASN]bool{}, perSource: map[string]int{}}
+	reg := &irrRegistry{imports: map[types.ASN][]types.ASN{}, reImports: map[types.ASN][]types.ASN{}, autnums: map[types.ASN]bool{}, perSource: map[string]int{}, droppedRoutes: map[string]int{}}
 	var order []string
 	families := []types.AddrFamily{{AFI: types.AFIv4, SAFI: types.SAFIUnicast}, {AFI: types.AFIv6, SAFI: types.SAFIUnicast}}
 	files := slices.Clone(dumps)
@@ -665,6 +720,23 @@ func loadRegistry(tb testing.TB, dumps []string, extra string) *irrRegistry {
 						order = append(order, source)
 					}
 					break
+				}
+			}
+			if routesFrom != nil && !routesFrom[regName] {
+				var isRoute bool
+				switch obj.(type) {
+				case *object.Route, *object.Route6:
+					isRoute = true
+				}
+				if isRoute {
+					reg.droppedRoutes[regName]++
+					for _, a := range o.Attributes() {
+						if strings.EqualFold(a.Name, "member-of") {
+							reg.droppedClaims++
+							break
+						}
+					}
+					continue
 				}
 			}
 			if !c.Put(obj) {

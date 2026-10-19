@@ -112,7 +112,7 @@ func TestLoadRegistryPrecedenceAndSelection(t *testing.T) {
 			"as-set: AS-X\nmembers: AS64502\nsource: RADB",
 			"as-set: AS-Y\nmembers: AS64503\nsource: RADB"),
 	}
-	reg := loadRegistry(t, dumps, "")
+	reg := loadRegistry(t, dumps, "", nil)
 
 	if want := map[types.ASN]bool{64496: true}; !reflect.DeepEqual(reg.autnums, want) {
 		t.Errorf("autnums = %v, want %v", reg.autnums, want)
@@ -386,7 +386,7 @@ func TestLoadRegistryExtraDumpRanksLast(t *testing.T) {
 	extra := writeGzip(t, dir, "extra.db.gz",
 		"as-set: AS-NEW\nmembers: AS64504\nsource: LEVEL3",
 		"aut-num: AS64499\nimport: from AS64500 accept ANY\nsource: RIPE")
-	reg := loadRegistry(t, dumps, extra)
+	reg := loadRegistry(t, dumps, extra, nil)
 
 	if want := []string{"RIPE", "RADB", "LEVEL3"}; !slices.Equal(reg.sources, want) {
 		t.Errorf("sources = %v, want %v", reg.sources, want)
@@ -411,5 +411,93 @@ func TestLoadRegistryExtraDumpRanksLast(t *testing.T) {
 	}
 	if got, want := res.List(), []types.ASN{64504}; !slices.Equal(got, want) {
 		t.Errorf("AS-NEW = %v, want %v", got, want)
+	}
+}
+
+func TestParseRoutesFrom(t *testing.T) {
+	got, err := parseRoutesFrom("")
+	if err != nil || got != nil {
+		t.Errorf(`parseRoutesFrom("") = %v, %v, want nil, nil`, got, err)
+	}
+	got, err = parseRoutesFrom("RIPE, apnic")
+	if want := map[string]bool{"ripe": true, "apnic": true}; err != nil || !reflect.DeepEqual(got, want) {
+		t.Errorf(`parseRoutesFrom("RIPE, apnic") = %v, %v, want %v`, got, err, want)
+	}
+	if _, err := parseRoutesFrom("ripe,nope"); err == nil || !strings.Contains(err.Error(), "nope") {
+		t.Errorf(`parseRoutesFrom("ripe,nope") error = %v, want one naming nope`, err)
+	}
+	if _, err := parseRoutesFrom("ripe,,apnic"); err == nil {
+		t.Errorf(`parseRoutesFrom("ripe,,apnic"): no error`)
+	}
+}
+
+func TestLoadRegistryRoutesFrom(t *testing.T) {
+	dir := t.TempDir()
+	dumps := []string{
+		writeGzip(t, dir, "ripe.db.route.gz",
+			"route: 192.0.2.0/24\norigin: AS64496\nsource: RIPE"),
+		writeGzip(t, dir, "radb.db.gz",
+			"route: 198.51.100.0/24\norigin: AS64496\nsource: RADB",
+			"route: 203.0.113.0/24\norigin: AS64497\nmember-of: RS-X\nsource: RADB",
+			"route-set: RS-X\nmbrs-by-ref: ANY\nsource: RADB",
+			"as-set: AS-Y\nmembers: AS64503\nsource: RADB"),
+	}
+	prefixes := func(reg *irrRegistry, as types.ASN) []string {
+		ps, err := reg.src.OriginatedRoutes(context.Background(), as, types.AFIv4)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var out []string
+		for _, p := range ps {
+			out = append(out, p.String())
+		}
+		slices.Sort(out)
+		return out
+	}
+	expandRS := func(reg *irrRegistry) []netip.Prefix {
+		ref, err := types.ParseSetRef("RS-X")
+		if err != nil {
+			t.Fatal(err)
+		}
+		res, err := (&resolve.Expander{Src: reg.src}).ExpandPrefixes(context.Background(), ref)
+		if err != nil {
+			t.Fatalf("ExpandPrefixes(RS-X): %v", err)
+		}
+		return res.List()
+	}
+
+	reg := loadRegistry(t, dumps, "", map[string]bool{"ripe": true})
+	if got, want := prefixes(reg, 64496), []string{"192.0.2.0/24"}; !slices.Equal(got, want) {
+		t.Errorf("AS64496 routes = %v, want %v", got, want)
+	}
+	if got := prefixes(reg, 64497); len(got) != 0 {
+		t.Errorf("AS64497 routes = %v, want none", got)
+	}
+	ref, err := types.ParseSetRef("AS-Y")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res, err := (&resolve.Expander{Src: reg.src}).ExpandAS(context.Background(), ref); err != nil || !slices.Equal(res.List(), []types.ASN{64503}) {
+		t.Errorf("ExpandAS(AS-Y) = %v, %v, want [64503]", res.List(), err)
+	}
+	if got := expandRS(reg); len(got) != 0 {
+		t.Errorf("ExpandPrefixes(RS-X) = %v, want empty", got)
+	}
+	if want := map[string]int{"radb": 2}; !reflect.DeepEqual(reg.droppedRoutes, want) {
+		t.Errorf("droppedRoutes = %v, want %v", reg.droppedRoutes, want)
+	}
+	if reg.droppedClaims != 1 {
+		t.Errorf("droppedClaims = %d, want 1", reg.droppedClaims)
+	}
+
+	all := loadRegistry(t, dumps, "", nil)
+	if got, want := prefixes(all, 64496), []string{"192.0.2.0/24", "198.51.100.0/24"}; !slices.Equal(got, want) {
+		t.Errorf("nil: AS64496 routes = %v, want %v", got, want)
+	}
+	if got := expandRS(all); len(got) != 1 || got[0].String() != "203.0.113.0/24" {
+		t.Errorf("nil: ExpandPrefixes(RS-X) = %v, want [203.0.113.0/24]", got)
+	}
+	if len(all.droppedRoutes) != 0 || all.droppedClaims != 0 {
+		t.Errorf("nil: dropped %v, %d", all.droppedRoutes, all.droppedClaims)
 	}
 }
