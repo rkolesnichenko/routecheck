@@ -205,6 +205,9 @@ func TestNoSession(t *testing.T) {
 				t.Errorf("stdout %q, want nothing", stdout)
 			}
 			wantContains(t, "stderr", stderr, tc.want)
+			if strings.Contains(stderr, "route objects") {
+				t.Errorf("stderr %q has the route-object note, want none without a session", stderr)
+			}
 		})
 	}
 	// The right address is a session.
@@ -1363,6 +1366,8 @@ func TestParseVerifiedSources(t *testing.T) {
 		{",", "empty"},
 		{"RIPE,ripe", "RIPE"},
 		{"RIPE,,ARIN", "empty"},
+		{"RIPE!", `"RIPE!"`},
+		{"RIPE,AR IN", `"AR IN"`},
 	} {
 		got, err := parseVerifiedSources(c.in)
 		if err == nil {
@@ -1668,7 +1673,7 @@ func TestVerifiedSourcesFlag(t *testing.T) {
 		t.Errorf("ripe,JPIRR,radb: stderr %q, want %q", stderr, want)
 	}
 
-	for _, bad := range []string{"", "RIPE,ripe"} {
+	for _, bad := range []string{"", "RIPE,ripe", "RIPE!"} {
 		code, _, stderr = run(t, append(slices.Clone(args), "-verified-sources", bad)...)
 		if code != exitUsage {
 			t.Errorf("-verified-sources %q: exit %d, want %d; stderr %s", bad, code, exitUsage, stderr)

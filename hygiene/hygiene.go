@@ -14,8 +14,9 @@ import (
 	"github.com/rkolesnichenko/rpsl/types"
 )
 
-// ErrAFIMismatch is returned by RouteObject and VerifiedRouteObject when afi is IPv4 or IPv6 and the
-// route's prefix is of the other family (a caller bug, not a missing object).
+// ErrAFIMismatch is returned by RouteObject and VerifiedRouteObject when afi
+// is IPv4 or IPv6 and the route's prefix is of the other family (a caller bug,
+// not a missing object).
 var ErrAFIMismatch = errors.New("hygiene: address family does not match the prefix")
 
 var errReadIncomplete = errors.New("hygiene: route-object read did not complete")
@@ -30,10 +31,12 @@ func afiFits(afi types.AFI, p netip.Prefix) bool {
 	return true
 }
 
-// Checker answers the two per-route questions that do not depend on policy.
-// Its zero value has neither data set and answers nil to both. It is safe
-// for concurrent use; do not copy it after first use. The route-object cache
-// grows for the Checker's lifetime: use a fresh Checker per run.
+// Checker answers the three per-route questions that do not depend on policy:
+// RPKI, RouteObject and VerifiedRouteObject. Its zero value has no data set
+// and answers nil to all three. It is safe for concurrent use; do not copy it
+// after first use. It keeps two route-object caches, one for Src and one for
+// Verified, and each grows for the Checker's lifetime: use a fresh Checker per
+// run.
 type Checker struct {
 	VRPs *rpki.VRPs     // nil: RPKI answers nil
 	Src  resolve.Source // nil: RouteObject answers nil
@@ -41,7 +44,9 @@ type Checker struct {
 	// (usually a subset of Src); nil: VerifiedRouteObject answers nil.
 	Verified resolve.Source
 
-	waiting atomic.Int64 // calls that began waiting behind a read; tests synchronize on it
+	// waiting counts calls that began waiting behind a read, in either cache;
+	// tests synchronize on it.
+	waiting atomic.Int64
 
 	objects  routeCache // reads of Src
 	verified routeCache // reads of Verified

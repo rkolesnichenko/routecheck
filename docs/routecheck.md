@@ -214,6 +214,13 @@ Each route also gets:
   routecheck: route objects: none of the verified sources (RIPE, APNIC, ARIN, AFRINIC, LACNIC) is present; answers are not marked
   ```
 
+  The sources are named in the order the dumps' sources first appear with
+  `-dump`, and in the order of `-verified-sources` with `-irrd`. With `-irrd`
+  each verified source is probed alone, within `-sources` when that is given;
+  without `-sources` the probe is not limited to the server's default source
+  list, so a "yes" can rest on a verified source the main answer did not
+  consult.
+
   The first form is printed when some verified source is present (`; absent: ...`
   only when some are absent), the second when none is. In the text, each report
   line ends with `; route objects 2 yes (1 unverified only), 1 no` (with the
@@ -399,6 +406,11 @@ Both spellings of 0xFFFFFF03 are read, in any case:
 
 ## Known limitations
 
+- **The `-irrd` probe of a verified source.** The probe counts a source as
+  absent only when the server refuses it with an error (`F`, IRRd 4's answer).
+  A server that answers an unknown source list with `D` makes the probe fail,
+  and the run exits 3. Naming only sources the server serves in
+  `-verified-sources` avoids it.
 - **AS-ANY in filter position.** A policy that accepts or announces a set
   reaching AS-ANY or RS-ANY (`accept AS-X`, `NOT AS-X`, where AS-X reaches
   `AS-ANY` directly or through nested sets) gives "unevaluable" routes: AS-ANY

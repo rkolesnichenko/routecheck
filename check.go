@@ -230,9 +230,9 @@ const ctxEvery = 4096
 // Check returns an error, and no Results, for options it cannot use, an
 // input observe cannot read (a truncated stream, observe.ErrRIBNotPrePolicy),
 // any other policy peval cannot evaluate (a missing aut-num), an
-// error from Routes, and ctx's error once it is done (also while observe
-// reads the input, which it reads whole before yielding a route). Errors for
-// options wrap ErrOptions.
+// error from Routes or from VerifiedRoutes, and ctx's error once it is done
+// (also while observe reads the input, which it reads whole before yielding a
+// route). Errors for options wrap ErrOptions.
 func (c *Checker) Check(ctx context.Context, mode Mode, records iter.Seq2[mrt.Record, error], o Options) ([]Result, error) {
 	afs, dirs, err := o.check(mode)
 	if err != nil {

@@ -165,9 +165,6 @@ func Run(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 	if err != nil {
 		return fail(err)
 	}
-	// The route-object note, once, only when Check gave answers, before the
-	// report.
-	fmt.Fprintln(stderr, "routecheck: "+reg.verifiedNote)
 	if s := sessionInfo(results); s != nil {
 		// Ruling R23: an empty selection is not "X announced nothing".
 		if s.Selected == 0 {
@@ -177,6 +174,11 @@ func Run(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 			}
 			return fail(fmt.Errorf("no record of a session with %s%s in the capture (a 2-byte capture shows a 4-byte AS as AS23456)", cfg.opts.Peer, from))
 		}
+	}
+	// The route-object note, once, only when Check gave answers (and, in
+	// session mode, the capture holds the session), before the report.
+	fmt.Fprintln(stderr, "routecheck: "+reg.verifiedNote)
+	if s := sessionInfo(results); s != nil {
 		if w := localMismatch(cfg, s); w != "" {
 			fmt.Fprintln(stderr, "routecheck: "+w)
 		}
@@ -368,18 +370,23 @@ func parse(args []string, stdout, stderr io.Writer) (*config, error) {
 
 // parseVerifiedSources reads -verified-sources: comma-separated registry
 // names, trimmed and upper-cased, in the order given. An empty list, an
-// empty name or a name given twice is an error naming it.
+// empty name, a name that is not a valid source name or a name given twice is
+// an error naming it.
 func parseVerifiedSources(s string) ([]string, error) {
 	if strings.TrimSpace(s) == "" {
 		return nil, usagef("-verified-sources: no registry named")
 	}
 	var out []string
 	for _, name := range strings.Split(s, ",") {
-		name = strings.ToUpper(strings.TrimSpace(name))
-		switch {
-		case name == "":
+		raw := strings.TrimSpace(name)
+		if raw == "" {
 			return nil, usagef("-verified-sources: an empty name in %q", s)
-		case slices.Contains(out, name):
+		}
+		name, err := types.ParseSourceName(raw)
+		if err != nil {
+			return nil, usagef("-verified-sources: %q is not a registry name (letters, digits, - and _)", raw)
+		}
+		if slices.Contains(out, name) {
 			return nil, usagef("-verified-sources: %s given twice", name)
 		}
 		out = append(out, name)

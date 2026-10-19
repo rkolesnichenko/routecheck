@@ -39,7 +39,7 @@ figures (`.data/verified-counts-2097152.log`):
 
 | | "yes" | of them unverified only | "no" |
 |---|---|---|---|
-| AS9086's import (1 report) | 717,629 | 253,107 (35.27%) | 260,560 |
+| AS9086's import (1 report with routes) | 717,629 | 253,107 (35.27%) | 260,560 |
 | AS6762's export (55 reports with routes) | 1,133,392 | 394,877 (34.84%) | 495,720 |
 
 - Verdicts equal v0.4.0's (978,368 import routes accepted; export 1,194,673 accepted / 33,968 rejected / 400,748
