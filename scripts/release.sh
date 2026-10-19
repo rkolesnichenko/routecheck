@@ -14,9 +14,10 @@
 # published go.mod is the tagged one, and that
 # `go install .../cmd/routecheck@vX.Y.Z` builds a binary that prints
 # testdata/golden/session.txt byte for byte (with exit status 1: that session
-# has Rejected routes, and only the verified-sources note on stderr); build routecheck for five platforms from the published
-# module, and create the GitHub release (from the changelog section) with the
-# archives and SHA256SUMS attached, using gh.
+# has Rejected routes, and only the verified-sources note on stderr); build
+# routecheck for five platforms from the published module, and create the
+# GitHub release (from the changelog section) with the archives and
+# SHA256SUMS attached, using gh.
 #
 # Adapted from mrt's scripts/release.sh (github.com/rkolesnichenko/mrt).
 #

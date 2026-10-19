@@ -144,7 +144,6 @@ func Run(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 		return fail(err)
 	}
 	defer reg.close()
-	fmt.Fprintln(stderr, "routecheck: "+reg.verifiedNote)
 
 	c := &routecheck.Checker{
 		Eval:           peval.Evaluator{Src: reg.src, Expander: resolve.Expander{MaxPrefixes: cfg.maxPrefixes}},
@@ -166,6 +165,9 @@ func Run(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 	if err != nil {
 		return fail(err)
 	}
+	// The route-object note, once, only when Check gave answers, before the
+	// report.
+	fmt.Fprintln(stderr, "routecheck: "+reg.verifiedNote)
 	if s := sessionInfo(results); s != nil {
 		// Ruling R23: an empty selection is not "X announced nothing".
 		if s.Selected == 0 {

@@ -166,12 +166,19 @@ func TestLocalFromCapture(t *testing.T) {
 	if code != exitUsage {
 		t.Errorf("capture's local AS is the peer: exit %d, want %d; stderr %s", code, exitUsage, stderr)
 	}
+	// A usage error found by Check prints no route-object note.
+	if strings.Contains(stderr, "route objects:") {
+		t.Errorf("capture's local AS is the peer: the note before a usage error:\n%s", stderr)
+	}
 	empty := write(t, "empty.mrt", nil)
 	code, _, stderr = run(t, "-peer", "AS64500", "-session", empty, "-dump", registry)
 	if code != exitUsage {
 		t.Errorf("capture naming no local AS: exit %d, want %d; stderr %s", code, exitUsage, stderr)
 	}
 	wantContains(t, "stderr", stderr, "give -local")
+	if strings.Contains(stderr, "route objects:") {
+		t.Errorf("capture naming no local AS: the note before a usage error:\n%s", stderr)
+	}
 }
 
 // TestNoSession: a capture with no record of the session selected is not
@@ -272,6 +279,10 @@ func TestFailures(t *testing.T) {
 				t.Errorf("stdout %q, want nothing", stdout)
 			}
 			wantContains(t, "stderr", stderr, tc.want)
+			// A run that fails before or in Check prints no route-object note.
+			if strings.Contains(stderr, "route objects:") {
+				t.Errorf("the route-object note on a failed run:\n%s", stderr)
+			}
 		})
 	}
 	// A truncated capture is named as such.
@@ -1544,6 +1555,42 @@ func TestVerifiedIRRdPartial(t *testing.T) {
 		t.Errorf("unreachable: exit %d, want %d; stderr %s", code, exitFailed, stderr)
 	}
 	wantContains(t, "unreachable stderr", stderr, "RIPE", dead)
+}
+
+// TestVerifiedProbes: a source named in -sources that the server refuses is
+// absent, and a context error during a probe fails the load (never
+// "absent").
+func TestVerifiedProbes(t *testing.T) {
+	srv := serveRegistries(t, registryText{"RADB", verifiedRADB}, registryText{"RIPE", verifiedRIPE})
+	defaults, err := parseVerifiedSources("RIPE,APNIC,ARIN,AFRINIC,LACNIC")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	cfg := &config{irrd: srv, sources: []string{"RIPE", "APNIC"}, verified: defaults}
+	reg, err := loadPolicy(context.Background(), cfg, io.Discard)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer reg.close()
+	if want := "route objects: verified sources RIPE; absent: APNIC, ARIN, AFRINIC, LACNIC"; reg.verifiedNote != want {
+		t.Errorf("-sources RIPE,APNIC: note %q, want %q", reg.verifiedNote, want)
+	}
+	if reg.verified == nil {
+		t.Error("-sources RIPE,APNIC: the marking is off, want it on over RIPE")
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	reg, err = loadPolicy(ctx, &config{irrd: srv, verified: defaults}, io.Discard)
+	if err == nil {
+		reg.close()
+		t.Fatalf("cancelled: loaded with note %q, want an error", reg.verifiedNote)
+	}
+	if !errors.Is(err, context.Canceled) {
+		t.Errorf("cancelled: %v, want context.Canceled", err)
+	}
+	wantContains(t, "cancelled error", err.Error(), "probing the verified source RIPE")
 }
 
 // TestVerifiedSourcesFlag: -verified-sources replaces the list; the present

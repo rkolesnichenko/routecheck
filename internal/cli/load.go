@@ -221,11 +221,14 @@ func loadPolicy(ctx context.Context, cfg *config, stderr io.Writer) (*loaded, er
 	}, nil
 }
 
-// probeSource reports whether the IRRd at addr serves the source name: a
-// one-source query, refused when the server does not know it. IRRd refuses
-// a whole "!s" list when one name in it is unknown, so the verified sources
-// are probed one at a time and the absent ones left out. Any other failure
-// is an error naming the source.
+// probeSource reports whether the IRRd at addr serves the source name. It
+// asks "!g" for AS64496 (a documentation ASN, RFC 5398) with the source list
+// restricted to name alone. Any irrd.ErrQueryRefused, whether the server
+// refused the "!s" selection or the query itself, counts the source as
+// absent. IRRd refuses a whole "!s" list when one name in it is unknown, so
+// the verified sources are probed one at a time and the absent ones left
+// out. Any other failure, a context error included, is an error naming the
+// source.
 func probeSource(ctx context.Context, addr, name string) (bool, error) {
 	s := &irrd.Source{Addr: addr, Sources: []string{name}}
 	defer s.Close()
