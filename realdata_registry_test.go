@@ -626,7 +626,7 @@ func TestLoadRegistryRoutesFromWithExtra(t *testing.T) {
 	}
 	extra := writeGzip(t, dir, "extra.db.gz",
 		"as-set: AS-NEW\nmembers: AS64504\nsource: LEVEL3",
-		"route: 198.51.100.0/24\norigin: AS64497\nsource: LEVEL3")
+		"route: 198.51.100.0/24\norigin: AS64497\nmember-of: RS-X\nsource: LEVEL3")
 	reg := loadRegistry(t, dumps, extra, map[string]bool{"ripe": true})
 	prefixes := func(as types.ASN) []netip.Prefix {
 		ps, err := reg.src.OriginatedRoutes(context.Background(), as, types.AFIv4)
@@ -652,6 +652,9 @@ func TestLoadRegistryRoutesFromWithExtra(t *testing.T) {
 	if want := map[string]int{"extra": 1}; !reflect.DeepEqual(reg.droppedRoutes, want) {
 		t.Errorf("droppedRoutes = %v, want %v", reg.droppedRoutes, want)
 	}
+	if reg.droppedClaims != 1 {
+		t.Errorf("droppedClaims = %d, want 1", reg.droppedClaims)
+	}
 }
 
 func TestTrackedSetsInterned(t *testing.T) {
@@ -670,8 +673,10 @@ func TestTrackedSetsInterned(t *testing.T) {
 			{Missing: []types.SetRef{ref("AS-B"), ref("AS-A")}},
 		}}}
 	}
+	other := rejected("100.64.0.0/10")
+	other.Verdict.Fails = []verdict.Fail{{Missing: []types.SetRef{ref("AS-Z")}}}
 	rep := routecheck.Report{Policy: peval.Policy{Clauses: make([]peval.Clause, 1)},
-		Routes: []routecheck.RouteVerdict{rejected("192.0.2.0/24"), rejected("198.51.100.0/24")}}
+		Routes: []routecheck.RouteVerdict{rejected("192.0.2.0/24"), rejected("198.51.100.0/24"), other}}
 	ctx := reportCtx{pair: "AS1-AS2", family: "ipv4.unicast", neighbour: "AS2"}
 	k1 := routeKey(ctx.pair, "import", ctx.family, ctx.neighbour, route("192.0.2.0/24"))
 	k2 := routeKey(ctx.pair, "import", ctx.family, ctx.neighbour, route("198.51.100.0/24"))
@@ -700,6 +705,9 @@ func TestTrackedSetsInterned(t *testing.T) {
 	}
 	if unsafe.StringData(a.Sets) != unsafe.StringData(b.Sets) {
 		t.Error("two tracked routes with the same missing sets hold two copies of the list")
+	}
+	if len(r.intern) != 1 {
+		t.Errorf("intern map holds %d lists, want 1: an untracked route's list must not be kept", len(r.intern))
 	}
 	if err := o.addPair(&r); err != nil {
 		t.Fatal(err)

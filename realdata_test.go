@@ -1771,7 +1771,12 @@ func (r *pairResult) report(rep *routecheck.Report, dir int, label string, rc re
 			sets = missingSetNames(&rv.Verdict)
 		}
 		if tracked || len(sets) > 0 {
-			joined := r.internSets(sets)
+			var joined string
+			if tracked {
+				joined = r.internSets(sets) // only a tracked key's list is kept, so only it is interned
+			} else {
+				joined = strings.Join(sets, ",")
+			}
 			tr := trackedResult{Outcome: rv.Verdict.Outcome.String(), Detail: undecidedKinds(&rv.Verdict), Sets: joined}
 			if tracked {
 				if r.lines == nil {
