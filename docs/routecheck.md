@@ -596,12 +596,15 @@ Both spellings of 0xFFFFFF03 are read, in any case:
       (`.data/provenance-R1.log`);
     - run V, the RIRs alone (`.data/provenance-V1.log`).
   - **Pair 2 (AS9086 from AS6762, 2,607,757 routes in A) could not be measured.**
-    In R and in V it went over the 8 GB memory cap, alone, every time:
-    8,224 and 8,255 MB in R, 8,249 MB in V (`.data/provenance-R-stopped.log`,
-    `-R2.log`, `-V2.log`).
-    - With fewer route objects, its AS-SEABONE expansions come in under
-      2,097,152 prefixes, and deciding against them costs more memory than
-      giving up.
+    It went over the 8 GB memory cap in R and in V. The guard stopped the
+    whole R run on pair 2, after pair 1, at 8,224 MB
+    (`.data/provenance-R-stopped.log`); pair 2 alone was stopped at 8,255 MB
+    in R and 8,249 MB in V (`.data/provenance-R2.log`, `-V2.log`).
+    - The likely cause, not measured: with fewer route objects, its AS-SEABONE
+      expansions may come in under 2,097,152 prefixes, and deciding against
+      them may cost more memory than giving up (the design's settled point 1
+      foresaw this). Both runs were stopped before pair 2 logged a report,
+      and no log gives AS-SEABONE's size in R or V.
     - R and V ran the other 59 pairs (peak 6,202 and 5,046 MB; A peaked at
       7,148 MB). Pair 2's routes are "no verdict" in both comparisons, and the
       shares below leave them out.
@@ -613,7 +616,7 @@ Both spellings of 0xFFFFFF03 are read, in any case:
     - No answer goes from "no" to "yes", as dropping objects cannot add one.
     - The RPKI state of those 1,660,441 routes: 1,055,319 valid (63.56%),
       605,079 not found, 43 invalid. "Valid" means a resource holder signed
-      that origin, so most of these unverified route objects agree with RPKI.
+      that origin: most of these routes are RPKI-valid.
     - On the 50 pairs of the earlier caveat: 551,873 of 1,568,538 "yes"
       answers (35.18%), which is 53.09% of the rise from 528,974. Run A
       reproduces the 1,568,538 exactly.
@@ -632,12 +635,25 @@ Both spellings of 0xFFFFFF03 are read, in any case:
     AS14544 are route objects only in `radb.db.gz`. Their route-object answer
     is "yes" in A and "no" in R, and AS44306's export of each to AS3491 is
     accepted in A and rejected in R.
-  - **What this means:** about a third of routecheck's "yes" route-object
-    answers rest on registries that do not check resource holders. Most of
-    those routes are RPKI-valid. Far fewer verdicts depend on them: 0.15% of
-    the export routes in both runs on these 59 pairs (5,190 of 3,369,730).
+  - **What this means:** on this sample, about a third of routecheck's "yes"
+    route-object answers rest on registries that do not check resource
+    holders. Most of those routes are RPKI-valid. Far fewer verdicts depend
+    on them: 0.15% of the export routes in both runs on these 59 pairs
+    (5,190 of 3,369,730).
+    - These shares are weighted by routes, and the sample is concentrated
+      (`.data/provenance-AR.log`, "concentration"). Three pairs (AS213642
+      from AS3257, AS48354 from AS20485, AS62120 from AS1299) hold 4,123,600
+      of the 4,549,769 "yes" answers in both runs (90.63%). Without them,
+      117,962 of 426,169 become "no" (27.68%). Over the 58 pairs with a "yes"
+      answered in both runs, the median pair's share is 0.00%.
+    - 4,910 of the 5,190 moves from accepted to rejected are in one report:
+      AS31133's export to AS31500 (pair AS41446 from AS31133). 19 pairs have
+      at least one.
+    - So the shares describe these 59 pairs, mostly three of them, not a
+      typical pair.
   - **Not measured:**
-    - pair 2;
+    - pair 2, and why it needs more memory without the unverified route
+      objects;
     - whether any unverified object is right;
     - how JPIRR or any other mirror verifies.
 - **Out of scope** (spec §12):

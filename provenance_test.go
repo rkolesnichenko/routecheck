@@ -369,6 +369,10 @@ type provDir struct {
 	Undecided map[provKey]int
 	// RouteObj is the route-object matrix over provRouteObjs.
 	RouteObj map[provKey]int
+	// CommonRouteObj is RouteObj over the pairs both runs checked, where the
+	// totals-only shortcut is taken (design, goal 2). Every yes → no is in it,
+	// since a key both runs have is in a pair both checked.
+	CommonRouteObj map[provKey]int
 	// RPKIYesNo and RPKIAccRej are A's RPKI state of the routes whose route
 	// object goes yes → no, and of those accepted → rejected. Both runs load
 	// the same VRPs.
@@ -379,7 +383,7 @@ type provDir struct {
 
 func newProvDir() *provDir {
 	return &provDir{Outcome: map[provKey]int{}, NoVerdict: map[provKey]int{}, Undecided: map[provKey]int{},
-		RouteObj: map[provKey]int{}, RPKIYesNo: map[string]int{}, RPKIAccRej: map[string]int{}}
+		RouteObj: map[provKey]int{}, CommonRouteObj: map[provKey]int{}, RPKIYesNo: map[string]int{}, RPKIAccRej: map[string]int{}}
 }
 
 // Universe is the number of route keys compared.
@@ -387,7 +391,7 @@ func (d *provDir) Universe() int { return d.Both + d.AOnly + d.OtherOnly }
 
 // add adds e's counts to d.
 func (d *provDir) add(e *provDir) {
-	for _, mm := range [][2]map[provKey]int{{d.Outcome, e.Outcome}, {d.NoVerdict, e.NoVerdict}, {d.Undecided, e.Undecided}, {d.RouteObj, e.RouteObj}} {
+	for _, mm := range [][2]map[provKey]int{{d.Outcome, e.Outcome}, {d.NoVerdict, e.NoVerdict}, {d.Undecided, e.Undecided}, {d.RouteObj, e.RouteObj}, {d.CommonRouteObj, e.CommonRouteObj}} {
 		for k, n := range mm[1] {
 			mm[0][k] += n
 		}
@@ -451,6 +455,7 @@ func (d *provDir) sumErrors() []string {
 	check("the undecided reasons", sumCells(d.Undecided), rowSum(d.Outcome, provUndecided))
 	check("the RPKI states of yes → no", sumCells(d.RPKIYesNo), d.RouteObj[provKey{"yes", "no"}])
 	check("the RPKI states of accepted → rejected", sumCells(d.RPKIAccRej), d.Outcome[provKey{provAccepted, provRejected}])
+	check("yes → no over the pairs both runs checked", d.CommonRouteObj[provKey{"yes", "no"}], d.RouteObj[provKey{"yes", "no"}])
 	return errs
 }
 
@@ -460,10 +465,93 @@ func (d *provDir) sumErrors() []string {
 type provTally struct {
 	Dirs           map[string]*provDir
 	SubsetRouteObj map[provKey]int
+	// Pairs is each pair's figures, both directions added, by pair id.
+	Pairs map[string]provPairFig
+	// AccRej counts the accepted → rejected routes by report: pair,
+	// direction and neighbour, "|"-joined.
+	AccRej map[string]int
 }
 
+// provPairFig is one pair's figures: A's route-object "yes" answered in both
+// runs (yes → yes or yes → no), how many of them go yes → no, and its
+// accepted → rejected routes.
+type provPairFig struct{ Answered, YesNo, AccRej int }
+
 func newProvTally() *provTally {
-	return &provTally{Dirs: map[string]*provDir{"import": newProvDir(), "export": newProvDir()}, SubsetRouteObj: map[provKey]int{}}
+	return &provTally{Dirs: map[string]*provDir{"import": newProvDir(), "export": newProvDir()}, SubsetRouteObj: map[provKey]int{},
+		Pairs: map[string]provPairFig{}, AccRej: map[string]int{}}
+}
+
+// provAnsweredYes is A's route-object "yes" answered in both runs in a
+// route-object matrix: yes → yes plus yes → no. It is the denominator of the
+// published yes → no shares.
+func provAnsweredYes(m map[provKey]int) int {
+	return m[provKey{"yes", "yes"}] + m[provKey{"yes", "no"}]
+}
+
+// provConc is how concentrated the comparison is over the pairs: the pairs
+// with the most answered yes, the median pair's yes → no share, the share
+// without those pairs, and the report with the most accepted → rejected.
+type provConc struct {
+	// Top is the pairs with the most answered yes, most first (ties by id);
+	// TopAnswered is their answered yes, Answered every pair's.
+	Top                   []string
+	TopAnswered, Answered int
+	// Pairs is the number of pairs with an answered yes, and Median the
+	// median of their yes → no shares, in percent: with an even number, the
+	// mean of the middle two.
+	Pairs  int
+	Median float64
+	// RestYesNo and RestAnswered are the yes → no and answered yes of the
+	// pairs not in Top.
+	RestYesNo, RestAnswered int
+	// MaxReport is the report with the most accepted → rejected (ties by id),
+	// MaxAccRej its count, AccRej every report's, and AccRejPairs the number of
+	// pairs with any.
+	MaxReport                      string
+	MaxAccRej, AccRej, AccRejPairs int
+}
+
+// provConcOf reads t's per-pair and per-report figures, with the top pairs
+// by answered yes.
+func provConcOf(t *provTally, top int) provConc {
+	var c provConc
+	ids := slices.Sorted(maps.Keys(t.Pairs))
+	byAnswered := slices.Clone(ids)
+	slices.SortStableFunc(byAnswered, func(x, y string) int { return t.Pairs[y].Answered - t.Pairs[x].Answered })
+	c.Top = byAnswered[:min(top, len(byAnswered))]
+	var shares []float64
+	for _, id := range ids {
+		f := t.Pairs[id]
+		c.Answered += f.Answered
+		if slices.Contains(c.Top, id) {
+			c.TopAnswered += f.Answered
+		} else {
+			c.RestYesNo += f.YesNo
+			c.RestAnswered += f.Answered
+		}
+		if f.Answered > 0 {
+			shares = append(shares, 100*float64(f.YesNo)/float64(f.Answered))
+		}
+		if f.AccRej > 0 {
+			c.AccRejPairs++
+		}
+	}
+	c.Pairs = len(shares)
+	if n := len(shares); n > 0 {
+		slices.Sort(shares)
+		c.Median = shares[n/2]
+		if n%2 == 0 {
+			c.Median = (shares[n/2-1] + shares[n/2]) / 2
+		}
+	}
+	for _, r := range slices.Sorted(maps.Keys(t.AccRej)) {
+		c.AccRej += t.AccRej[r]
+		if t.AccRej[r] > c.MaxAccRej {
+			c.MaxReport, c.MaxAccRej = r, t.AccRej[r]
+		}
+	}
+	return c
 }
 
 // SubsetAYes is A's import route-object "yes" answers over the self-check's
@@ -531,6 +619,9 @@ func comparePair(t *provTally, a, b map[string]provRoute, aStatus, bStatus strin
 		}
 		d.Outcome[provKey{oa, ob}]++
 		d.RouteObj[provKey{sa, sb}]++
+		if aStatus == "checked" && bStatus == "checked" {
+			d.CommonRouteObj[provKey{sa, sb}]++
+		}
 		if oa == provUndecided {
 			detail := ra.Detail
 			if detail == "" {
@@ -541,9 +632,24 @@ func comparePair(t *provTally, a, b map[string]provRoute, aStatus, bStatus strin
 		if sa == "yes" && sb == "no" {
 			d.RPKIYesNo[ra.RPKI]++
 		}
+		pair, _, _ := strings.Cut(key, "|")
+		fig := t.Pairs[pair]
+		if sa == "yes" && (sb == "yes" || sb == "no") {
+			fig.Answered++
+			if sb == "no" {
+				fig.YesNo++
+			}
+		}
 		if oa == provAccepted && ob == provRejected {
 			d.RPKIAccRej[ra.RPKI]++
+			f := strings.Split(key, "|")
+			if len(f) < 4 {
+				return fmt.Errorf("key %q: no neighbour field", key)
+			}
+			t.AccRej[f[0]+"|"+f[1]+"|"+f[3]]++
+			fig.AccRej++
 		}
+		t.Pairs[pair] = fig
 		if subset50 && dir == "import" {
 			t.SubsetRouteObj[provKey{sa, sb}]++
 		}
@@ -602,11 +708,12 @@ func logProvCells(t *testing.T, title string, m map[provKey]int) {
 	}
 }
 
-// logProvStates logs an RPKI table, sorted by state.
+// logProvStates logs an RPKI table, sorted by state, each state with its
+// share of the sum.
 func logProvStates(t *testing.T, title string, m map[string]int) {
 	t.Logf("  %s, sum %d:", title, sumCells(m))
 	for _, s := range slices.Sorted(maps.Keys(m)) {
-		t.Logf("    %-12s %d", s, m[s])
+		t.Logf("    %-12s %d (%s)", s, m[s], provShare(m[s], sumCells(m)))
 	}
 }
 
@@ -627,15 +734,23 @@ func logProvDir(t *testing.T, name, other string, d *provDir) {
 	logProvCells(t, "no verdict, by reason", d.NoVerdict)
 	logProvCells(t, "undecided in A, by A's reasons → "+other+"'s outcome", d.Undecided)
 	logProvMatrix(t, "route objects", other, provRouteObjs, d.RouteObj)
-	tot := provTotalsOf(d)
-	t.Logf("  route object yes → no: %d, %s of A's %d yes", tot.YesNo, provShare(tot.YesNo, tot.AYes), tot.AYes)
+	yesNo, aYes := d.RouteObj[provKey{"yes", "no"}], rowSum(d.RouteObj, "yes")
+	t.Logf("  route object yes → no: %d, %s of A's %d yes", yesNo, provShare(yesNo, aYes), aYes)
+	ans := provAnsweredYes(d.RouteObj)
+	t.Logf("  route object yes → no over the routes answered in both runs: %d of A's %d yes there (yes → yes + yes → no), %s",
+		yesNo, ans, provShare(yesNo, ans))
 	logProvStates(t, "RPKI (A's) of route object yes → no", d.RPKIYesNo)
+	accRej := d.Outcome[provKey{provAccepted, provRejected}]
+	t.Logf("  accepted → rejected: %d, %s of the %d routes in both runs", accRej, provShare(accRej, d.Both), d.Both)
 	logProvStates(t, "RPKI (A's) of accepted → rejected", d.RPKIAccRej)
-	t.Logf("  totals only: A's yes %d - %s's yes %d = %d; route by route yes → no %d; equal: %v",
+	tot := provTotalsOf(d)
+	t.Logf("  totals only, over the pairs both runs checked: A's yes %d - %s's yes %d = %d; route by route yes → no %d; equal: %v",
 		tot.AYes, other, tot.OtherYes, tot.AYes-tot.OtherYes, tot.YesNo, tot.AYes-tot.OtherYes == tot.YesNo)
-	t.Logf("  route-object denominators (yes + no): A %d, %s %d", tot.ADen, other, tot.OtherDen)
+	t.Logf("  route-object denominators (yes + no) over the pairs both runs checked: A %d, %s %d", tot.ADen, other, tot.OtherDen)
 	if tot.ADen != tot.OtherDen {
 		t.Logf("  the denominators differ: the totals-only shortcut does not apply (design, settled 2)")
+	} else {
+		t.Logf("  the denominators are equal: the totals-only shortcut applies and was checked")
 	}
 	if err := tot.check(name); err != nil {
 		t.Error(err)
@@ -645,25 +760,39 @@ func logProvDir(t *testing.T, name, other string, d *provDir) {
 	}
 }
 
-// provTotals is one direction's route-object figures: A's and the other run's
-// "yes" answers, their denominators (yes + no), and the route-by-route
-// yes → no count.
+// logProvConc logs how concentrated the comparison is over the pairs (both
+// directions added).
+func logProvConc(t *testing.T, c provConc) {
+	t.Logf("concentration, both directions, A's route-object yes answered in both runs:")
+	t.Logf("  the %d pairs with the most (%s) hold %d of %d (%s)",
+		len(c.Top), strings.Join(c.Top, ", "), c.TopAnswered, c.Answered, provShare(c.TopAnswered, c.Answered))
+	t.Logf("  the median pair's yes → no share, over the %d pairs with an answered yes (even: the mean of the middle two): %.2f%%", c.Pairs, c.Median)
+	t.Logf("  without those %d pairs: yes → no %d of %d (%s)", len(c.Top), c.RestYesNo, c.RestAnswered, provShare(c.RestYesNo, c.RestAnswered))
+	t.Logf("  accepted → rejected: the report with the most (pair|direction|neighbour) %s has %d of %d (%s); %d pairs have at least one",
+		c.MaxReport, c.MaxAccRej, c.AccRej, provShare(c.MaxAccRej, c.AccRej), c.AccRejPairs)
+}
+
+// provTotals is one direction's route-object figures over the pairs both runs
+// checked: A's and the other run's "yes" answers, their denominators
+// (yes + no), and the route-by-route yes → no count.
 type provTotals struct{ AYes, OtherYes, ADen, OtherDen, YesNo int }
 
-// provTotalsOf reads d's route-object matrix.
+// provTotalsOf reads d's route-object matrix over the pairs both runs checked.
 func provTotalsOf(d *provDir) provTotals {
-	aYes, otherYes := rowSum(d.RouteObj, "yes"), colSum(d.RouteObj, "yes")
+	m := d.CommonRouteObj
+	aYes, otherYes := rowSum(m, "yes"), colSum(m, "yes")
 	return provTotals{
 		AYes: aYes, OtherYes: otherYes,
-		ADen: aYes + rowSum(d.RouteObj, "no"), OtherDen: otherYes + colSum(d.RouteObj, "no"),
-		YesNo: d.RouteObj[provKey{"yes", "no"}],
+		ADen: aYes + rowSum(m, "no"), OtherDen: otherYes + colSum(m, "no"),
+		YesNo: m[provKey{"yes", "no"}],
 	}
 }
 
 // check holds the totals-only shortcut to the route-by-route count (design,
-// goal 2): when both runs' denominators are equal, A's yes minus the other
-// run's must be the yes → no count, or the measurement fails. When the
-// denominators differ the shortcut does not apply and nothing is checked.
+// goal 2), over the pairs both runs checked: when both runs' denominators
+// there are equal, A's yes minus the other run's must be the yes → no count,
+// or the measurement fails. When they differ the shortcut does not apply and
+// nothing is checked.
 func (p provTotals) check(dir string) error {
 	if p.ADen != p.OtherDen || p.AYes-p.OtherYes == p.YesNo {
 		return nil
@@ -767,22 +896,37 @@ func TestProvenanceCompare(t *testing.T) {
 	tl := newProvTally()
 	if err := zipPairs(order, ar, br, aStatus, bStatus, func(p string, am, bm map[string]provRoute) error {
 		t.Logf("pair %s: A %s, %d routes; %s %s, %d routes; self-check %v", p, aStatus[p], len(am), label, bStatus[p], len(bm), !exclude[p])
-		return comparePair(tl, am, bm, aStatus[p], bStatus[p], !exclude[p])
+		if err := comparePair(tl, am, bm, aStatus[p], bStatus[p], !exclude[p]); err != nil {
+			return err
+		}
+		f := tl.Pairs[p]
+		t.Logf("pair %s: A's route-object yes answered in both runs %d, yes → no %d (%s); accepted → rejected %d",
+			p, f.Answered, f.YesNo, provShare(f.YesNo, f.Answered), f.AccRej)
+		return nil
 	}); err != nil {
 		t.Fatal(err)
 	}
 
+	both := 0
+	for _, p := range order {
+		if aStatus[p] == "checked" && bStatus[p] == "checked" {
+			both++
+		}
+	}
+	t.Logf("%d of %d pairs checked in both runs; the totals-only shortcut is taken over them", both, len(order))
 	logProvDir(t, "import", label, tl.Dirs["import"])
 	logProvDir(t, "export", label, tl.Dirs["export"])
 	logProvDir(t, "total", label, tl.Total())
+	logProvConc(t, provConcOf(tl, 3))
 
 	n := len(order) - len(exclude)
 	logProvMatrix(t, fmt.Sprintf("self-check, %d pairs: import route objects", n), label, provRouteObjs, tl.SubsetRouteObj)
 	sub := func(a, b string) int { return tl.SubsetRouteObj[provKey{a, b}] }
 	t.Logf("self-check, %d pairs: A's import route-object yes %d (want %d); yes → yes %d, yes → no %d, yes → unknown %d, yes → no verdict %d, unknown → yes %d",
 		n, tl.SubsetAYes(), provEveryRegistryImportYes, sub("yes", "yes"), sub("yes", "no"), sub("yes", "unknown"), sub("yes", provNoVerdict), sub("unknown", "yes"))
-	t.Logf("self-check, %d pairs: yes → no %d is %s of the old rise %d (%d to %d); routes without an answer in both runs are not in it",
-		n, tl.SubsetYesNo(), provShare(tl.SubsetYesNo(), provOldRise), provOldRise, provRIPEOnlyImportYes, provEveryRegistryImportYes)
+	t.Logf("self-check, %d pairs: yes → no %d is %s of A's %d yes and %s of the old rise %d (%d to %d); routes without an answer in both runs are not in it",
+		n, tl.SubsetYesNo(), provShare(tl.SubsetYesNo(), tl.SubsetAYes()), tl.SubsetAYes(),
+		provShare(tl.SubsetYesNo(), provOldRise), provOldRise, provRIPEOnlyImportYes, provEveryRegistryImportYes)
 	if tl.SubsetAYes() != provEveryRegistryImportYes {
 		t.Errorf("self-check: A's import route-object yes over the %d pairs is %d, want %d", n, tl.SubsetAYes(), provEveryRegistryImportYes)
 	}
@@ -1111,8 +1255,8 @@ func TestCompareTotalsOnly(t *testing.T) {
 	// A's yes is 1 and the other's 0, with equal denominators (1 and 1), but no
 	// route goes yes → no: one goes yes → unknown, another unknown → no.
 	d := newProvDir()
-	d.RouteObj[provKey{"yes", "unknown"}] = 1
-	d.RouteObj[provKey{"unknown", "no"}] = 1
+	d.CommonRouteObj[provKey{"yes", "unknown"}] = 1
+	d.CommonRouteObj[provKey{"unknown", "no"}] = 1
 	err := provTotalsOf(d).check("import")
 	if err == nil || !strings.Contains(err.Error(), "import") || !strings.Contains(err.Error(), "totals-only figure 1") || !strings.Contains(err.Error(), "yes → no 0") {
 		t.Errorf("equal denominators, totals-only 1, route by route 0: %v, want an error naming import and both figures", err)
@@ -1120,19 +1264,61 @@ func TestCompareTotalsOnly(t *testing.T) {
 	// Agreeing: yes → no 1 and yes → yes 1; denominators 2 and 2, totals-only
 	// 2 - 1 = 1, yes → no 1.
 	agree := newProvDir()
-	agree.RouteObj[provKey{"yes", "no"}] = 1
-	agree.RouteObj[provKey{"yes", "yes"}] = 1
+	agree.CommonRouteObj[provKey{"yes", "no"}] = 1
+	agree.CommonRouteObj[provKey{"yes", "yes"}] = 1
 	if err := provTotalsOf(agree).check("import"); err != nil {
 		t.Errorf("agreeing figures: %v", err)
 	}
 	// Unequal denominators (1 and 2): the shortcut does not apply, whatever
 	// the figures.
-	d.RouteObj[provKey{provNoVerdict, "no"}] = 1
+	d.CommonRouteObj[provKey{provNoVerdict, "no"}] = 1
 	if p := provTotalsOf(d); p.ADen == p.OtherDen {
 		t.Fatalf("denominators %d and %d, want them unequal", p.ADen, p.OtherDen)
 	}
 	if err := provTotalsOf(d).check("export"); err != nil {
 		t.Errorf("unequal denominators: %v, want no check", err)
+	}
+}
+
+func TestCompareTotalsOnlyCommonPairs(t *testing.T) {
+	// AS1-AS2 is checked in both runs: one route goes yes → unknown, another
+	// unknown → no, so A's yes 1 - the other's 0 = 1, but no route goes
+	// yes → no; its denominators are 1 and 1. AS3-AS4 is checked in A only (the
+	// other run timed out): its yes → no verdict makes the denominators over
+	// every pair unequal (2 and 1). The shortcut is taken over AS1-AS2 alone,
+	// where it fails.
+	const k1, k2, k3 = "AS1-AS2|import|ipv4|AS2|10.0.0.0/24|AS2", "AS1-AS2|import|ipv4|AS2|10.0.1.0/24|AS2", "AS3-AS4|import|ipv4|AS4|10.0.2.0/24|AS4"
+	tl := newProvTally()
+	if err := comparePair(tl, map[string]provRoute{k1: provR("accepted", "yes", "valid", ""), k2: provR("accepted", "unknown", "valid", "")},
+		map[string]provRoute{k1: provR("accepted", "unknown", "valid", ""), k2: provR("rejected", "no", "valid", "")}, "checked", "checked", false); err != nil {
+		t.Fatal(err)
+	}
+	if err := comparePair(tl, map[string]provRoute{k3: provR("accepted", "yes", "valid", "")}, nil, "checked", "timeout", false); err != nil {
+		t.Fatal(err)
+	}
+	d := tl.Dirs["import"]
+	p := provTotalsOf(d)
+	if p.ADen != 1 || p.OtherDen != 1 || p.AYes != 1 || p.OtherYes != 0 || p.YesNo != 0 {
+		t.Errorf("over the pairs both runs checked: A's yes %d of %d, the other's %d of %d, yes → no %d; want 1 of 1, 0 of 1, 0",
+			p.AYes, p.ADen, p.OtherYes, p.OtherDen, p.YesNo)
+	}
+	err := p.check("import")
+	if err == nil || !strings.Contains(err.Error(), "totals-only figure 1") || !strings.Contains(err.Error(), "yes → no 0") {
+		t.Errorf("disagreeing over the common pair: %v, want an error naming both figures", err)
+	}
+
+	// Agreeing over AS1-AS2 (yes → no and yes → yes), with AS3-AS4's yes →
+	// no verdict outside: totals-only 2 - 1 = 1, yes → no 1.
+	ok := newProvTally()
+	if err := comparePair(ok, map[string]provRoute{k1: provR("accepted", "yes", "valid", ""), k2: provR("accepted", "yes", "valid", "")},
+		map[string]provRoute{k1: provR("accepted", "yes", "valid", ""), k2: provR("rejected", "no", "valid", "")}, "checked", "checked", false); err != nil {
+		t.Fatal(err)
+	}
+	if err := comparePair(ok, map[string]provRoute{k3: provR("accepted", "yes", "valid", "")}, nil, "checked", "timeout", false); err != nil {
+		t.Fatal(err)
+	}
+	if p := provTotalsOf(ok.Dirs["import"]); p.ADen != 2 || p.OtherDen != 2 || p.check("import") != nil {
+		t.Errorf("agreeing over the common pair: denominators %d and %d, check %v; want 2, 2, nil", p.ADen, p.OtherDen, p.check("import"))
 	}
 }
 
@@ -1232,5 +1418,78 @@ func TestCompareZipOrder(t *testing.T) {
 		if err == nil || !strings.Contains(err.Error(), tc.wantErr) {
 			t.Errorf("%s: %v, want an error naming %s", tc.name, err, tc.wantErr)
 		}
+	}
+}
+
+func TestCompareByPair(t *testing.T) {
+	// A's route-object yes answered in both runs (yes → yes, yes → no) counts
+	// per pair over both directions; yes → no verdict and yes → unknown do not.
+	// accepted → rejected counts per report: pair, direction, neighbour.
+	tl := newProvTally()
+	a := map[string]provRoute{
+		"AS1-AS2|import|ipv4|AS2|10.0.0.0/24|AS2":   provR("accepted", "yes", "valid", ""),
+		"AS1-AS2|export|ipv4|AS9|10.0.1.0/24|AS2":   provR("accepted", "yes", "valid", ""),
+		"AS1-AS2|export|ipv6|AS9|2001:db8::/32|AS2": provR("accepted", "yes", "valid", ""),
+		"AS1-AS2|export|ipv4|AS8|10.0.2.0/24|AS2":   provR("accepted", "yes", "valid", ""),
+		"AS1-AS2|import|ipv4|AS2|10.0.3.0/24|AS2":   provR("accepted", "yes", "valid", ""),
+		"AS1-AS2|import|ipv4|AS2|10.0.4.0/24|AS2":   provR("accepted", "yes", "valid", ""),
+	}
+	b := map[string]provRoute{
+		"AS1-AS2|import|ipv4|AS2|10.0.0.0/24|AS2":   provR("accepted", "yes", "valid", ""),
+		"AS1-AS2|export|ipv4|AS9|10.0.1.0/24|AS2":   provR("rejected", "no", "valid", ""),
+		"AS1-AS2|export|ipv6|AS9|2001:db8::/32|AS2": provR("rejected", "no", "valid", ""),
+		"AS1-AS2|export|ipv4|AS8|10.0.2.0/24|AS2":   provR("rejected", "no", "valid", ""),
+		"AS1-AS2|import|ipv4|AS2|10.0.4.0/24|AS2":   provR("accepted", "unknown", "valid", ""),
+	}
+	if err := comparePair(tl, a, b, "checked", "checked", false); err != nil {
+		t.Fatal(err)
+	}
+	if got, want := tl.Pairs["AS1-AS2"], (provPairFig{Answered: 4, YesNo: 3, AccRej: 3}); got != want {
+		t.Errorf("AS1-AS2: %+v, want %+v", got, want)
+	}
+	if got, want := fmt.Sprint(tl.AccRej), "map[AS1-AS2|export|AS8:1 AS1-AS2|export|AS9:2]"; got != want {
+		t.Errorf("accepted → rejected by report: %s, want %s", got, want)
+	}
+	if n := provAnsweredYes(tl.Total().RouteObj); n != 4 {
+		t.Errorf("answered yes over both directions: %d, want 4", n)
+	}
+	if n := provAnsweredYes(tl.Dirs["import"].RouteObj); n != 1 {
+		t.Errorf("answered yes on import: %d, want 1", n)
+	}
+}
+
+func TestProvConcentration(t *testing.T) {
+	tl := newProvTally()
+	tl.Pairs = map[string]provPairFig{
+		"AS1-AS1": {Answered: 100, YesNo: 50, AccRej: 1},
+		"AS2-AS2": {Answered: 80, YesNo: 0},
+		"AS3-AS3": {Answered: 80, YesNo: 40}, // ties AS2-AS2: by id, AS2-AS2 is in the top
+		"AS4-AS4": {Answered: 10, YesNo: 5, AccRej: 2},
+		"AS5-AS5": {Answered: 10, YesNo: 0},
+		"AS6-AS6": {Answered: 0, YesNo: 0, AccRej: 0}, // no answered yes: not in the median
+	}
+	tl.AccRej = map[string]int{"AS1-AS1|export|AS7": 1, "AS4-AS4|export|AS8": 2}
+	c := provConcOf(tl, 2)
+	if got, want := fmt.Sprint(c.Top), "[AS1-AS1 AS2-AS2]"; got != want {
+		t.Errorf("top: %s, want %s", got, want)
+	}
+	if c.TopAnswered != 180 || c.Answered != 280 || c.Pairs != 5 {
+		t.Errorf("top %d of %d over %d pairs; want 180 of 280 over 5", c.TopAnswered, c.Answered, c.Pairs)
+	}
+	// Shares 50, 0, 50, 50, 0: sorted 0, 0, 50, 50, 50; median 50.
+	if c.Median != 50 {
+		t.Errorf("median %v, want 50", c.Median)
+	}
+	if c.RestYesNo != 45 || c.RestAnswered != 100 {
+		t.Errorf("without the top: %d of %d, want 45 of 100", c.RestYesNo, c.RestAnswered)
+	}
+	if c.MaxReport != "AS4-AS4|export|AS8" || c.MaxAccRej != 2 || c.AccRej != 3 || c.AccRejPairs != 2 {
+		t.Errorf("accepted → rejected: most %s %d of %d, %d pairs; want AS4-AS4|export|AS8 2 of 3, 2 pairs", c.MaxReport, c.MaxAccRej, c.AccRej, c.AccRejPairs)
+	}
+	// An even count: the mean of the middle two.
+	delete(tl.Pairs, "AS5-AS5")
+	tl.Pairs["AS4-AS4"] = provPairFig{Answered: 10, YesNo: 1, AccRej: 2}
+	if c := provConcOf(tl, 2); c.Median != 30 {
+		t.Errorf("even count (shares 0, 10, 50, 50): median %v, want 30", c.Median)
 	}
 }

@@ -310,10 +310,14 @@ Packages, imports strictly downward:
     - Under OUT, the test also streams `routes.tsv.gz` (one line per route of every report with a
       policy) and writes `pairs.tsv` (each pair's status).
     - `TestProvenanceCompare` (`ROUTECHECK_PROVENANCE_A`, `_B`, `_LABEL`, `_EXCLUDE`) compares two runs
-      offline. It peaked at 2,582 MB (`.data/provenance-AV.log`).
-    - With fewer route objects, pair 2 (AS9086 from AS6762) goes over the 8 GB cap even alone, at
-      8,224 to 8,255 MB. Its AS-SEABONE expansions fit under 2,097,152 and are decided, so shard
-      it out (`ROUTECHECK_REALDATA_PAIRS=1,3-60`).
+      offline. It peaked at 2,645 MB (`.data/provenance-AR.log`). It logs the shares over routes
+      answered in both runs, their concentration over pairs (the shares are route-weighted: three pairs
+      hold 90.63% of A-R's "yes" answers in both runs), and the totals-only check over the pairs both
+      runs checked.
+    - With fewer route objects, pair 2 (AS9086 from AS6762) goes over the 8 GB cap: the whole R run
+      stopped on it at 8,224 MB, and it alone at 8,255 MB in R and 8,249 MB in V. Likely (not
+      measured) its AS-SEABONE expansions then fit under 2,097,152 and are decided; the runs stopped
+      before it logged a report. Shard it out (`ROUTECHECK_REALDATA_PAIRS=1,3-60`).
     - `.data/provenance-runs.zsh` and `.data/provenance-shards.zsh` drive the runs.
   - The benchmarks (`BenchmarkDecide`, `BenchmarkCollector`; `ROUTECHECK_BENCH_LOCAL`, `_PEER`,
     `_AF` and `_ROUTES`) use the same data and load every pinned registry too. Their commands

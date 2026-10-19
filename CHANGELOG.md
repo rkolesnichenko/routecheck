@@ -39,7 +39,10 @@ assumption: JPIRR is grouped with RADB).
     peak 6,202 MB).
 - Run V, the RIRs only (`ROUTECHECK_REALDATA_REGISTRIES=ripe,apnic,arin,afrinic,lacnic`): the other 59 pairs passed
   (`.data/provenance-V1.log`, peak 5,046 MB); pair 2 alone was stopped at 8,249 MB (`.data/provenance-V2.log`).
-- Pair 2's 2,607,757 routes are therefore "no verdict" in R and V, and are left out of every share below.
+- Pair 2's 2,607,757 routes are therefore "no verdict" in R and V, and are left out of every share below. The likely
+  cause, not measured: with fewer route objects its AS-SEABONE expansions may fit under 2,097,152 and be decided,
+  costing more memory than giving up (design, settled 1). R2 and V2 were stopped before pair 2 logged a report, and no
+  log gives AS-SEABONE's size in R or V.
 - A against R (`.data/provenance-AR.log`), over the routes answered in both runs:
 
   | route-object "yes" in A | resting on unverified route objects alone | share |
@@ -49,8 +52,12 @@ assumption: JPIRR is grouped with RADB).
   | total 4,549,769 | 1,660,441 | 36.50% |
 
   - No answer went from "no" to "yes".
-  - The RPKI state of the 1,660,441: 1,055,319 valid (63.56%), 605,079 not found, 43 invalid.
-  - The totals-only shortcut does not apply: the runs' route-object denominators differ, because of pair 2.
+  - The RPKI state of the 1,660,441: 1,055,319 valid (63.56%), 605,079 not found, 43 invalid: most of these routes
+    are RPKI-valid.
+  - The totals-only shortcut, taken over the 59 pairs both runs checked: the denominators are equal (import 2,809,318,
+    export 3,369,171) and it agrees with the route-by-route count (import 2,102,844 - 1,338,722 = 764,122, export
+    2,446,925 - 1,550,606 = 896,319). Against V it does not apply on export: the denominators differ there (3,369,171
+    and 3,368,732), because of the 439 routes whose report loses its policy (`.data/provenance-AV.log`).
   - On the 50 pairs of the every-registry caveat, A reproduces 1,568,538 "yes" answers. Of these, 551,873 (35.18%)
     rest on unverified route objects alone: 53.09% of the rise from 528,974.
 - Verdicts:
@@ -63,7 +70,14 @@ assumption: JPIRR is grouped with RADB).
 - Hand-checked: 44.31.178.0/24 from AS211776 and 81.208.192.0/19 from AS14544 are route objects only in
   `radb.db.gz`. Their answer is "yes" in A and "no" in R, and AS44306's export of each to AS3491 is accepted in A and
   rejected in R.
-- Not measured: pair 2; whether any unverified object is right; how JPIRR or another mirror verifies.
+- The shares are weighted by routes, and this sample is concentrated (`.data/provenance-AR.log`, "concentration"):
+  - AS213642-AS3257, AS48354-AS20485 and AS62120-AS1299 hold 4,123,600 of the 4,549,769 "yes" answers in both runs
+    (90.63%). Without them, 117,962 of 426,169 become "no" (27.68%).
+  - Over the 58 pairs with a "yes" answered in both runs, the median pair's share is 0.00%.
+  - 4,910 of the 5,190 moves from accepted to rejected are in one report, AS31133's export to AS31500 (pair
+    AS41446-AS31133); 19 pairs have at least one.
+- Not measured: pair 2, and why it needs more memory without the unverified route objects; whether any unverified
+  object is right; how JPIRR or another mirror verifies.
 
 ### Measured, missing sets
 
