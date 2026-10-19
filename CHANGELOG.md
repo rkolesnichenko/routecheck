@@ -8,6 +8,8 @@ a minor version may change the API.
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-10-19
+
 ### Added
 
 - `-max-prefixes N` sets the most prefixes one set's expansion may reach
@@ -661,7 +663,8 @@ route can be higher.
 - **Out of scope:** ASPA, BMP and RIS Live, transparent route servers,
   `import-via:`/`export-via:`/`default:`, L's own export, and clause actions.
 
-[Unreleased]: https://github.com/rkolesnichenko/routecheck/compare/v0.3.0...HEAD
+[Unreleased]: https://github.com/rkolesnichenko/routecheck/compare/v0.4.0...HEAD
+[0.4.0]: https://github.com/rkolesnichenko/routecheck/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/rkolesnichenko/routecheck/compare/v0.2.1...v0.3.0
 [0.2.1]: https://github.com/rkolesnichenko/routecheck/compare/v0.2.0...v0.2.1
 [0.2.0]: https://github.com/rkolesnichenko/routecheck/compare/v0.1.0...v0.2.0
