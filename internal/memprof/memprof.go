@@ -15,6 +15,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"runtime/pprof"
+	"strings"
 	"sync"
 	"time"
 )
@@ -64,9 +65,14 @@ func Start(dir string, every time.Duration) (*Sampler, error) {
 		f.Close()
 		return nil, err
 	}
+	start := time.Now()
+	if err := os.WriteFile(filepath.Join(dir, "start.txt"), []byte(start.Format(time.RFC3339Nano)+"\n"), 0o644); err != nil {
+		f.Close()
+		return nil, err
+	}
 	s := &Sampler{
 		dir:    dir,
-		start:  time.Now(),
+		start:  start,
 		series: f,
 		quit:   make(chan struct{}),
 		done:   make(chan struct{}),
@@ -98,24 +104,24 @@ func (s *Sampler) fail(err error) {
 }
 
 // line appends one series line, written unbuffered; callers hold s.mu.
-func (s *Sampler) line(m *runtime.MemStats, mark string) {
+func (s *Sampler) line(elapsed time.Duration, m *runtime.MemStats, mark string) {
 	_, err := fmt.Fprintf(s.series, "%d\t%d\t%d\t%d\t%d\t%d\t%s\n",
-		time.Since(s.start).Milliseconds(), m.HeapInuse, m.HeapAlloc, m.Sys, m.NextGC, m.NumGC, mark)
+		elapsed.Milliseconds(), m.HeapInuse, m.HeapAlloc, m.Sys, m.NextGC, m.NumGC, mark)
 	s.fail(err)
 }
 
 // sample reads the heap, appends a series line and, at a new high, writes a
 // peak profile.
 func (s *Sampler) sample() {
-	var m runtime.MemStats
-	runtime.ReadMemStats(&m)
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.stopped {
 		return
 	}
-	s.line(&m, "")
+	var m runtime.MemStats
+	runtime.ReadMemStats(&m)
 	now := time.Now()
+	s.line(now.Sub(s.start), &m, "")
 	if float64(m.HeapInuse) >= peakGrowth*float64(s.high) && (s.peaks == 0 || now.Sub(s.lastPeak) >= peakInterval) {
 		s.peaks++
 		s.high = m.HeapInuse
@@ -126,13 +132,20 @@ func (s *Sampler) sample() {
 
 // profile writes the heap profile to dir/name.
 func (s *Sampler) profile(name string) error {
-	f, err := os.Create(filepath.Join(s.dir, name))
+	path := filepath.Join(s.dir, name)
+	f, err := os.Create(path + ".tmp")
 	if err != nil {
 		return err
 	}
 	err = pprof.Lookup("heap").WriteTo(f, 0)
 	if cerr := f.Close(); err == nil {
 		err = cerr
+	}
+	if err == nil {
+		err = os.Rename(path+".tmp", path)
+	}
+	if err != nil {
+		os.Remove(path + ".tmp")
 	}
 	return err
 }
@@ -145,17 +158,28 @@ func (s *Sampler) Mark(label string) uint64 {
 		return 0
 	}
 	runtime.GC()
-	var m runtime.MemStats
-	runtime.ReadMemStats(&m)
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.stopped {
 		return 0
 	}
+	var m runtime.MemStats
+	runtime.ReadMemStats(&m)
+	s.line(time.Since(s.start), &m, column(label))
 	s.marks++
 	s.fail(s.profile(fmt.Sprintf("mark-%03d-%s.pb.gz", s.marks, sanitize(label))))
-	s.line(&m, label)
 	return m.HeapAlloc
+}
+
+// column makes label safe for a tab-separated line: tab, CR and LF become
+// a space.
+func column(label string) string {
+	return strings.Map(func(r rune) rune {
+		if r == '\t' || r == '\r' || r == '\n' {
+			return ' '
+		}
+		return r
+	}, label)
 }
 
 // sanitize maps every rune outside [A-Za-z0-9._-] to '_'.
@@ -192,6 +216,9 @@ func (s *Sampler) Stop() error {
 
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	var m runtime.MemStats
+	runtime.ReadMemStats(&m)
+	s.line(time.Since(s.start), &m, "")
 	s.fail(s.profile("final.pb.gz"))
 	s.fail(s.series.Close())
 	return s.err

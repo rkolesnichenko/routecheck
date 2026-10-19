@@ -5,6 +5,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -170,5 +171,69 @@ func TestNotInCommand(t *testing.T) {
 		if strings.HasSuffix(strings.TrimSpace(l), "/internal/memprof") {
 			t.Errorf("cmd/routecheck depends on %s", l)
 		}
+	}
+}
+
+func TestSeriesOrderAndMarks(t *testing.T) {
+	defer release()
+	dir := filepath.Join(t.TempDir(), "prof")
+	s, err := Start(dir, time.Millisecond)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for i := 0; i < 5; i++ {
+		hold(1 << 20)
+		s.Mark("m\t" + strconv.Itoa(i) + "\nx")
+		time.Sleep(3 * time.Millisecond)
+	}
+	if err := s.Stop(); err != nil {
+		t.Fatal(err)
+	}
+	lines := readLines(t, filepath.Join(dir, "series.tsv"))[1:]
+	var prevT, prevGC, marks int64
+	for _, l := range lines {
+		f := strings.Split(l, "\t")
+		if len(f) != 7 {
+			t.Fatalf("line %q has %d columns, want 7", l, len(f))
+		}
+		ms, _ := strconv.ParseInt(f[0], 10, 64)
+		gc, _ := strconv.ParseInt(f[5], 10, 64)
+		if ms < prevT {
+			t.Errorf("t_ms went back: %d after %d", ms, prevT)
+		}
+		if f[6] != "" {
+			marks++
+			if gc < prevGC {
+				t.Errorf("mark line num_gc %d below the previous line's %d", gc, prevGC)
+			}
+		}
+		prevT, prevGC = ms, gc
+	}
+	if marks != 5 {
+		t.Errorf("%d mark lines, want 5", marks)
+	}
+}
+
+func TestTmpFilesAndStart(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "prof")
+	s, err := Start(dir, 5*time.Millisecond)
+	if err != nil {
+		t.Fatal(err)
+	}
+	s.Mark("x")
+	time.Sleep(20 * time.Millisecond)
+	if err := s.Stop(); err != nil {
+		t.Fatal(err)
+	}
+	tmp, _ := filepath.Glob(filepath.Join(dir, "*.tmp"))
+	if len(tmp) != 0 {
+		t.Errorf("leftover tmp files: %v", tmp)
+	}
+	data, err := os.ReadFile(filepath.Join(dir, "start.txt"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := time.Parse(time.RFC3339Nano, strings.TrimSpace(string(data))); err != nil {
+		t.Errorf("start.txt %q: %v", data, err)
 	}
 }
