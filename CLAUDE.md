@@ -202,6 +202,12 @@ Packages, imports strictly downward:
   sources are present (`-dump`: loaded; `-irrd`: each probed alone with `!g`, a refusal is absent, any other
   error exit 3); none present turns the marking off. Once on, a verified lookup error fails the run like
   `RouteObj`'s. The stderr note is printed after Check succeeds; scripts/release.sh pins its "none" form.
+- **R29. Reports are handed over, not kept.** `Checker.CheckEach` hands each finished report to the caller and keeps
+  no reference to it. `Check` is CheckEach plus collecting. The command (`internal/cli`) keeps only each report's
+  rendered output and a few flags, and writes stdout only once the check has succeeded, so a failed run still has
+  empty stdout and no route-object note. The real-data test spools each pair's lines to `.pair-<i>.*` files under
+  OUT, appended only for a checked pair. The finalizer tests (`TestCheckEachReleasesReports`,
+  `TestOutputKeepsNoReport`) hold that reports are released during the run.
 - **AnySets.** `Verdict.AnySets` is, on an Accepted verdict only, the canonical names (sorted,
   deduplicated) of the sets reaching AS-ANY named by the AS-path tests, either polarity, of the
   conjunct that accepted the route: per conjunct, not per clause. It is nil otherwise, and always

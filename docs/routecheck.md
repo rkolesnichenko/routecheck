@@ -651,6 +651,13 @@ Both spellings of 0xFFFFFF03 are read, in any case:
     - R and V ran the other 59 pairs (peak 6,202 and 5,046 MB; A peaked at
       7,148 MB). Pair 2's routes are "no verdict" in both comparisons, and the
       shares below leave them out.
+    - Since then (v0.6.0, reports handed over as they are built), pair 2 alone
+      completes in R and in V: peak 5,337 and 4,526 MB (`.data/stream-R2.log`,
+      `.data/stream-V2.log`). The memory profile found the cause: in R and V,
+      the 21 AS-SEABONE reports that are over the limit in A fit under it, and
+      each kept its expansion until the check ended (design
+      `docs/superpowers/specs/2026-10-19-memory-profile-design.md`, addendum).
+      The shares below still leave pair 2 out; redoing them is a follow-up.
   - **Route-object answers** (`.data/provenance-AR.log`):
     - Over the routes answered in both runs, 1,660,441 of the 4,549,769 "yes"
       answers (36.50%) become "no" without the unverified route objects: they
@@ -695,8 +702,7 @@ Both spellings of 0xFFFFFF03 are read, in any case:
     - So the shares describe these 59 pairs, mostly three of them, not a
       typical pair.
   - **Not measured:**
-    - pair 2, and why it needs more memory without the unverified route
-      objects;
+    - pair 2's shares (it now fits, see above; the comparison was not redone);
     - whether any unverified object is right;
     - how JPIRR or any other mirror verifies.
 - **The marking on the command run.** The command on AS9086 from AS6762, every
@@ -718,6 +724,26 @@ Both spellings of 0xFFFFFF03 are read, in any case:
   - With `-irrd`, the marking asks at most one extra query per (origin,
     family) whose answer is "yes" (the verified sources are asked only then),
     plus one probe per verified source at startup.
+- **Memory since v0.6.0.** `Checker.CheckEach` hands each report over as it is
+  built, and the command and the real-data test let it go (design
+  `docs/superpowers/specs/2026-10-19-stream-reports-design.md`). Measured
+  2026-10-19 under the guard (MB = MiB), with output unchanged:
+  - The command on AS9086 from AS6762, every registry, `-max-prefixes 2097152`:
+    5,959 MB (`.data/stream-cli-2097152.log`), against 6,421 MB in v0.5.0. Its
+    output equals v0.5.0's.
+  - The real-data test's 60 pairs with `ROUTECHECK_REALDATA_OUT`: 6,635 MB
+    (`.data/stream-A.log`), against 7,148 MB. Its TOTALS and every output file
+    equal the earlier run's.
+  - Pair 2 alone in runs R and V: completes, 5,337 and 4,526 MB.
+  - What remains is mostly the Go heap's room between collections. Profiled
+    (`.data/memprof2/`), pair 2's live heap now peaks at 2,212 MB (4,232 MB
+    before) while its in-use heap reaches 4,359 MB. The command's live heap at
+    its last profiled collection is 2,498 MB, mostly the registry, the
+    route-object lookups and the observations, while its in-use heap swings
+    between about 2.8 and 5.2 GB.
+  - The design's targets for the command (5,120 MB) and the 60 pairs
+    (6,144 MB) are not met. A lower GC target, or a smaller registry in rpsl,
+    is what would reach them; neither is built.
 - **Out of scope** (spec §12):
   - ASPA path verification;
   - BMP and RIS Live;
