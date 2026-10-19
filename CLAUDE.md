@@ -333,6 +333,9 @@ Packages, imports strictly downward:
       at most 5,000 queries in all. Never run it without the user's go-ahead.
     - `TestMissingSetsClassify` (`_DIR`, `_TRACKED`, `_SUBSET`) is offline. `_SUBSET` takes pair ids
       (`AS<L>-AS<X>`); a malformed one fails, and each id's count of tracked routes is logged.
+      It streams `tracked.tsv` (equal set lists share one slice). `_RIR_ONLY=1` renames the two "real"
+      classes for run R; `_A_ROUTES` and `_R_ROUTES` (`routes.tsv.gz`, both or neither) add splits by A's
+      outcome and by the route-object answer A to R; `_TAKE_NOT_FOUND` (set names) adds a sensitivity table.
     - `.data/missing-sets-rounds.zsh` drives the rounds.
   - The registry-provenance measurement (CHANGELOG, "Measured, registry provenance"):
     - `ROUTECHECK_REALDATA_ROUTES_FROM` (registry names) keeps route and route6 objects only from those
