@@ -26,7 +26,7 @@ router the command line did not give) makes the route Undecided, with the
 reason.
 
 Status: pre-v1 (0.x). The API may still change between minor versions. The
-latest release is v0.5.0; see [CHANGELOG.md](CHANGELOG.md).
+latest release is v0.6.0; see [CHANGELOG.md](CHANGELOG.md).
 
 ## Install
 
