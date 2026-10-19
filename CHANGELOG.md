@@ -8,6 +8,63 @@ a minor version may change the API.
 
 ## [Unreleased]
 
+### Added (tests only)
+
+- The opt-in real-data test writes its missing sets and its rejected routes (`ROUTECHECK_REALDATA_OUT`), tracks a
+  given list of routes into a later run (`ROUTECHECK_REALDATA_TRACK`), loads one extra dump last in precedence
+  (`ROUTECHECK_REALDATA_EXTRA`) and checks only some of its pairs (`ROUTECHECK_REALDATA_PAIRS`).
+- `TestMissingSetsLookup` (opt-in, live, `ROUTECHECK_MISSINGSETS_LIVE=1`) classifies missing sets through
+  whois.radb.net and RIPE's version history, cached and capped at 5,000 queries. `TestMissingSetsClassify`
+  classifies the tracked routes. The command, the API and go.mod do not change.
+
+### Measured, missing sets
+
+The runs of 2026-10-19, on the same pinned 2026-10-18 files, every registry, `ROUTECHECK_REALDATA_MAX_PREFIXES=2097152`,
+under the memory guard (8 GB cap, normal priority, `GOMAXPROCS=4`, `GOMEMLIMIT=6GiB`, one run at a time), on the
+machine of `.data/max-prefixes-machine.log`. The design is `docs/superpowers/specs/2026-10-19-missing-sets-design.md`.
+The logs are kept by the maintainer and are not committed.
+
+- Run A (`.data/missing-sets-A.log`): PASS, 60 of 60 pairs, every TOTALS line equal to
+  `.data/realdata-max-prefixes.log`'s. It listed 106,529 routes rejected with a missing set in a failing clause
+  (106,526 export + 3 import) and 809 missing sets (808 export + 1 import). Peak RSS 6,991 MB (6,565 MB before
+  the new outputs), 280 s.
+- Lookup (`.data/missing-sets-round1-lookup.log` to `-round4-lookup.log`, `.data/missing-sets-rounds.log`):
+  - 4 rounds, with 809, 22, 10, 1 and 0 new names.
+  - The 842 sets: 407 deleted, 380 not found, 54 elsewhere, 1 inconclusive, 0 held but refused
+    (407 + 380 + 54 + 1 = 842).
+  - Of the 54 found elsewhere, 51 are in a source routecheck does not load (copies: LEVEL3 33, IDNIC 17,
+    RIPE-NONAUTH 1) and 3 in a loaded registry but not in its dump (copies: RIPE 2, ARIN 1). The copies are dated
+    2014-03-20 to 2026-10-18: none is newer than the dumps, and none is undated.
+  - 110 of the 407 deletions are from 2026, none after 2026-10-18.
+  - 1,641 queries of the 5,000 cap (10 of them a five-set smoke run first, `.data/missing-sets-smoke.log`); none
+    failed, and no service was stopped.
+  - The one inconclusive set is AS-CONCERTAP. RIPE's history answers it with an empty table and no deletion line.
+    RIPE holds no object of that name (one query by hand, 2026-10-19T10:22:37Z, `.data/missing-sets/concertap-ripe-obj.txt`).
+- Runs B1 to B4 (`.data/missing-sets-round1-B.log` to `-round4-B.log`): PASS, 60 of 60, peak RSS 7,382, 7,229,
+  7,456 and 7,480 MB.
+  - B4 loaded the 54 found objects (sources IDNIC 17, LEVEL3 33, RIPE-NONAUTH 1, beside the loaded ones).
+  - Every count in its TOTALS equals run A's. Only the "reached" figures of the 24 unevaluable reports moved
+    (AS-SEABONE 2,097,154 to 2,097,153; AS-UAIX 2,100,534 to 2,100,684; AS-DECIX 2,097,192 to 2,097,225).
+  - All 106,529 tracked routes are still rejected. 59,403 of them had a found set in a failing clause, and each of
+    those routes' lists of missing sets got shorter.
+- Classification (`.data/missing-sets-classify.log`):
+
+  | | gap | real | real for any IRR filter | unknown | sum |
+  |---|---|---|---|---|---|
+  | all tracked routes | 0 | 0 | 72,561 | 33,968 | 106,529 |
+  | export | 0 | 0 | 72,558 | 33,968 | 106,526 |
+  | import | 0 | 0 | 3 | 0 | 3 |
+  | the 59,395 0.4.0 newly decided (10 pairs) | 0 | 0 | 25,427 | 33,968 | 59,395 |
+
+  - All 33,968 unknown routes are AS9086-AS6762's ipv6 export, for one reason: an inconclusive set (AS-CONCERTAP).
+  - Hand-checked:
+    - AS20771 to AS174, 37.143.152.0/22 is "real for any IRR filter": its 247 missing sets in B4 are 176 deleted
+      and 71 not found, and the first three answer "no entries" at both services.
+    - AS6762 to AS1257, 2803:57c0:ff00::/48 is "unknown": its sets are 370 deleted, 356 not found and AS-CONCERTAP.
+- Not measured:
+  - route objects that live only in IDNIC, RIPE-NONAUTH or LEVEL3;
+  - any sample other than the 60 pairs.
+
 ## [0.4.0] - 2026-10-19
 
 ### Added

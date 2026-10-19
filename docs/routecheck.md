@@ -395,8 +395,12 @@ Both spellings of 0xFFFFFF03 are read, in any case:
   47,522 to 47,317 (`.data/same-pairs.log`). What remains mostly names sets no
   loaded registry holds: AS-ISPSERVICES, AS-STEFFANN-IPV4, AS-STEFFANN-IPV6 and
   AS-TELFORT, at 46,052 routes each (all one pair's: AS200184 from AS1136), are in none of the 32 dumps
-  (`.data/every-registry-checks.log`). For those, load a source that holds them, if any does (none of the 32 dumps does),
-  or use `-irrd` with a server that does. What loading more registries changes
+  (`.data/every-registry-checks.log`). No source holds them: RIPE's history
+  says each was deleted (AS-ISPSERVICES on 2019-07-03, AS-STEFFANN-IPV4 and
+  AS-STEFFANN-IPV6 on 2024-02-09, AS-TELFORT on 2025-04-02), and none of
+  whois.radb.net's 19 sources has them (2026-10-19,
+  `.data/missing-sets-round1-lookup.log`; see "The rejections against missing
+  sets" below). What loading more registries changes
   most is the route-object answer: L's observations with a route-object
   answer went from 528,974 to 1,568,538 of 2,108,128 on the same pairs (the
   denominator is yes + no; 366 more are unknown). How much of that rests on
@@ -480,8 +484,65 @@ Both spellings of 0xFFFFFF03 are read, in any case:
     limit at the default.
   - **Not measured:** limits between 2,097,152 and 4,194,304; anything above
     4,194,304, the guard's cap; how large `AS-SEABONE`'s full expansion is (it is
-    above 2,097,154); memory on a machine without the 8 GB cap; which of the newly
-    rejected routes would be accepted if the missing sets existed.
+    above 2,097,154); memory on a machine without the 8 GB cap. Whether the newly
+    rejected routes would be accepted if the missing sets existed is measured in
+    the next bullet.
+- **The rejections against missing sets are what any IRR-built filter does.**
+  Measured on 2026-10-19 at `-max-prefixes 2097152`, every registry, on the
+  2026-10-18 dumps (design: `docs/superpowers/specs/2026-10-19-missing-sets-design.md`).
+  - **Method:** run A (`.data/missing-sets-A.log`) listed every route rejected
+    with a missing set in a failing clause: 106,526 export and 3 import. Each
+    missing set was looked up live. Then run B was the same test with the sets
+    found elsewhere added as one extra dump, last in precedence. This went round
+    by round until B named no set not yet looked up: 4 rounds, with 809, 22, 10,
+    1 and 0 new names (`.data/missing-sets-rounds.log`).
+  - **The 842 sets:** 407 deleted, 380 not found, 54 found elsewhere, 1
+    inconclusive and 0 held but refused.
+    - **Deleted:** RIPE's history gives the date; 110 of them were deleted in
+      2026, none after 2026-10-18.
+    - **Not found:** "no entries" from all 19 of whois.radb.net's sources and
+      from RIPE's history.
+    - **Found elsewhere:** 51 are in a source routecheck does not load (copies:
+      LEVEL3 33, IDNIC 17, RIPE-NONAUTH 1), and 3 in a loaded registry but not
+      in its dump (copies: RIPE 2, ARIN 1). The copies are dated 2014-03-20 to
+      2026-10-18, so none is newer than the dumps, and none is undated.
+    - **Queries:** 1,641 of the 5,000 cap, to whois.radb.net and
+      whois.ripe.net, one at a time; none failed, and no service was stopped.
+  - **Run B changed nothing** (`.data/missing-sets-round4-B.log`, peak RSS
+    7,480 MB; run A 6,991 MB).
+    - It loaded the 54 objects. 59,403 of the listed routes had a found set in a
+      failing clause, and each of their lists of missing sets got shorter.
+    - Yet every count in B's TOTALS equals A's: 106,712 export rejections, and
+      the same 24 unevaluable reports holding the same routes. Only the
+      "reached" figures of those 24 moved: AS-SEABONE's 2,097,154 became
+      2,097,153, AS-UAIX's 2,100,534 became 2,100,684, and AS-DECIX's 2,097,192
+      became 2,097,225.
+  - **The listed routes** (`.data/missing-sets-classify.log`):
+
+    | class | all 106,529 | the 59,395 0.4.0 newly decided |
+    |---|---|---|
+    | gap (accepted with the found sets) | 0 | 0 |
+    | real (rejected, no missing set left) | 0 | 0 |
+    | real for any IRR filter | 72,561 | 25,427 |
+    | unknown | 33,968 | 33,968 |
+
+    - The sums are 72,561 + 33,968 = 106,529 and 25,427 + 33,968 = 59,395.
+    - Every unknown route is in pair 2's ipv6 export (AS6762 toward its
+      neighbours, against AS-SEABONE-V6), for one reason: AS-CONCERTAP is
+      inconclusive.
+    - RIPE's history for AS-CONCERTAP is an empty table with no deletion line,
+      so it is not "deleted". RIPE holds no object of that name (one query by
+      hand, 2026-10-19T10:22:37Z), and neither does any of whois.radb.net's 19
+      sources.
+  - **What this means:** on these 60 pairs, no rejection against a missing set
+    comes from a registry routecheck failed to load. The filters name sets that
+    exist nowhere, most of them deleted, so a filter built from the IRR (bgpq4,
+    rpslq) rejects the same routes. Whether the policy's author meant to accept
+    them cannot be read from the data.
+  - **Not measured:**
+    - route objects that live only in IDNIC, RIPE-NONAUTH or LEVEL3 (one could
+      cover a route counted "real for any IRR filter");
+    - any sample other than these 60 pairs.
 - **Out of scope** (spec §12):
   - ASPA path verification;
   - BMP and RIS Live;

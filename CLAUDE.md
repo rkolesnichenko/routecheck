@@ -285,6 +285,19 @@ Packages, imports strictly downward:
     the RIBs (all 16: 35.871 s, peak RSS 3,534 MB, `.data/load-all.log`).
   - `ROUTECHECK_REALDATA_SAMPLE`, `_REGEXP_SAMPLE` and `_SEED` choose the sample.
   - `ROUTECHECK_CHECK_TIMEOUT` (default 600s) is the per-pair timeout.
+  - `ROUTECHECK_REALDATA_OUT=DIR` writes `missing-sets.tsv` and `rejected-missing.tsv` (every route
+    rejected with a missing set). With `ROUTECHECK_REALDATA_TRACK=FILE` (a `rejected-missing.tsv`) it
+    also writes `tracked.tsv`: this run's verdict for each of FILE's routes, `none` when the pair was not
+    checked. `ROUTECHECK_REALDATA_EXTRA=FILE` loads one more RPSL dump, last in precedence, never
+    feeding the pair selection. `ROUTECHECK_REALDATA_PAIRS` (such as `1-20,31`) checks only those pairs.
+    At 2,097,152 with OUT it peaked at 6,991 MB, and with an extra dump of 54 sets at 7,480 MB
+    (`.data/missing-sets-A.log`, `.data/missing-sets-round4-B.log`): ask before running it.
+  - The missing-sets measurement (CHANGELOG, "Measured, missing sets"):
+    - `TestMissingSetsLookup` is live and opt-in (`ROUTECHECK_MISSINGSETS_LIVE=1`, `_DIR`, `_IN`, plus
+      `ROUTECHECK_REALDATA`). It queries whois.radb.net and whois.ripe.net, one query at a time, cached,
+      at most 5,000 queries in all. Never run it without the user's go-ahead.
+    - `TestMissingSetsClassify` (`_DIR`, `_TRACKED`, `_SUBSET`) is offline.
+    - `.data/missing-sets-rounds.zsh` drives the rounds.
   - The benchmarks (`BenchmarkDecide`, `BenchmarkCollector`; `ROUTECHECK_BENCH_LOCAL`, `_PEER`,
     `_AF` and `_ROUTES`) use the same data and load every pinned registry too. Their commands
     are in `bench_test.go`. Set `ROUTECHECK_REALDATA_REGISTRIES=ripe` to compare with 0.2.0's
