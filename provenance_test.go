@@ -223,6 +223,149 @@ func (r *pairReader) next1() (string, map[string]provRoute, error) {
 	}
 }
 
+// pairSource is what zipPairs reads a run's pairs from: a pairReader (one
+// stream of shards) or a runReader (shards that interleave).
+type pairSource interface {
+	Next() (pair string, routes map[string]provRoute, err error)
+	Close()
+}
+
+// runReader reads a run whose shards may interleave: each shard has the
+// run's pairs.tsv order, and checked some of its pairs. Next returns every
+// pair the run checked, in that order, each from the shard that checked it
+// (zero routes for a checked pair its shard wrote no lines for).
+type runReader struct {
+	order  []string
+	pos    map[string]int
+	idx    int // index in order of the next pair to return
+	shards []*runShard
+	err    error // sticky
+}
+
+type runShard struct {
+	routes  string            // the routes.tsv.gz path, for errors
+	status  map[string]string // this shard's own pairs.tsv
+	r       *pairReader
+	peeked  bool
+	pPair   string
+	pRoutes map[string]provRoute
+	eof     bool
+}
+
+// newRunReader opens the shards in dirs (each holding pairs.tsv and
+// routes.tsv.gz). Every shard must list order in pairs.tsv, and no pair may be
+// checked in two shards.
+func newRunReader(dirs []string, order []string) (*runReader, error) {
+	if len(dirs) == 0 {
+		return nil, errors.New("no shard")
+	}
+	var statusFiles []string
+	for _, d := range dirs {
+		statusFiles = append(statusFiles, filepath.Join(d, "pairs.tsv"))
+	}
+	if _, runOrder, err := readPairStatus(statusFiles); err != nil {
+		return nil, err
+	} else if !slices.Equal(runOrder, order) {
+		return nil, errors.New("the run's pairs.tsv lists other pairs, or another order, than order")
+	}
+	rr := &runReader{order: order, pos: make(map[string]int, len(order))}
+	for i, p := range order {
+		rr.pos[p] = i
+	}
+	for _, d := range dirs {
+		status, _, err := readPairStatus([]string{filepath.Join(d, "pairs.tsv")})
+		if err != nil {
+			rr.Close()
+			return nil, err
+		}
+		file := filepath.Join(d, "routes.tsv.gz")
+		pr, err := newPairReader([]string{file})
+		if err != nil {
+			rr.Close()
+			return nil, err
+		}
+		rr.shards = append(rr.shards, &runShard{routes: file, status: status, r: pr})
+	}
+	return rr, nil
+}
+
+// Close closes every shard.
+func (rr *runReader) Close() {
+	for _, s := range rr.shards {
+		s.r.Close()
+	}
+}
+
+// fill makes s hold its next pair, if it has one.
+func (rr *runReader) fill(s *runShard) error {
+	if s.peeked || s.eof {
+		return nil
+	}
+	p, routes, err := s.r.Next()
+	if errors.Is(err, io.EOF) {
+		s.eof = true
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	if _, ok := rr.pos[p]; !ok {
+		return fmt.Errorf("%s: pair %s has routes but is not in pairs.tsv", s.routes, p)
+	}
+	if s.status[p] != "checked" {
+		return fmt.Errorf("%s: pair %s has routes but its status in this shard is %q", s.routes, p, s.status[p])
+	}
+	s.peeked, s.pPair, s.pRoutes = true, p, routes
+	return nil
+}
+
+// Next returns the next checked pair of order and its routes, or io.EOF after
+// the last. An error is sticky.
+func (rr *runReader) Next() (string, map[string]provRoute, error) {
+	if rr.err != nil {
+		return "", nil, rr.err
+	}
+	p, routes, err := rr.next1()
+	if err != nil {
+		rr.err = err
+	}
+	return p, routes, err
+}
+
+func (rr *runReader) next1() (string, map[string]provRoute, error) {
+	for ; rr.idx < len(rr.order); rr.idx++ {
+		p := rr.order[rr.idx]
+		for _, s := range rr.shards {
+			if s.status[p] != "checked" {
+				continue
+			}
+			if err := rr.fill(s); err != nil {
+				return "", nil, err
+			}
+			rr.idx++
+			if s.peeked && s.pPair == p {
+				routes := s.pRoutes
+				s.peeked, s.pPair, s.pRoutes = false, "", nil
+				return p, routes, nil
+			}
+			if s.peeked && rr.pos[s.pPair] < rr.idx {
+				return "", nil, fmt.Errorf("%s: pair %s comes after %s, against the pairs.tsv order", s.routes, s.pPair, p)
+			}
+			return p, map[string]provRoute{}, nil
+		}
+	}
+	// Every pair is returned: a shard with more pairs has them out of order.
+	for _, s := range rr.shards {
+		if err := rr.fill(s); err != nil {
+			return "", nil, err
+		}
+		if s.peeked {
+			return "", nil, fmt.Errorf("%s: pair %s comes after the last pair, against the pairs.tsv order", s.routes, s.pPair)
+		}
+	}
+	return "", nil, io.EOF
+}
+
 // provStatuses is the set of pairs.tsv statuses.
 var provStatuses = []string{"checked", "timeout", "error", "not selected"}
 
@@ -287,14 +430,14 @@ func readPairStatus(files []string) (map[string]string, []string, error) {
 // held. A pair with routes that order does not hold, or holds earlier than the
 // pair before it, or whose status in that run is not "checked", is an error
 // naming it.
-func zipPairs(order []string, a, b *pairReader, aStatus, bStatus map[string]string, fn func(pair string, am, bm map[string]provRoute) error) error {
+func zipPairs(order []string, a, b pairSource, aStatus, bStatus map[string]string, fn func(pair string, am, bm map[string]provRoute) error) error {
 	pos := make(map[string]int, len(order))
 	for i, p := range order {
 		pos[p] = i
 	}
 	type cursor struct {
 		run    string
-		r      *pairReader
+		r      pairSource
 		status map[string]string
 		pair   string
 		routes map[string]provRoute
@@ -842,7 +985,8 @@ func provSplit(s string) []string {
 // TestProvenanceCompare compares two real-data runs route by route: run A
 // (ROUTECHECK_PROVENANCE_A) and the other run (ROUTECHECK_PROVENANCE_B,
 // labelled R or V by ROUTECHECK_PROVENANCE_LABEL), each a comma-separated
-// list of ROUTECHECK_REALDATA_OUT directories, its shards in order. The pairs
+// list of ROUTECHECK_REALDATA_OUT directories (its shards; they may interleave:
+// each pair is read from the shard that checked it). The pairs
 // not in ROUTECHECK_PROVENANCE_EXCLUDE (space- or comma-separated pair ids)
 // are the self-check's: A's import route-object "yes" there must be
 // 1,568,538. It writes nothing; the tables are its log.
@@ -883,12 +1027,12 @@ func TestProvenanceCompare(t *testing.T) {
 	}
 	t.Logf("%d pairs; the self-check takes the %d not excluded (%d excluded)", len(order), len(order)-len(exclude), len(exclude))
 
-	ar, err := newPairReader(files(aDirs, "routes.tsv.gz"))
+	ar, err := newRunReader(aDirs, order)
 	if err != nil {
 		t.Fatalf("A: %v", err)
 	}
 	defer ar.Close()
-	br, err := newPairReader(files(bDirs, "routes.tsv.gz"))
+	br, err := newRunReader(bDirs, order)
 	if err != nil {
 		t.Fatalf("%s: %v", label, err)
 	}
@@ -1024,6 +1168,159 @@ func TestPairReaderOrder(t *testing.T) {
 	}
 	if _, err := newPairReader([]string{filepath.Join(dir, "absent.gz")}); err == nil {
 		t.Error("a missing file: no error")
+	}
+}
+
+// writeProvShard writes a shard (pairs.tsv and routes.tsv.gz) into a new
+// directory and returns it. statuses is pair, status in order.
+func writeProvShard(t *testing.T, order []string, statuses map[string]string, lines ...string) string {
+	t.Helper()
+	dir := t.TempDir()
+	var b strings.Builder
+	for _, p := range order {
+		fmt.Fprintf(&b, "%s\t%s\n", p, statuses[p])
+	}
+	if err := os.WriteFile(filepath.Join(dir, "pairs.tsv"), []byte(b.String()), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	writeProvRoutes(t, dir, "routes.tsv.gz", lines...)
+	return dir
+}
+
+func TestRunReaderInterleaved(t *testing.T) {
+	const p1, p2, p3 = "AS1-AS2", "AS3-AS4", "AS5-AS6"
+	order := []string{p1, p2, p3}
+	l := []string{provTestLine(p1, "import", 1), provTestLine(p1, "export", 1), provTestLine(p2, "import", 1), provTestLine(p3, "import", 1)}
+	s1 := writeProvShard(t, order, map[string]string{p1: "checked", p2: "not selected", p3: "checked"}, l[0], l[1], l[3])
+	s2 := writeProvShard(t, order, map[string]string{p1: "not selected", p2: "checked", p3: "not selected"}, l[2])
+	a := writeProvShard(t, order, map[string]string{p1: "checked", p2: "checked", p3: "checked"}, l...)
+	rr, err := newRunReader([]string{s1, s2}, order)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rr.Close()
+	var got []string
+	for {
+		p, routes, err := rr.Next()
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			t.Fatal(err)
+		}
+		got = append(got, fmt.Sprintf("%s %d", p, len(routes)))
+	}
+	if want := "[AS1-AS2 2 AS3-AS4 1 AS5-AS6 1]"; fmt.Sprint(got) != want {
+		t.Errorf("read %v, want %s", got, want)
+	}
+
+	rr2, err := newRunReader([]string{s1, s2}, order)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rr2.Close()
+	ar, err := newRunReader([]string{a}, order)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer ar.Close()
+	checked := map[string]string{p1: "checked", p2: "checked", p3: "checked"}
+	var zipped []string
+	err = zipPairs(order, ar, rr2, checked, checked, func(p string, am, bm map[string]provRoute) error {
+		zipped = append(zipped, fmt.Sprintf("%s %d %d", p, len(am), len(bm)))
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := "[AS1-AS2 2 2 AS3-AS4 1 1 AS5-AS6 1 1]"; fmt.Sprint(zipped) != want {
+		t.Errorf("zip gave %v, want %s", zipped, want)
+	}
+}
+
+// A checked pair with no lines in the middle of a run still hands zipPairs an
+// empty, non-nil map: zipPairs advances a run's reader only after a pair with a
+// non-nil map, so a nil one would stall the run and drop every later pair's
+// routes.
+func TestZipEmptyPairInMiddle(t *testing.T) {
+	const p1, p2, p3, p4 = "AS1-AS2", "AS3-AS4", "AS5-AS6", "AS7-AS8"
+	order := []string{p1, p2, p3, p4}
+	l := []string{
+		provTestLine(p1, "import", 1), provTestLine(p3, "import", 1), provTestLine(p3, "export", 1),
+		provTestLine(p4, "import", 1),
+	}
+	allChecked := map[string]string{p1: "checked", p2: "checked", p3: "checked", p4: "checked"}
+	a := writeProvShard(t, order, allChecked, l...)
+	s1 := writeProvShard(t, order, map[string]string{p1: "checked", p2: "not selected", p3: "checked", p4: "not selected"}, l[0], l[1], l[2])
+	s2 := writeProvShard(t, order, map[string]string{p1: "not selected", p2: "checked", p3: "not selected", p4: "checked"}, l[3])
+	ar, err := newRunReader([]string{a}, order)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer ar.Close()
+	br, err := newRunReader([]string{s1, s2}, order)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer br.Close()
+	var got []string
+	err = zipPairs(order, ar, br, allChecked, allChecked, func(p string, am, bm map[string]provRoute) error {
+		got = append(got, fmt.Sprintf("%s %d %d", p, len(am), len(bm)))
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := "[AS1-AS2 1 1 AS3-AS4 0 0 AS5-AS6 2 2 AS7-AS8 1 1]"; fmt.Sprint(got) != want {
+		t.Errorf("zip gave %v, want %s", got, want)
+	}
+}
+
+func TestRunReaderStrayPair(t *testing.T) {
+	const p1, p2 = "AS1-AS2", "AS3-AS4"
+	order := []string{p1, p2}
+	s1 := writeProvShard(t, order, map[string]string{p1: "checked", p2: "not selected"}, provTestLine(p1, "import", 1))
+	s2 := writeProvShard(t, order, map[string]string{p1: "not selected", p2: "checked"}, provTestLine(p1, "import", 1), provTestLine(p2, "import", 1))
+	rr, err := newRunReader([]string{s1, s2}, order)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rr.Close()
+	var last error
+	for {
+		_, _, last = rr.Next()
+		if last != nil {
+			break
+		}
+	}
+	if last == io.EOF || !strings.Contains(last.Error(), filepath.Join(s2, "routes.tsv.gz")) || !strings.Contains(last.Error(), p1) {
+		t.Errorf("ended with %v, want an error naming shard 2 and %s", last, p1)
+	}
+}
+
+func TestRunReaderEmptyPair(t *testing.T) {
+	const p1, p2 = "AS1-AS2", "AS3-AS4"
+	order := []string{p1, p2}
+	s1 := writeProvShard(t, order, map[string]string{p1: "checked", p2: "not selected"}, provTestLine(p1, "import", 1))
+	s2 := writeProvShard(t, order, map[string]string{p1: "not selected", p2: "checked"})
+	rr, err := newRunReader([]string{s1, s2}, order)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rr.Close()
+	var got []string
+	for {
+		p, routes, err := rr.Next()
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			t.Fatal(err)
+		}
+		got = append(got, fmt.Sprintf("%s %d", p, len(routes)))
+	}
+	if want := "[AS1-AS2 1 AS3-AS4 0]"; fmt.Sprint(got) != want {
+		t.Errorf("read %v, want %s", got, want)
 	}
 }
 

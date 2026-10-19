@@ -638,72 +638,122 @@ Both spellings of 0xFFFFFF03 are read, in any case:
       1,785,072 route objects, 23,655 of them `member-of:` claimants
       (`.data/provenance-R1.log`);
     - run V, the RIRs alone (`.data/provenance-V1.log`).
-  - **Pair 2 (AS9086 from AS6762, 2,607,757 routes in A) could not be measured.**
-    It went over the 8 GB memory cap in R and in V. The guard stopped the
-    whole R run on pair 2, after pair 1, at 8,224 MB
-    (`.data/provenance-R-stopped.log`); pair 2 alone was stopped at 8,255 MB
-    in R and 8,249 MB in V (`.data/provenance-R2.log`, `-V2.log`).
-    - Superseded by the measured cause below ("Since the streaming change"): this bullet was a guess. With
-      fewer route objects, its AS-SEABONE expansions may come in under 2,097,152 prefixes, and deciding against
-      them may cost more memory than giving up (the design's settled point 1 foresaw this). Both runs were stopped
-      before pair 2 logged a report, and no log gives AS-SEABONE's size in R or V.
-    - R and V ran the other 59 pairs (peak 6,202 and 5,046 MB; A peaked at
-      7,148 MB). Pair 2's routes are "no verdict" in both comparisons, and the
-      shares below leave them out.
-    - Since the streaming change (CHANGELOG, [Unreleased]: reports handed over as they are built, and the test
-      spooling its rejected lines), pair 2 alone completes in R and in V: peak 5,337 and 4,526 MB
-      (`.data/stream-R2.log`, `.data/stream-V2.log`). The memory profile found the cause: in R and V, the 21
-      AS-SEABONE reports that are over the limit in A fit under it, and each was kept until the check ended; the
-      test also held its rejected lines (design
-      `docs/superpowers/specs/2026-10-19-memory-profile-design.md`, addendum).
-      The shares below still leave pair 2 out; redoing them is a follow-up.
-  - **Route-object answers** (`.data/provenance-AR.log`):
-    - Over the routes answered in both runs, 1,660,441 of the 4,549,769 "yes"
-      answers (36.50%) become "no" without the unverified route objects: they
-      rest on those alone. That is 764,122 of 2,102,844 on import (36.34%) and
-      896,319 of 2,446,925 on export (36.63%).
+  - **Pair 2 (AS9086 from AS6762, 2,607,757 routes in A).** It went over the
+    8 GB cap in R and in V when first measured (stopped at 8,255 and 8,249 MB,
+    `.data/provenance-R2.log`, `-V2.log`), so the figures were first published
+    without it ("without pair 2" below).
+    - Since the streaming change (CHANGELOG 0.6.0), pair 2 alone completes in R
+      and V: 5,337 and 4,526 MB (`.data/stream-R2.log`, `-V2.log`). The cause,
+      measured by the memory profile, was 21 AS-SEABONE reports that are over
+      the limit in A and fit under it in R and V, each kept until the check
+      ended; the test also held its rejected lines (the memory-profile
+      addendum).
+    - **The comparisons with pair 2** read R as two shards, R1 (every pair
+      but 2, made at 2d5e24a) and pair 2 alone (made at ae7d034, v0.6.0's code
+      commit), and V likewise (`.data/provenance-AR2.log`, `-AV2.log`).
+      - Mixing the two versions is sound because v0.6.0's results are
+        identical to before: its 60-pair run A's TOTALS and output files are
+        byte-identical to `.data/provenance/A`'s. That run never takes the
+        RIR-only route-object path that R uses, so it does not cover it.
+      - Pair 2's route-object "yes → no" in R (253,107 import, 394,877 export)
+        equals the v0.5.0 marking's "yes (unverified only)" for the same pair.
+        This is the independent cross-check of the RIR-only path: a different
+        code path gives the same numbers.
+      - Run first without pair 2, the extended comparer reproduces the
+        published logs exactly (`.data/provenance-AR-control.log`,
+        `-AV-control.log`).
+  - **Route-object answers**, with pair 2 (`.data/provenance-AR2.log`):
+    - Over the routes answered in both runs, 2,308,425 of the 6,400,790 "yes"
+      answers (36.06%) rest on the unverified route objects alone. That is
+      1,017,229 of 2,820,473 on import (36.07%) and 1,291,196 of 3,580,317 on
+      export (36.06%).
+    - Pair 2's own part is 647,984 of its 1,851,021 "yes" answers (35.01%).
     - No answer goes from "no" to "yes", as dropping objects cannot add one.
-    - The RPKI state of those 1,660,441 routes: 1,055,319 valid (63.56%),
-      605,079 not found, 43 invalid. "Valid" means a resource holder signed
-      that origin: most of these routes are RPKI-valid.
-    - On the 50 pairs of the earlier caveat: 551,873 of 1,568,538 "yes"
-      answers (35.18%), which is 53.09% of the rise from 528,974. Run A
-      reproduces the 1,568,538 exactly.
-  - **Verdicts:**
-    - Without the unverified route objects (A against R), 5,190 export routes
-      go from accepted to rejected. Their RPKI state is 2,888 valid, 2,288 not
-      found and 14 invalid. Nothing goes from rejected to accepted.
-    - Without anything unverified (A against V, `.data/provenance-AV.log`),
-      5,399 go from accepted to rejected (3,092 valid, 2,293 not found, 14
-      invalid). Another 439 (432 accepted, 7 rejected) have no verdict, because
-      their report loses its policy.
-    - The only other moves are limit effects: 3 routes unevaluable at
-      2,097,152 in A (2 import, 1 export) are accepted once their sets shrink.
-      Apart from those 2, no import verdict moves.
+    - The RPKI state of the 2,308,425: 1,448,598 valid (62.75%), 859,770 not
+      found, 57 invalid.
+    - Without pair 2 (as first published, `.data/provenance-AR.log`):
+      1,660,441 of 4,549,769 (36.50%); 764,122 of 2,102,844 on import (36.34%)
+      and 896,319 of 2,446,925 on export (36.63%); 1,055,319 valid (63.56%),
+      605,079 not found, 43 invalid.
+    - On the 50 pairs of the earlier caveat, which leave pair 2 out: 551,873 of
+      1,568,538 "yes" answers (35.18%), which is 53.09% of the rise from
+      528,974. Run A reproduces the 1,568,538 exactly, in every comparison.
+  - **Verdicts**, with pair 2:
+    - Without the unverified route objects (A against R): 8,883 export routes go
+      from accepted to rejected (5,552 valid, 3,317 not found, 14 invalid; 0.18%
+      of the 4,999,119 export routes). Nothing goes from rejected to accepted.
+    - Without anything unverified (A against V, `.data/provenance-AV2.log`):
+      10,604 (7,260 valid, 3,330 not found, 14 invalid; 0.21% of 4,998,680).
+      Another 439 (432 accepted, 7 rejected) have no verdict, because their
+      report loses its policy.
+    - Pair 2 adds 3,693 of the 8,883 (R) and 5,205 of the 10,604 (V).
+    - **Pair 2's 400,748 export routes that are undecided in A.** In A they are
+      unevaluable: AS-SEABONE reaches 2,097,154 prefixes, over the limit.
+      Without the unverified route objects, AS-SEABONE fits, and they are
+      decided: 186,276 accepted and 214,472 rejected in R; 176,449 and 224,299
+      in V. (The "unevaluable → accepted" cells of the pair-2 comparison are
+      186,277 and 176,450; each holds 1 limit-effect route from another pair,
+      which `.data/provenance-AR.log` and `-AV.log` show as
+      "unevaluable → accepted 1" without pair 2: 186,277 − 1 = 186,276 and
+      176,450 − 1 = 176,449.)
+      - So the limit is reached because of the unverified route objects. This
+        is a data effect that shows up through the limit, not only a limit
+        effect.
+      - Every pair-2 rejection in R and V fails against missing sets (252,133
+        in R and 263,472 in V, naming 1,276 and 1,039 distinct sets;
+        `.data/stream-R2.log`, `-V2.log`). The missing-sets lookup
+        overlaps these (`.data/stream/R2/missing-sets.tsv` and `V2/` against
+        the 842 looked up in `.data/missing-sets/lookup/sets.tsv`): 807 of R's
+        1,276 sets and 568 of V's 1,039 were among the 842 looked up; 469 and
+        471 were not. (Run A named 809 of the 842; the other 33 came from
+        later lookup rounds.)
+        - In R, each of 739 sets is named by all 252,133 pair-2 rejections.
+          All 739 were looked up: 367 deleted, 347 not found, 24 found
+          elsewhere and 1 inconclusive, AS-CONCERTAP, the set that left A's
+          33,968 rejections unknown.
+        - In V, each of 712 sets is named by all 263,472 rejections; 476 of
+          them were looked up: 315 deleted, 153 not found, 7 found elsewhere
+          and 1 inconclusive (AS-CONCERTAP).
+    - The only other moves are limit effects: 3 routes unevaluable at 2,097,152
+      in A (2 import, 1 export) are accepted once their sets shrink. Apart from
+      those 2, no import verdict moves.
+    - Without pair 2 (as first published): 5,190 (A against R; 2,888 valid,
+      2,288 not found, 14 invalid; 0.15% of 3,369,730) and 5,399 (A against V).
   - **Hand-checked:** 44.31.178.0/24 from AS211776 and 81.208.192.0/19 from
     AS14544 are route objects only in `radb.db.gz`. Their route-object answer
     is "yes" in A and "no" in R, and AS44306's export of each to AS3491 is
     accepted in A and rejected in R.
-  - **What this means:** on this sample, about a third of routecheck's "yes"
-    route-object answers rest on registries that do not check resource
-    holders. Most of those routes are RPKI-valid. Far fewer verdicts depend
-    on them: 0.15% of the export routes in both runs on these 59 pairs
-    (5,190 of 3,369,730).
+  - **What this means:**
+    - On this sample, about a third of routecheck's "yes" route-object answers
+      rest on registries that do not check resource holders (36.06% with pair
+      2, 36.50% without). Most of those routes are RPKI-valid.
+    - Few decided verdicts flip: 0.18% of the export routes go from accepted to
+      rejected without the unverified route objects.
+    - But a large pair can depend on them in a less visible way. Pair 2's
+      400,748 export routes are undecided in A only because the unverified
+      route objects push AS-SEABONE over the limit. Without them, 214,472 of
+      those would be rejected (R), all against sets missing from every registry
+      routecheck loads (R loads sets from all 16 registries; only its route
+      objects are RIR-only). V, which loads the RIRs alone, rejects 224,299.
     - These shares are weighted by routes, and the sample is concentrated
-      (`.data/provenance-AR.log`, "concentration"). Three pairs (AS213642
-      from AS3257, AS48354 from AS20485, AS62120 from AS1299) hold 4,123,600
-      of the 4,549,769 "yes" answers in both runs (90.63%). Without them,
-      117,962 of 426,169 become "no" (27.68%). Over the 58 pairs with a "yes"
-      answered in both runs, the median pair's share is 0.00%.
-    - 4,910 of the 5,190 moves from accepted to rejected are in one report:
-      AS31133's export to AS31500 (pair AS41446 from AS31133). 19 pairs have
-      at least one.
-    - So the shares describe these 59 pairs, mostly three of them, not a
+      (`.data/provenance-AR2.log`, "concentration"):
+      - pair 2 alone holds 1,851,021 of the 6,400,790 "yes" answers (28.92%);
+      - three pairs (AS213642 from AS3257, pair 2, AS48354 from AS20485) hold
+        5,139,745 of the 6,400,790 "yes" answers (80.30%); without them,
+        406,371 of 1,261,045 become "no" (32.22%);
+      - over the 59 pairs with a "yes" answered in both runs, the median pair's
+        share is 0.00%;
+      - 4,910 of the 8,883 moves from accepted to rejected are in one report,
+        AS31133's export to AS31500 (pair AS41446 from AS31133); 20 pairs have
+        at least one.
+    - So the shares describe these 60 pairs, mostly three of them, not a
       typical pair.
   - **Not measured:**
-    - pair 2's shares (it now fits, see above; the comparison was not redone);
     - whether any unverified object is right;
-    - how JPIRR or any other mirror verifies.
+    - how JPIRR or any other mirror verifies;
+    - whether the 469 (R) and 471 (V) sets pair 2 fails against that were
+      never looked up exist anywhere, and whether loading the "found
+      elsewhere" sets would flip any of these rejections.
 - **The marking on the command run.** The command on AS9086 from AS6762, every
   registry, `-max-prefixes 2097152`, with the marking (2026-10-19,
   `.data/verified-counts-2097152.log`; the stderr note named all five RIRs as
