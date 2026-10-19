@@ -12,6 +12,7 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"unicode"
 )
 
 // The self-check figures, from CHANGELOG.md's every-registry section, over the
@@ -454,17 +455,26 @@ func (d *provDir) sumErrors() []string {
 }
 
 // provTally is the comparison of run A with another run, per direction
-// ("import", "export"), and the self-check counters over the pairs it is
-// taken on: A's import route-object "yes" answers, and the other run's import
-// "yes" answers on the routes A has.
+// ("import", "export"), and the self-check's import route-object matrix over
+// the pairs it is taken on (over provRouteObjs, route by route, as RouteObj).
 type provTally struct {
-	Dirs                       map[string]*provDir
-	SubsetAYes, SubsetOtherYes int
+	Dirs           map[string]*provDir
+	SubsetRouteObj map[provKey]int
 }
 
 func newProvTally() *provTally {
-	return &provTally{Dirs: map[string]*provDir{"import": newProvDir(), "export": newProvDir()}}
+	return &provTally{Dirs: map[string]*provDir{"import": newProvDir(), "export": newProvDir()}, SubsetRouteObj: map[provKey]int{}}
 }
+
+// SubsetAYes is A's import route-object "yes" answers over the self-check's
+// pairs: the figure that must be 1,568,538.
+func (t *provTally) SubsetAYes() int { return rowSum(t.SubsetRouteObj, "yes") }
+
+// SubsetYesNo is the self-check's import routes whose route object is "yes"
+// in A and "no" in the other run: the part of the old rise that rests on the
+// route objects the other run lacks. A route with no answer in one run
+// ("unknown" or "no verdict") is not in it.
+func (t *provTally) SubsetYesNo() int { return t.SubsetRouteObj[provKey{"yes", "no"}] }
 
 // Total is both directions added.
 func (t *provTally) Total() *provDir {
@@ -491,7 +501,7 @@ func provNoVerdictKind(status string) string {
 // statuses ("" when absent). The universe is the union of a's and b's keys; a
 // key missing from a side is "no verdict" there. A route object "no" in A and
 // "yes" in the other run is an error naming the key. With subset50, the pair
-// counts in the self-check.
+// counts in the self-check's import route-object matrix.
 func comparePair(t *provTally, a, b map[string]provRoute, aStatus, bStatus string, subset50 bool) error {
 	count := func(key string, ra, rb provRoute, inA, inB bool) error {
 		dir, err := provDirOf(key)
@@ -534,11 +544,8 @@ func comparePair(t *provTally, a, b map[string]provRoute, aStatus, bStatus strin
 		if oa == provAccepted && ob == provRejected {
 			d.RPKIAccRej[ra.RPKI]++
 		}
-		if subset50 && inA && dir == "import" && sa == "yes" {
-			t.SubsetAYes++
-		}
-		if subset50 && inA && dir == "import" && sb == "yes" {
-			t.SubsetOtherYes++
+		if subset50 && dir == "import" {
+			t.SubsetRouteObj[provKey{sa, sb}]++
 		}
 		return nil
 	}
@@ -620,21 +627,75 @@ func logProvDir(t *testing.T, name, other string, d *provDir) {
 	logProvCells(t, "no verdict, by reason", d.NoVerdict)
 	logProvCells(t, "undecided in A, by A's reasons → "+other+"'s outcome", d.Undecided)
 	logProvMatrix(t, "route objects", other, provRouteObjs, d.RouteObj)
-	aYes, otherYes := rowSum(d.RouteObj, "yes"), colSum(d.RouteObj, "yes")
-	aDen, otherDen := aYes+rowSum(d.RouteObj, "no"), otherYes+colSum(d.RouteObj, "no")
-	yesNo := d.RouteObj[provKey{"yes", "no"}]
-	t.Logf("  route object yes → no: %d, %s of A's %d yes", yesNo, provShare(yesNo, aYes), aYes)
+	tot := provTotalsOf(d)
+	t.Logf("  route object yes → no: %d, %s of A's %d yes", tot.YesNo, provShare(tot.YesNo, tot.AYes), tot.AYes)
 	logProvStates(t, "RPKI (A's) of route object yes → no", d.RPKIYesNo)
 	logProvStates(t, "RPKI (A's) of accepted → rejected", d.RPKIAccRej)
 	t.Logf("  totals only: A's yes %d - %s's yes %d = %d; route by route yes → no %d; equal: %v",
-		aYes, other, otherYes, aYes-otherYes, yesNo, aYes-otherYes == yesNo)
-	t.Logf("  route-object denominators (yes + no): A %d, %s %d", aDen, other, otherDen)
-	if aDen != otherDen {
+		tot.AYes, other, tot.OtherYes, tot.AYes-tot.OtherYes, tot.YesNo, tot.AYes-tot.OtherYes == tot.YesNo)
+	t.Logf("  route-object denominators (yes + no): A %d, %s %d", tot.ADen, other, tot.OtherDen)
+	if tot.ADen != tot.OtherDen {
 		t.Logf("  the denominators differ: the totals-only shortcut does not apply (design, settled 2)")
+	}
+	if err := tot.check(name); err != nil {
+		t.Error(err)
 	}
 	for _, e := range d.sumErrors() {
 		t.Errorf("%s: %s", name, e)
 	}
+}
+
+// provTotals is one direction's route-object figures: A's and the other run's
+// "yes" answers, their denominators (yes + no), and the route-by-route
+// yes → no count.
+type provTotals struct{ AYes, OtherYes, ADen, OtherDen, YesNo int }
+
+// provTotalsOf reads d's route-object matrix.
+func provTotalsOf(d *provDir) provTotals {
+	aYes, otherYes := rowSum(d.RouteObj, "yes"), colSum(d.RouteObj, "yes")
+	return provTotals{
+		AYes: aYes, OtherYes: otherYes,
+		ADen: aYes + rowSum(d.RouteObj, "no"), OtherDen: otherYes + colSum(d.RouteObj, "no"),
+		YesNo: d.RouteObj[provKey{"yes", "no"}],
+	}
+}
+
+// check holds the totals-only shortcut to the route-by-route count (design,
+// goal 2): when both runs' denominators are equal, A's yes minus the other
+// run's must be the yes → no count, or the measurement fails. When the
+// denominators differ the shortcut does not apply and nothing is checked.
+func (p provTotals) check(dir string) error {
+	if p.ADen != p.OtherDen || p.AYes-p.OtherYes == p.YesNo {
+		return nil
+	}
+	return fmt.Errorf("%s: the denominators are equal (%d) but the totals-only figure %d (A's yes %d - the other run's %d) is not the route-by-route yes → no %d",
+		dir, p.ADen, p.AYes-p.OtherYes, p.AYes, p.OtherYes, p.YesNo)
+}
+
+// provSelfCheckPairs is the number of pairs the self-check is taken on: the
+// 50 the every-registry and RIPE-only runs both checked.
+const provSelfCheckPairs = 50
+
+// parseProvExclude reads ROUTECHECK_PROVENANCE_EXCLUDE: pair ids separated by
+// commas or white space. They must be distinct pairs of order, and exactly
+// len(order) - 50 of them, so that the self-check keeps its 50 pairs.
+func parseProvExclude(s string, order []string) (map[string]bool, error) {
+	want := len(order) - provSelfCheckPairs
+	exclude := map[string]bool{}
+	for _, p := range strings.FieldsFunc(s, func(r rune) bool { return r == ',' || unicode.IsSpace(r) }) {
+		if !slices.Contains(order, p) {
+			return nil, fmt.Errorf("ROUTECHECK_PROVENANCE_EXCLUDE: %s is not a pair of the runs", p)
+		}
+		if exclude[p] {
+			return nil, fmt.Errorf("ROUTECHECK_PROVENANCE_EXCLUDE: %s is given twice", p)
+		}
+		exclude[p] = true
+	}
+	if len(exclude) != want {
+		return nil, fmt.Errorf("ROUTECHECK_PROVENANCE_EXCLUDE names %d pairs; the runs have %d, so %d must be excluded to leave the self-check's %d",
+			len(exclude), len(order), want, provSelfCheckPairs)
+	}
+	return exclude, nil
 }
 
 // provSplit splits a comma-separated list of directories, dropping empty
@@ -687,15 +748,9 @@ func TestProvenanceCompare(t *testing.T) {
 	if !slices.Equal(order, bOrder) {
 		t.Fatalf("A and %s list other pairs or another order: %v and %v", label, order, bOrder)
 	}
-	exclude := map[string]bool{}
-	for _, p := range strings.FieldsFunc(os.Getenv("ROUTECHECK_PROVENANCE_EXCLUDE"), func(r rune) bool { return r == ',' || r == ' ' }) {
-		if !slices.Contains(order, p) {
-			t.Fatalf("ROUTECHECK_PROVENANCE_EXCLUDE: %s is not a pair of the runs", p)
-		}
-		exclude[p] = true
-	}
-	if len(exclude) == 0 {
-		t.Fatal("ROUTECHECK_PROVENANCE_EXCLUDE is needed: the pairs outside the self-check")
+	exclude, err := parseProvExclude(os.Getenv("ROUTECHECK_PROVENANCE_EXCLUDE"), order)
+	if err != nil {
+		t.Fatal(err)
 	}
 	t.Logf("%d pairs; the self-check takes the %d not excluded (%d excluded)", len(order), len(order)-len(exclude), len(exclude))
 
@@ -721,12 +776,15 @@ func TestProvenanceCompare(t *testing.T) {
 	logProvDir(t, "export", label, tl.Dirs["export"])
 	logProvDir(t, "total", label, tl.Total())
 
-	diff := tl.SubsetAYes - tl.SubsetOtherYes
-	t.Logf("self-check, %d pairs: A's import route-object yes %d (want %d); %s's yes on A's routes %d; difference %d, %s of the old rise %d (%d to %d)",
-		len(order)-len(exclude), tl.SubsetAYes, provEveryRegistryImportYes, label, tl.SubsetOtherYes, diff,
-		provShare(diff, provOldRise), provOldRise, provRIPEOnlyImportYes, provEveryRegistryImportYes)
-	if tl.SubsetAYes != provEveryRegistryImportYes {
-		t.Errorf("self-check: A's import route-object yes over the %d pairs is %d, want %d", len(order)-len(exclude), tl.SubsetAYes, provEveryRegistryImportYes)
+	n := len(order) - len(exclude)
+	logProvMatrix(t, fmt.Sprintf("self-check, %d pairs: import route objects", n), label, provRouteObjs, tl.SubsetRouteObj)
+	sub := func(a, b string) int { return tl.SubsetRouteObj[provKey{a, b}] }
+	t.Logf("self-check, %d pairs: A's import route-object yes %d (want %d); yes → yes %d, yes → no %d, yes → unknown %d, yes → no verdict %d, unknown → yes %d",
+		n, tl.SubsetAYes(), provEveryRegistryImportYes, sub("yes", "yes"), sub("yes", "no"), sub("yes", "unknown"), sub("yes", provNoVerdict), sub("unknown", "yes"))
+	t.Logf("self-check, %d pairs: yes → no %d is %s of the old rise %d (%d to %d); routes without an answer in both runs are not in it",
+		n, tl.SubsetYesNo(), provShare(tl.SubsetYesNo(), provOldRise), provOldRise, provRIPEOnlyImportYes, provEveryRegistryImportYes)
+	if tl.SubsetAYes() != provEveryRegistryImportYes {
+		t.Errorf("self-check: A's import route-object yes over the %d pairs is %d, want %d", n, tl.SubsetAYes(), provEveryRegistryImportYes)
 	}
 }
 
@@ -1018,15 +1076,117 @@ func TestCompareSums(t *testing.T) {
 	if n := total.RPKIAccRej["invalid"]; n != 1 || len(total.RPKIAccRej) != 1 {
 		t.Errorf("RPKI of accepted → rejected: %v, want invalid 1", total.RPKIAccRej)
 	}
-	if tl.SubsetAYes != 1 || tl.SubsetOtherYes != 0 {
-		t.Errorf("self-check: A's import yes %d, other's %d; want 1, 0", tl.SubsetAYes, tl.SubsetOtherYes)
+	if n := sumCells(tl.SubsetRouteObj); tl.SubsetAYes() != 1 || tl.SubsetYesNo() != 1 || n != 3 {
+		t.Errorf("self-check: A's import yes %d, yes → no %d, %d import routes; want 1, 1, 3 (%v)", tl.SubsetAYes(), tl.SubsetYesNo(), n, tl.SubsetRouteObj)
 	}
 	tl2 := newProvTally()
 	if err := comparePair(tl2, a, b, "checked", "checked", false); err != nil {
 		t.Fatal(err)
 	}
-	if tl2.SubsetAYes != 0 || tl2.SubsetOtherYes != 0 {
-		t.Errorf("an excluded pair counts in the self-check: %d, %d", tl2.SubsetAYes, tl2.SubsetOtherYes)
+	if len(tl2.SubsetRouteObj) != 0 {
+		t.Errorf("an excluded pair counts in the self-check: %v", tl2.SubsetRouteObj)
+	}
+}
+
+func TestCompareSelfCheck(t *testing.T) {
+	const k1, k2 = "AS1-AS2|import|ipv4|AS1|10.0.0.0/24|AS1", "AS3-AS4|import|ipv4|AS3|10.0.1.0/24|AS3"
+	tl := newProvTally()
+	// k1: yes → no, both pairs checked: it rests on the route objects the
+	// other run lacks.
+	if err := comparePair(tl, map[string]provRoute{k1: provR("accepted", "yes", "valid", "")},
+		map[string]provRoute{k1: provR("accepted", "no", "valid", "")}, "checked", "checked", true); err != nil {
+		t.Fatal(err)
+	}
+	// k2: yes → no verdict, the other run's pair timed out: no answer there,
+	// so it is not in the share.
+	if err := comparePair(tl, map[string]provRoute{k2: provR("accepted", "yes", "valid", "")}, nil, "checked", "timeout", true); err != nil {
+		t.Fatal(err)
+	}
+	if tl.SubsetAYes() != 2 || tl.SubsetYesNo() != 1 || tl.SubsetRouteObj[provKey{"yes", provNoVerdict}] != 1 {
+		t.Errorf("A's yes %d, yes → no %d, yes → no verdict %d; want 2, 1, 1", tl.SubsetAYes(), tl.SubsetYesNo(), tl.SubsetRouteObj[provKey{"yes", provNoVerdict}])
+	}
+}
+
+func TestCompareTotalsOnly(t *testing.T) {
+	// A's yes is 1 and the other's 0, with equal denominators (1 and 1), but no
+	// route goes yes → no: one goes yes → unknown, another unknown → no.
+	d := newProvDir()
+	d.RouteObj[provKey{"yes", "unknown"}] = 1
+	d.RouteObj[provKey{"unknown", "no"}] = 1
+	err := provTotalsOf(d).check("import")
+	if err == nil || !strings.Contains(err.Error(), "import") || !strings.Contains(err.Error(), "totals-only figure 1") || !strings.Contains(err.Error(), "yes → no 0") {
+		t.Errorf("equal denominators, totals-only 1, route by route 0: %v, want an error naming import and both figures", err)
+	}
+	// Agreeing: yes → no 1 and yes → yes 1; denominators 2 and 2, totals-only
+	// 2 - 1 = 1, yes → no 1.
+	agree := newProvDir()
+	agree.RouteObj[provKey{"yes", "no"}] = 1
+	agree.RouteObj[provKey{"yes", "yes"}] = 1
+	if err := provTotalsOf(agree).check("import"); err != nil {
+		t.Errorf("agreeing figures: %v", err)
+	}
+	// Unequal denominators (1 and 2): the shortcut does not apply, whatever
+	// the figures.
+	d.RouteObj[provKey{provNoVerdict, "no"}] = 1
+	if p := provTotalsOf(d); p.ADen == p.OtherDen {
+		t.Fatalf("denominators %d and %d, want them unequal", p.ADen, p.OtherDen)
+	}
+	if err := provTotalsOf(d).check("export"); err != nil {
+		t.Errorf("unequal denominators: %v, want no check", err)
+	}
+}
+
+func TestCompareExclude(t *testing.T) {
+	var order []string
+	for i := range 60 {
+		order = append(order, fmt.Sprintf("AS%d-AS%d", i+1, i+100))
+	}
+	ten := strings.Join(order[:10], " ")
+	ex, err := parseProvExclude(strings.Join(order[:5], ",")+"\n\t"+strings.Join(order[5:10], ", "), order)
+	if err != nil || len(ex) != 10 || !ex[order[0]] || !ex[order[9]] || ex[order[10]] {
+		t.Errorf("10 ids, commas and white space: %v, %v", ex, err)
+	}
+	for _, tc := range []struct{ name, s, wantErr string }{
+		{"nine", strings.Join(order[:9], " "), "names 9 pairs"},
+		{"a duplicate", ten + " " + order[3], order[3] + " is given twice"},
+		{"not in the order", strings.Join(order[:9], " ") + " AS9-AS9", "AS9-AS9 is not a pair"},
+		{"none", "", "names 0 pairs"},
+	} {
+		if _, err := parseProvExclude(tc.s, order); err == nil || !strings.Contains(err.Error(), tc.wantErr) {
+			t.Errorf("%s: %v, want an error with %q", tc.name, err, tc.wantErr)
+		}
+	}
+}
+
+func TestCompareSumErrors(t *testing.T) {
+	const key = "AS1-AS2|import|ipv4|AS1|10.0.0.0/24|AS1"
+	tl := newProvTally()
+	if err := comparePair(tl, map[string]provRoute{key: provR("undecided", "yes", "valid", "peval")},
+		map[string]provRoute{key: provR("rejected", "no", "valid", "")}, "checked", "checked", false); err != nil {
+		t.Fatal(err)
+	}
+	d := tl.Dirs["import"]
+	if errs := d.sumErrors(); len(errs) > 0 {
+		t.Fatalf("before the change: %v", errs)
+	}
+	for _, tc := range []struct {
+		name    string
+		change  func(*provDir)
+		wantErr string
+	}{
+		{"an extra outcome cell", func(d *provDir) { d.Outcome[provKey{provAccepted, provAccepted}]++ }, "outcome matrix"},
+		{"an extra route-object cell", func(d *provDir) { d.RouteObj[provKey{"no", "no"}]++ }, "route-object matrix"},
+		{"an undecided reason missing", func(d *provDir) { d.Undecided = map[provKey]int{} }, "undecided reasons"},
+		{"an RPKI state missing", func(d *provDir) { d.RPKIYesNo = map[string]int{} }, "yes → no"},
+		{"a universe count off", func(d *provDir) { d.AOnly++ }, "sums to"},
+	} {
+		c := newProvDir()
+		c.add(d)
+		tc.change(c)
+		errs := c.sumErrors()
+		if len(errs) == 0 || !strings.Contains(strings.Join(errs, "; "), tc.wantErr) {
+			t.Errorf("%s: %v, want an error naming %q", tc.name, errs, tc.wantErr)
+		}
 	}
 }
 
