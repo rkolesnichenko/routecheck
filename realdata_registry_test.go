@@ -112,7 +112,7 @@ func TestLoadRegistryPrecedenceAndSelection(t *testing.T) {
 			"as-set: AS-X\nmembers: AS64502\nsource: RADB",
 			"as-set: AS-Y\nmembers: AS64503\nsource: RADB"),
 	}
-	reg := loadRegistry(t, dumps)
+	reg := loadRegistry(t, dumps, "")
 
 	if want := map[types.ASN]bool{64496: true}; !reflect.DeepEqual(reg.autnums, want) {
 		t.Errorf("autnums = %v, want %v", reg.autnums, want)
@@ -335,5 +335,81 @@ func TestRealOutTracked(t *testing.T) {
 	}
 	if len(errs) != 1 || !strings.Contains(errs[0], "AS1-AS2|k3") {
 		t.Errorf("errors = %q, want one naming AS1-AS2|k3", errs)
+	}
+}
+
+func TestParsePairSelection(t *testing.T) {
+	for _, c := range []struct {
+		sel  string
+		n    int
+		want []int
+	}{
+		{"", 3, []int{1, 2, 3}},
+		{"1-2,3", 3, []int{1, 2, 3}},
+		{"2", 3, []int{2}},
+		{" 1 - 2 , 3 ", 3, []int{1, 2, 3}},
+	} {
+		got, err := parsePairSelection(c.sel, c.n)
+		if err != nil {
+			t.Errorf("parsePairSelection(%q, %d): %v", c.sel, c.n, err)
+			continue
+		}
+		want := map[int]bool{}
+		for _, i := range c.want {
+			want[i] = true
+		}
+		if !reflect.DeepEqual(got, want) {
+			t.Errorf("parsePairSelection(%q, %d) = %v, want %v", c.sel, c.n, got, want)
+		}
+	}
+	for _, c := range []struct{ sel, item string }{
+		{"0", "0"}, {"4", "4"}, {"3-1", "3-1"}, {"1,,2", ""}, {"x", "x"},
+	} {
+		_, err := parsePairSelection(c.sel, 3)
+		if err == nil {
+			t.Errorf("parsePairSelection(%q, 3): no error", c.sel)
+		} else if !strings.Contains(err.Error(), fmt.Sprintf("%q", c.item)) {
+			t.Errorf("parsePairSelection(%q, 3): error %q does not name the item %q", c.sel, err, c.item)
+		}
+	}
+}
+
+func TestLoadRegistryExtraDumpRanksLast(t *testing.T) {
+	dir := t.TempDir()
+	dumps := []string{
+		writeGzip(t, dir, "ripe.db.gz",
+			"aut-num: AS64496\nimport: from AS64500 accept AS-X\nsource: RIPE",
+			"as-set: AS-X\nmembers: AS64501\nsource: RIPE"),
+		writeGzip(t, dir, "radb.db.gz",
+			"as-set: AS-Y\nmembers: AS64503\nsource: RADB"),
+	}
+	extra := writeGzip(t, dir, "extra.db.gz",
+		"as-set: AS-NEW\nmembers: AS64504\nsource: LEVEL3",
+		"aut-num: AS64499\nimport: from AS64500 accept ANY\nsource: RIPE")
+	reg := loadRegistry(t, dumps, extra)
+
+	if want := []string{"RIPE", "RADB", "LEVEL3"}; !slices.Equal(reg.sources, want) {
+		t.Errorf("sources = %v, want %v", reg.sources, want)
+	}
+	if want := []string{"ripe", "radb", "extra"}; !slices.Equal(reg.registries, want) {
+		t.Errorf("registries = %v, want %v", reg.registries, want)
+	}
+	if want := map[types.ASN]bool{64496: true}; !reflect.DeepEqual(reg.autnums, want) {
+		t.Errorf("autnums = %v, want %v (the extra dump must not feed the selection)", reg.autnums, want)
+	}
+	if _, ok := reg.imports[64499]; ok {
+		t.Errorf("imports holds the extra dump's aut-num: %v", reg.imports)
+	}
+	ref, err := types.ParseSetRef("AS-NEW")
+	if err != nil {
+		t.Fatal(err)
+	}
+	ex := &resolve.Expander{Src: reg.src}
+	res, err := ex.ExpandAS(context.Background(), ref)
+	if err != nil {
+		t.Fatalf("ExpandAS(AS-NEW): %v", err)
+	}
+	if got, want := res.List(), []types.ASN{64504}; !slices.Equal(got, want) {
+		t.Errorf("AS-NEW = %v, want %v", got, want)
 	}
 }

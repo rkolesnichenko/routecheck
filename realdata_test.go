@@ -119,6 +119,14 @@ import (
 // this run's outcome for it, or "none" when its pair was not checked (or timed
 // out) in this run.
 //
+// ROUTECHECK_REALDATA_EXTRA=FILE is an RPSL dump (gzip or plain) loaded after
+// every MANIFEST dump, as the registry "extra": its objects keep their own
+// source:, so a source not seen before ranks last, and it never feeds the
+// selection maps (the pairs stay those of RIPE's files).
+// ROUTECHECK_REALDATA_PAIRS=SEL (1-based indices into the PAIRS: list, such as
+// 1-20,31; default all) checks only those pairs; the others are logged as
+// "not selected", added to no total and written as "none" in tracked.tsv.
+//
 // ROUTECHECK_REALDATA_SAMPLE (default 50), ROUTECHECK_REALDATA_REGEXP_SAMPLE
 // (default 10: the pairs added whose import term has an AS-path regexp,
 // which the plain sample may not draw at all) and ROUTECHECK_REALDATA_SEED
@@ -149,14 +157,19 @@ func TestRealData(t *testing.T) {
 	start := time.Now()
 
 	t0 := time.Now()
-	reg := loadRegistry(t, rd.dumps)
+	extra := os.Getenv("ROUTECHECK_REALDATA_EXTRA")
+	reg := loadRegistry(t, rd.dumps, extra)
 	loadTime := since(t0)
 	var per []string
 	for _, s := range reg.sources {
 		per = append(per, fmt.Sprintf("%s=%d", s, reg.perSource[s]))
 	}
+	nDumps := len(rd.dumps)
+	if extra != "" {
+		nDumps++
+	}
 	t.Logf("registry: %d objects from %d dumps of %d registries (%s), sources in precedence order %s, objects per source %s; %d RIPE aut-nums, %d naming a literal import peer (%d with an AS-path regexp toward one), in %s (heap in use %s)",
-		reg.objects, len(rd.dumps), len(reg.registries), strings.Join(reg.registries, ","), strings.Join(reg.sources, ","), strings.Join(per, ", "), len(reg.autnums), len(reg.imports), len(reg.reImports), loadTime, heapInUse())
+		reg.objects, nDumps, len(reg.registries), strings.Join(reg.registries, ","), strings.Join(reg.sources, ","), strings.Join(per, ", "), len(reg.autnums), len(reg.imports), len(reg.reImports), loadTime, heapInUse())
 	if maxPrefixes == 0 {
 		t.Logf("limits: MaxPrefixes rpsl's default")
 	} else {
@@ -220,9 +233,17 @@ func TestRealData(t *testing.T) {
 		t.Logf("  AS%d: %d entries through it (%s); file %s", x, seen.all[x], strings.Join(per, ", "), sizeOf(files[x]))
 	}
 
+	selected, err := parsePairSelection(os.Getenv("ROUTECHECK_REALDATA_PAIRS"), len(pairs))
+	if err != nil {
+		t.Fatalf("ROUTECHECK_REALDATA_PAIRS: %v", err)
+	}
 	tot := totals{reasons: [2]tally{{}, {}}, tooExp: tally{}, unevaluable: tally{}, anySets: tally{},
 		missingSets: [2]tally{{}, {}}, routeObj: [2]tally{{}, {}}}
 	for i, p := range pairs {
+		if !selected[i+1] {
+			t.Logf("pair %d/%d: not selected", i+1, len(pairs))
+			continue
+		}
 		r := checkPair(t, reg, vrps, p, files[bgp.ASN(p.X)], timeout, resolve.Expander{MaxPrefixes: maxPrefixes}, out.trackSet())
 		r.log(t, i+1, len(pairs))
 		if r.dupKeys > 0 {
@@ -550,19 +571,64 @@ type irrRegistry struct {
 	registries []string           // the registries loaded, in order
 }
 
+// parsePairSelection reads ROUTECHECK_REALDATA_PAIRS: comma-separated 1-based
+// indices or ranges "a-b" into a list of n pairs, such as "1-20,31". The empty
+// string selects all n. An empty item, a non-number, an index below 1 or
+// above n and a reversed range are errors naming the item.
+func parsePairSelection(s string, n int) (map[int]bool, error) {
+	sel := map[int]bool{}
+	if strings.TrimSpace(s) == "" {
+		for i := 1; i <= n; i++ {
+			sel[i] = true
+		}
+		return sel, nil
+	}
+	for _, item := range strings.Split(s, ",") {
+		item = strings.TrimSpace(item)
+		lo, hi, isRange := strings.Cut(item, "-")
+		if !isRange {
+			hi = lo
+		}
+		a, errA := strconv.Atoi(strings.TrimSpace(lo))
+		b, errB := strconv.Atoi(strings.TrimSpace(hi))
+		switch {
+		case errA != nil || errB != nil:
+			return nil, fmt.Errorf("pair selection item %q is not a number or a range", item)
+		case a < 1 || b < 1 || a > n || b > n:
+			return nil, fmt.Errorf("pair selection item %q is outside 1-%d", item, n)
+		case a > b:
+			return nil, fmt.Errorf("pair selection item %q is a reversed range", item)
+		}
+		for i := a; i <= b; i++ {
+			sel[i] = true
+		}
+	}
+	return sel, nil
+}
+
 // loadRegistry parses the dumps (rpsl.Parse, rpsl.Decode) into one
 // resolve.Corpus keeping policy, source precedence by first appearance, and
 // wraps its source in a resolve.Cache, as internal/cli's loadPolicy does. The
 // dumps are given in precedence order (orderDumps). Only the files of RIPE
-// feed the selection maps, so adding registries never changes the pairs.
-func loadRegistry(tb testing.TB, dumps []string) *irrRegistry {
+// feed the selection maps, so adding registries never changes the pairs. A
+// non-empty extra is one more dump (gzip or plain, any file name) read last as
+// the registry "extra": its objects keep their own source:, and it never feeds
+// the selection maps either.
+func loadRegistry(tb testing.TB, dumps []string, extra string) *irrRegistry {
 	tb.Helper()
 	c := &resolve.Corpus{KeepPolicy: true}
 	reg := &irrRegistry{imports: map[types.ASN][]types.ASN{}, reImports: map[types.ASN][]types.ASN{}, autnums: map[types.ASN]bool{}, perSource: map[string]int{}}
 	var order []string
 	families := []types.AddrFamily{{AFI: types.AFIv4, SAFI: types.SAFIUnicast}, {AFI: types.AFIv6, SAFI: types.SAFIUnicast}}
-	for _, name := range dumps {
-		regName, ok := dumpRegistry(filepath.Base(name))
+	files := slices.Clone(dumps)
+	if extra != "" {
+		files = append(files, extra)
+	}
+	for i, name := range files {
+		regName, ok := "extra", true
+		if i < len(dumps) {
+			regName, ok = dumpRegistry(filepath.Base(name))
+		}
 		if !ok {
 			tb.Fatalf("%s is not a dump of a known registry", name)
 		}
