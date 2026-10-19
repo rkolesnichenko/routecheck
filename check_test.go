@@ -1420,6 +1420,9 @@ func reportsOf(results []routecheck.Result) ([]handed, []routecheck.Result) {
 	return reps, bare
 }
 
+// Check is built on CheckEach, so this checks assembly and order; that
+// Check's results are v0.5.0's rests on the other Check tests and the CLI
+// goldens.
 func TestCheckEachMatchesCheck(t *testing.T) {
 	c := checker(registry(t, autL, autX))
 	v4 := []types.AddrFamily{af(t, "ipv4.unicast")}
@@ -1515,18 +1518,40 @@ func TestCheckEachCallbackError(t *testing.T) {
 	}
 }
 
+// finalized runs the collector up to 10 times, yielding and pausing between,
+// until ran reaches want; it reports whether it did.
+func finalized(ran *atomic.Int64, want int64) bool {
+	for range 10 {
+		runtime.GC()
+		runtime.Gosched()
+		if ran.Load() >= want {
+			return true
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	return ran.Load() >= want
+}
+
 // checkEachKeepingNothing runs CheckEach over the collector dump with an f
 // that keeps nothing, setting a finalizer on each report's routes that
-// counts into ran; it returns how many finalizers it set. Everything it
-// builds is out of reach once it returns.
+// counts into ran. At each call it checks that the routes of every earlier
+// report have been collected already, while the check is still running;
+// it returns how many finalizers it set. Everything it builds is out of
+// reach once it returns.
 func checkEachKeepingNothing(t *testing.T, ran *atomic.Int64) int {
 	t.Helper()
 	c := checker(registry(t, autL, autX))
-	set, reports := 0, 0
+	set, reports, checked := 0, 0, 0
 	_, err := c.CheckEach(context.Background(), routecheck.ModeCollector, records(collectorRecs()), routecheck.Options{
 		Local: types.ASN(asL), Peer: types.ASN(asX), AF: []types.AddrFamily{af(t, "ipv4.unicast")},
 	}, func(_ *routecheck.Result, _ routecheck.Direction, rep *routecheck.Report) error {
 		reports++
+		if set > 0 {
+			if !finalized(ran, int64(set)) {
+				t.Errorf("report %d: %d of the %d earlier reports' routes were collected; CheckEach still holds the rest", reports, ran.Load(), set)
+			}
+			checked = set
+		}
 		if len(rep.Routes) > 0 {
 			set++
 			runtime.SetFinalizer(&rep.Routes[0], func(*routecheck.RouteVerdict) { ran.Add(1) })
@@ -1536,8 +1561,10 @@ func checkEachKeepingNothing(t *testing.T, ran *atomic.Int64) int {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if reports < 3 || set == 0 {
-		t.Fatalf("%d reports, %d with routes; the test needs at least 3 and 1", reports, set)
+	// The import report and the one toward N1 have routes, and N2's comes
+	// after both: the last call sees two earlier reports released.
+	if reports < 3 || checked < 2 {
+		t.Fatalf("%d reports, %d earlier ones with routes checked at the last call; the test needs at least 3 and 2", reports, checked)
 	}
 	return set
 }
@@ -1545,15 +1572,9 @@ func checkEachKeepingNothing(t *testing.T, ran *atomic.Int64) int {
 func TestCheckEachReleasesReports(t *testing.T) {
 	var ran atomic.Int64
 	set := checkEachKeepingNothing(t, &ran)
-	for range 10 {
-		runtime.GC()
-		runtime.Gosched()
-		if ran.Load() == int64(set) {
-			return
-		}
-		time.Sleep(10 * time.Millisecond)
+	if !finalized(&ran, int64(set)) {
+		t.Errorf("%d of %d reports' routes were collected; the rest are still held", ran.Load(), set)
 	}
-	t.Errorf("%d of %d reports' routes were collected; the rest are still held", ran.Load(), set)
 }
 
 func TestDirectNotCheckedBeforeReports(t *testing.T) {

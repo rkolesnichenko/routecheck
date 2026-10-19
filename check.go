@@ -79,8 +79,8 @@ type Options struct {
 }
 
 // Checker checks one session's routes against the registered policies.
-// Check holds no state between calls, so a Checker may serve concurrent
-// calls when its sources may.
+// Check and CheckEach hold no state between calls, so a Checker may serve
+// concurrent calls when its sources may.
 type Checker struct {
 	// Eval evaluates the aut-nums' policies: its Src, Expander and Source
 	// as rpsl's peval takes them.
@@ -262,14 +262,17 @@ func (c *Checker) Check(ctx context.Context, mode Mode, records iter.Seq2[mrt.Re
 }
 
 // CheckEach is Check, handing each finished report to f instead of keeping
-// it. f is called per family, in o.AF's order, first with the import report
-// (dir DirImport), then with the export reports (DirExport) in Check's
-// order: toward L in session mode, by neighbour AS in collector mode.
+// it. f is called per family, in o.AF's order (ipv4.unicast, then
+// ipv6.unicast, when o.AF is empty), first with the import report (dir
+// DirImport), then with the export reports (DirExport) in Check's order:
+// toward L in session mode, by neighbour AS in collector mode.
 //
-// res is that family's Result, complete before its first report (its
-// Coverage, DirectNotChecked included), with Import and Export nil; f must
-// not modify it. f may keep rep: CheckEach holds no reference to it once f
-// returns, so a report f drops can be freed while the check goes on.
+// res is that family's Result, complete before the family's first report
+// (its Coverage, DirectNotChecked included) except for Import and Export,
+// which stay nil while reporting; the returned Results get Export set
+// afterwards. f must not modify res. f may keep rep: CheckEach holds no
+// reference to it once f returns, so a report f drops can be freed while
+// the check goes on.
 //
 // CheckEach returns Check's Results with every report removed: Import nil,
 // and Export nil when the export direction is not checked and an empty
