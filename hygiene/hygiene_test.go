@@ -372,3 +372,66 @@ func TestRouteObjectPanickingLeaderWithWaiter(t *testing.T) {
 		t.Errorf("reads = %d, want 2", n)
 	}
 }
+
+func TestVerifiedRouteObject(t *testing.T) {
+	ctx := context.Background()
+	load := func(s string) *resolve.MemSource {
+		t.Helper()
+		m, err := resolve.LoadDump(strings.NewReader(s))
+		if err != nil {
+			t.Fatal(err)
+		}
+		return m
+	}
+	all := load("route: 192.0.2.0/24\norigin: AS64500\nsource: TEST\n\nroute: 198.51.100.0/24\norigin: AS64500\nsource: TEST\n")
+	only := load("route: 192.0.2.0/24\norigin: AS64500\nsource: RIR\n")
+	ver := &counting{Source: only}
+	src := &counting{Source: all}
+	c := &Checker{Src: src, Verified: ver}
+	yes, no := true, false
+	for i := 0; i < 5; i++ {
+		got, err := c.VerifiedRouteObject(ctx, route("192.0.2.0/24", 1, 64500), types.AFIv4)
+		if err != nil || got == nil || *got != yes {
+			t.Fatalf("verified object: %v, %v", got, err)
+		}
+		got, err = c.VerifiedRouteObject(ctx, route("198.51.100.0/24", 1, 64500), types.AFIv4)
+		if err != nil || got == nil || *got != no {
+			t.Fatalf("unverified-only object: %v, %v", got, err)
+		}
+	}
+	if n := ver.calls.Load(); n != 1 {
+		t.Errorf("Verified read %d times, want 1", n)
+	}
+	if n := src.calls.Load(); n != 0 {
+		t.Errorf("Src read %d times by VerifiedRouteObject, want 0", n)
+	}
+	// RouteObject keeps its own cache: it reads Src, not Verified.
+	if got, err := c.RouteObject(ctx, route("198.51.100.0/24", 1, 64500), types.AFIv4); err != nil || got == nil || !*got {
+		t.Errorf("RouteObject: %v, %v", got, err)
+	}
+	if n := src.calls.Load(); n != 1 {
+		t.Errorf("Src read %d times, want 1", n)
+	}
+	set := route("192.0.2.0/24", 1, 64500)
+	set.OriginSet = true
+	if got, err := c.VerifiedRouteObject(ctx, set, types.AFIv4); got != nil || err != nil {
+		t.Errorf("as_set origin: %v, %v", got, err)
+	}
+	if _, err := c.VerifiedRouteObject(ctx, route("2001:db8::/32", 1, 64500), types.AFIv4); !errors.Is(err, ErrAFIMismatch) {
+		t.Errorf("mismatch: %v", err)
+	}
+	if got, err := (&Checker{Src: src}).VerifiedRouteObject(ctx, route("192.0.2.0/24", 64500), types.AFIv4); got != nil || err != nil {
+		t.Errorf("nil Verified: %v, %v", got, err)
+	}
+	// An error is returned and not cached.
+	bad := &counting{Source: only, err: errors.New("down")}
+	c = &Checker{Verified: bad}
+	for i := 0; i < 2; i++ {
+		if _, err := c.VerifiedRouteObject(ctx, route("192.0.2.0/24", 64500), types.AFIv4); err == nil {
+			t.Fatal("no error")
+		}
+	}
+	if n := bad.calls.Load(); n != 2 {
+		t.Errorf("error cached: %d reads, want 2", n)
+	}
+}

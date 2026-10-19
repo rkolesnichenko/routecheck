@@ -14,7 +14,7 @@ import (
 	"github.com/rkolesnichenko/rpsl/types"
 )
 
-// ErrAFIMismatch is returned by RouteObject when afi is IPv4 or IPv6 and the
+// ErrAFIMismatch is returned by RouteObject and VerifiedRouteObject when afi is IPv4 or IPv6 and the
 // route's prefix is of the other family (a caller bug, not a missing object).
 var ErrAFIMismatch = errors.New("hygiene: address family does not match the prefix")
 
@@ -37,9 +37,19 @@ func afiFits(afi types.AFI, p netip.Prefix) bool {
 type Checker struct {
 	VRPs *rpki.VRPs     // nil: RPKI answers nil
 	Src  resolve.Source // nil: RouteObject answers nil
+	// Verified is the source of the registries that count as verified
+	// (usually a subset of Src); nil: VerifiedRouteObject answers nil.
+	Verified resolve.Source
 
 	waiting atomic.Int64 // calls that began waiting behind a read; tests synchronize on it
 
+	objects  routeCache // reads of Src
+	verified routeCache // reads of Verified
+}
+
+// routeCache is the route objects read from one Source, by origin and
+// family.
+type routeCache struct {
 	mu    sync.Mutex
 	cache map[originKey]*originRoutes
 }
@@ -91,11 +101,26 @@ func (c *Checker) RouteObject(ctx context.Context, r verdict.Route, afi types.AF
 	if !afiFits(afi, r.Prefix) {
 		return nil, fmt.Errorf("%w: %s for %s", ErrAFIMismatch, afi, r.Prefix)
 	}
+	return c.lookup(ctx, &c.objects, c.Src, r, afi)
+}
+
+// VerifiedRouteObject is RouteObject for the verified registries: whether
+// Verified holds a route or route6 object for exactly (r.Prefix, origin).
+// It returns nil, nil when the route has no origin or Verified is nil, and
+// reads, caches and fails as RouteObject does, from its own cache.
+func (c *Checker) VerifiedRouteObject(ctx context.Context, r verdict.Route, afi types.AFI) (*bool, error) {
+	if !afiFits(afi, r.Prefix) {
+		return nil, fmt.Errorf("%w: %s for %s", ErrAFIMismatch, afi, r.Prefix)
+	}
+	return c.lookup(ctx, &c.verified, c.Verified, r, afi)
+}
+
+func (c *Checker) lookup(ctx context.Context, rc *routeCache, src resolve.Source, r verdict.Route, afi types.AFI) (*bool, error) {
 	as, ok := origin(r)
-	if !ok || c.Src == nil {
+	if !ok || src == nil {
 		return nil, nil
 	}
-	e, err := c.routes(ctx, originKey{as, afi})
+	e, err := c.routes(ctx, rc, src, originKey{as, afi})
 	if err != nil {
 		return nil, err
 	}
@@ -103,11 +128,11 @@ func (c *Checker) RouteObject(ctx context.Context, r verdict.Route, afi types.AF
 	return &found, nil
 }
 
-func (c *Checker) routes(ctx context.Context, k originKey) (*originRoutes, error) {
+func (c *Checker) routes(ctx context.Context, rc *routeCache, src resolve.Source, k originKey) (*originRoutes, error) {
 	for {
-		c.mu.Lock()
-		if e, ok := c.cache[k]; ok {
-			c.mu.Unlock()
+		rc.mu.Lock()
+		if e, ok := rc.cache[k]; ok {
+			rc.mu.Unlock()
 			c.waiting.Add(1)
 			select {
 			case <-e.done:
@@ -126,32 +151,32 @@ func (c *Checker) routes(ctx context.Context, k originKey) (*originRoutes, error
 			continue
 		}
 		e := &originRoutes{done: make(chan struct{})}
-		if c.cache == nil {
-			c.cache = make(map[originKey]*originRoutes)
+		if rc.cache == nil {
+			rc.cache = make(map[originKey]*originRoutes)
 		}
-		c.cache[k] = e
-		c.mu.Unlock()
-		return c.fetch(ctx, k, e)
+		rc.cache[k] = e
+		rc.mu.Unlock()
+		return fetch(ctx, rc, src, k, e)
 	}
 }
 
 // fetch is the leader's read. However it ends, normally, with an error or by
 // a panic in Src, an unsuccessful entry leaves the cache and its waiters are
 // released.
-func (c *Checker) fetch(ctx context.Context, k originKey, e *originRoutes) (*originRoutes, error) {
+func fetch(ctx context.Context, rc *routeCache, src resolve.Source, k originKey, e *originRoutes) (*originRoutes, error) {
 	completed := false
 	defer func() {
 		if !completed {
 			e.err = errReadIncomplete
 		}
 		if e.err != nil {
-			c.mu.Lock()
-			delete(c.cache, k)
-			c.mu.Unlock()
+			rc.mu.Lock()
+			delete(rc.cache, k)
+			rc.mu.Unlock()
 		}
 		close(e.done)
 	}()
-	ps, err := c.Src.OriginatedRoutes(ctx, k.as, k.afi)
+	ps, err := src.OriginatedRoutes(ctx, k.as, k.afi)
 	if err != nil {
 		e.err = err
 		completed = true

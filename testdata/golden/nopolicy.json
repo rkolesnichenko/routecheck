@@ -28,6 +28,9 @@
       "Accepted": 0,
       "Rejected": 0,
       "Undecided": 0,
+      "RouteObjYes": 0,
+      "RouteObjUnverifiedOnly": 0,
+      "RouteObjNo": 0,
       "Policy": {
         "Clauses": null,
         "Undecided": null
@@ -42,6 +45,9 @@
         "Accepted": 0,
         "Rejected": 0,
         "Undecided": 0,
+        "RouteObjYes": 0,
+        "RouteObjUnverifiedOnly": 0,
+        "RouteObjNo": 0,
         "Policy": {
           "Clauses": null,
           "Undecided": null
@@ -79,6 +85,9 @@
       "Accepted": 0,
       "Rejected": 0,
       "Undecided": 0,
+      "RouteObjYes": 0,
+      "RouteObjUnverifiedOnly": 0,
+      "RouteObjNo": 0,
       "Policy": {
         "Clauses": null,
         "Undecided": null
@@ -93,6 +102,9 @@
         "Accepted": 0,
         "Rejected": 0,
         "Undecided": 0,
+        "RouteObjYes": 0,
+        "RouteObjUnverifiedOnly": 0,
+        "RouteObjNo": 0,
         "Policy": {
           "Clauses": null,
           "Undecided": null

@@ -3,5 +3,7 @@ var ErrAFIMismatch = errors.New(…)
 type Checker struct
 	VRPs *rpki.VRPs
 	Src resolve.Source
+	Verified resolve.Source
 func (*Checker) RPKI(r verdict.Route) *rpki.State
 func (*Checker) RouteObject(ctx context.Context, r verdict.Route, afi types.AFI) (*bool, error)
+func (*Checker) VerifiedRouteObject(ctx context.Context, r verdict.Route, afi types.AFI) (*bool, error)

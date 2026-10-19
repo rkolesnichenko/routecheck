@@ -28,6 +28,9 @@
       "Accepted": 2,
       "Rejected": 2,
       "Undecided": 1,
+      "RouteObjYes": 2,
+      "RouteObjUnverifiedOnly": 0,
+      "RouteObjNo": 2,
       "Policy": {
         "Clauses": [
           {
@@ -53,6 +56,7 @@
             "PeerAddr": "192.0.2.1"
           },
           "RouteObj": null,
+          "RouteObjVerified": null,
           "Route": {
             "Prefix": "10.0.0.0/8",
             "Path": [
@@ -90,6 +94,7 @@
             "PeerAddr": "192.0.2.1"
           },
           "RouteObj": true,
+          "RouteObjVerified": null,
           "Route": {
             "Prefix": "192.0.2.0/24",
             "Path": [
@@ -121,6 +126,7 @@
             "PeerAddr": "192.0.2.1"
           },
           "RouteObj": true,
+          "RouteObjVerified": null,
           "Route": {
             "Prefix": "198.51.100.0/24",
             "Path": [
@@ -151,6 +157,7 @@
             "PeerAddr": "192.0.2.1"
           },
           "RouteObj": false,
+          "RouteObjVerified": null,
           "Route": {
             "Prefix": "203.0.113.0/24",
             "Path": [
@@ -192,6 +199,7 @@
             "PeerAddr": "192.0.2.1"
           },
           "RouteObj": false,
+          "RouteObjVerified": null,
           "Route": {
             "Prefix": "203.0.113.128/25",
             "Path": [
@@ -234,6 +242,9 @@
         "Accepted": 1,
         "Rejected": 4,
         "Undecided": 0,
+        "RouteObjYes": 2,
+        "RouteObjUnverifiedOnly": 0,
+        "RouteObjNo": 2,
         "Policy": {
           "Clauses": [
             {
@@ -254,6 +265,7 @@
               "PeerAddr": "192.0.2.1"
             },
             "RouteObj": null,
+            "RouteObjVerified": null,
             "Route": {
               "Prefix": "10.0.0.0/8",
               "Path": [
@@ -289,6 +301,7 @@
               "PeerAddr": "192.0.2.1"
             },
             "RouteObj": true,
+            "RouteObjVerified": null,
             "Route": {
               "Prefix": "192.0.2.0/24",
               "Path": [
@@ -320,6 +333,7 @@
               "PeerAddr": "192.0.2.1"
             },
             "RouteObj": true,
+            "RouteObjVerified": null,
             "Route": {
               "Prefix": "198.51.100.0/24",
               "Path": [
@@ -356,6 +370,7 @@
               "PeerAddr": "192.0.2.1"
             },
             "RouteObj": false,
+            "RouteObjVerified": null,
             "Route": {
               "Prefix": "203.0.113.0/24",
               "Path": [
@@ -392,6 +407,7 @@
               "PeerAddr": "192.0.2.1"
             },
             "RouteObj": false,
+            "RouteObjVerified": null,
             "Route": {
               "Prefix": "203.0.113.128/25",
               "Path": [
@@ -452,6 +468,9 @@
       "Accepted": 1,
       "Rejected": 1,
       "Undecided": 0,
+      "RouteObjYes": 1,
+      "RouteObjUnverifiedOnly": 0,
+      "RouteObjNo": 1,
       "Policy": {
         "Clauses": [
           {
@@ -472,6 +491,7 @@
             "PeerAddr": "192.0.2.1"
           },
           "RouteObj": true,
+          "RouteObjVerified": null,
           "Route": {
             "Prefix": "2001:db8:1::/48",
             "Path": [
@@ -501,6 +521,7 @@
             "PeerAddr": "192.0.2.1"
           },
           "RouteObj": false,
+          "RouteObjVerified": null,
           "Route": {
             "Prefix": "2001:db8:dead::/48",
             "Path": [
@@ -538,6 +559,9 @@
         "Accepted": 1,
         "Rejected": 1,
         "Undecided": 0,
+        "RouteObjYes": 1,
+        "RouteObjUnverifiedOnly": 0,
+        "RouteObjNo": 1,
         "Policy": {
           "Clauses": [
             {
@@ -558,6 +582,7 @@
               "PeerAddr": "192.0.2.1"
             },
             "RouteObj": true,
+            "RouteObjVerified": null,
             "Route": {
               "Prefix": "2001:db8:1::/48",
               "Path": [
@@ -587,6 +612,7 @@
               "PeerAddr": "192.0.2.1"
             },
             "RouteObj": false,
+            "RouteObjVerified": null,
             "Route": {
               "Prefix": "2001:db8:dead::/48",
               "Path": [
