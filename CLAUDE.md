@@ -340,7 +340,7 @@ Packages, imports strictly downward:
     - Under OUT, the test also streams `routes.tsv.gz` (one line per route of every report with a
       policy) and writes `pairs.tsv` (each pair's status).
     - `TestProvenanceCompare` (`ROUTECHECK_PROVENANCE_A`, `_B`, `_LABEL`, `_EXCLUDE`) compares two runs
-      offline. It peaked at 2,645 MB (`.data/provenance-AR.log`). It logs the shares over routes
+      offline; a run's shards may interleave (each pair is read from the shard that checked it). It peaked at 2,645 MB (`.data/provenance-AR.log`). It logs the shares over routes
       answered in both runs, their concentration over pairs (the shares are route-weighted: three pairs
       hold 90.63% of A-R's "yes" answers in both runs), and the totals-only check over the pairs both
       runs checked.
