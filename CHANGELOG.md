@@ -59,7 +59,8 @@ The logs are kept by the maintainer and are not committed.
   7,456 and 7,480 MB.
   - B4 loaded the 54 found objects (sources IDNIC 17, LEVEL3 33, RIPE-NONAUTH 1, beside the loaded ones).
   - Every route count in its TOTALS equals run A's: 106,712 export rejections, and the same 24 unevaluable reports
-    with the same routes. Distinct export missing sets fell from 808 to 787. Only the "reached" figures of the 24
+    with the same routes. Distinct export missing sets fell from 808 to 787: 406 deleted, 380 not found and
+    AS-CONCERTAP (`.data/missing-sets/B4/missing-sets.tsv`, with the classes from `sets.tsv`). Only the "reached" figures of the 24
     moved (AS-SEABONE 2,097,154 to 2,097,153; AS-UAIX 2,100,534 to 2,100,684; AS-DECIX 2,097,192 to 2,097,225).
   - All 106,529 tracked routes are still rejected. 59,403 of them had a found set in a failing clause, and each of
     those routes' lists of missing sets got shorter (`.data/missing-sets/A/rejected-missing.tsv` against
@@ -75,7 +76,10 @@ The logs are kept by the maintainer and are not committed.
 
   - No route is a gap; all 33,968 unknown routes are AS9086-AS6762's ipv6 export, for one reason: an inconclusive
     set (AS-CONCERTAP).
-  - Of the 787 sets found nowhere (407 deleted + 380 not found), 407 (51.7%) were deleted.
+  - Of the 842 sets, 54 were found and loaded; the sets still missing in B are ones none of the sources asked holds.
+    Over both directions 787 of the 842 are deleted or not found (407 + 380, the import set FLTR-BOGONS-V6 among the
+    deleted; not the same 787 as B's export count above, which holds AS-CONCERTAP instead), and 407 of them (51.7%)
+    were deleted.
   - Hand-checked (`.data/missing-sets/B4/tracked.tsv`, with the classes from `sets.tsv`):
     - AS20771 to AS174, 37.143.152.0/22 is "real for any IRR filter": its 247 missing sets in B4 are 176 deleted
       and 71 not found, and the first three answer "no entries" at both services.

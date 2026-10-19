@@ -538,7 +538,9 @@ Both spellings of 0xFFFFFF03 are read, in any case:
       `.data/missing-sets/B4/tracked.tsv`).
     - Every route count in B's TOTALS equals A's: 106,712 export rejections,
       and the same 24 unevaluable reports holding the same routes. Distinct
-      missing sets left on export fell from 808 to 787. Only the "reached"
+      missing sets left on export fell from 808 to 787: 406 deleted, 380 not
+      found and AS-CONCERTAP (`.data/missing-sets/B4/missing-sets.tsv`, with
+      the classes from `sets.tsv`). Only the "reached"
       figures of those 24 moved: AS-SEABONE's 2,097,154 became 2,097,153,
       AS-UAIX's 2,100,534 became 2,100,684, and AS-DECIX's 2,097,192 became
       2,097,225.
@@ -564,9 +566,13 @@ Both spellings of 0xFFFFFF03 are read, in any case:
       of whois.radb.net's 19 sources.
   - **What this means:** on these 60 pairs, no rejection against a missing set
     was measured as a gap: none was accepted with the found sets loaded, and
-    33,968 stay unknown on one inconclusive set. The filters name sets that
-    none of the sources asked holds: of the 787 found nowhere (407 deleted +
-    380 not found), 407 (51.7%) were deleted. A filter built from the IRR
+    33,968 stay unknown on one inconclusive set. Of the 842 sets the filters
+    named, 54 were found and loaded; the sets still missing in run B are ones
+    none of the sources asked holds. Over both directions, 787 of the 842 are
+    deleted or not found (407 + 380, the import set FLTR-BOGONS-V6 among the
+    deleted; a different 787 from run B's export count above, which holds
+    AS-CONCERTAP instead), and 407 of those 787 (51.7%) were deleted. A filter
+    built from the IRR
     (bgpq4, rpslq) rejects the same routes. Whether the policy's author meant
     to accept them cannot be read from the data.
   - **Not measured:**
