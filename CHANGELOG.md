@@ -8,6 +8,8 @@ a minor version may change the API.
 
 ## [Unreleased]
 
+## [0.6.0] - 2026-10-19
+
 ### Added
 
 - `Checker.CheckEach` runs the same check as `Check` but hands each finished `Report` to a function and keeps none,
@@ -888,7 +890,8 @@ route can be higher.
 - **Out of scope:** ASPA, BMP and RIS Live, transparent route servers,
   `import-via:`/`export-via:`/`default:`, L's own export, and clause actions.
 
-[Unreleased]: https://github.com/rkolesnichenko/routecheck/compare/v0.5.0...HEAD
+[Unreleased]: https://github.com/rkolesnichenko/routecheck/compare/v0.6.0...HEAD
+[0.6.0]: https://github.com/rkolesnichenko/routecheck/compare/v0.5.0...v0.6.0
 [0.5.0]: https://github.com/rkolesnichenko/routecheck/compare/v0.4.0...v0.5.0
 [0.4.0]: https://github.com/rkolesnichenko/routecheck/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/rkolesnichenko/routecheck/compare/v0.2.1...v0.3.0
