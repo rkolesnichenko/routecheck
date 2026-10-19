@@ -729,8 +729,7 @@ Both spellings of 0xFFFFFF03 are read, in any case:
   2026-10-19 under the guard (MB = MiB), with output unchanged:
   - The command on AS9086 from AS6762, every registry, `-max-prefixes 2097152`:
     5,959 MB (`.data/stream-cli-2097152.log`), against 6,421 MB in v0.5.0. Its
-    output equals the v0.5.0 run's (`.data/verified-counts-2097152.log`, built two commits before the v0.5.0 tag,
-    with equivalent code for this collector run).
+    output equals the v0.5.0 run's (`.data/verified-counts-2097152.log`, built at 6309e36 on the branch v0.5.0 was released from; the later code change, 13d47d3, validates `-verified-sources` names and moves the route-object note after the session check, and does not touch this collector run).
   - The real-data test's 60 pairs with `ROUTECHECK_REALDATA_OUT`: 6,635 MB
     (`.data/stream-A.log`), against 7,148 MB. Its TOTALS and every output file
     equal the earlier run's.

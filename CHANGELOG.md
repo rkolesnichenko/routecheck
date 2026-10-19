@@ -42,8 +42,7 @@ MB = MiB):
 | pair 2 alone, route objects from the RIRs only | stopped at 8,255 MB | 5,337 MB | `.data/stream-R2.log` |
 | pair 2 alone, the RIRs only | stopped at 8,249 MB | 4,526 MB | `.data/stream-V2.log` |
 
-- Output unchanged: the command's equals the v0.5.0 run's (`.data/verified-counts-2097152.log`, built two commits
-  before the v0.5.0 tag, with equivalent code for this collector run). The 60 pairs' TOTALS equal the earlier run's, and so do its
+- Output unchanged: the command's equals the v0.5.0 run's (`.data/verified-counts-2097152.log`, built at 6309e36 on the branch v0.5.0 was released from; the later code change, 13d47d3, validates `-verified-sources` names and moves the route-object note after the session check, and does not touch this collector run). The 60 pairs' TOTALS equal the earlier run's, and so do its
   decompressed `routes.tsv.gz`, `rejected-missing.tsv`, `missing-sets.tsv` and `pairs.tsv`.
 - What remains is mostly the heap's room between collections (inferred: the 60-pair run was not profiled; the
   explanation rests on pair 2 alone and the command's profile). Pair 2's live heap is measured only at report
