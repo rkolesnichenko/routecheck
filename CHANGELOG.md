@@ -42,10 +42,13 @@ MB = MiB):
 | pair 2 alone, route objects from the RIRs only | stopped at 8,255 MB | 5,337 MB | `.data/stream-R2.log` |
 | pair 2 alone, the RIRs only | stopped at 8,249 MB | 4,526 MB | `.data/stream-V2.log` |
 
-- Output unchanged: the command's equals v0.5.0's. The 60 pairs' TOTALS equal the earlier run's, and so do its
+- Output unchanged: the command's equals the v0.5.0 run's (`.data/verified-counts-2097152.log`, built two commits
+  before the v0.5.0 tag, with equivalent code for this collector run). The 60 pairs' TOTALS equal the earlier run's, and so do its
   decompressed `routes.tsv.gz`, `rejected-missing.tsv`, `missing-sets.tsv` and `pairs.tsv`.
-- What remains is mostly the heap's room between collections: pair 2's live heap peaks at 2,212 MB, with
-  4,359 MB in use (`.data/memprof2/A2`).
+- What remains is mostly the heap's room between collections (inferred: the 60-pair run was not profiled; the
+  explanation rests on pair 2 alone and the command's profile). Pair 2's live heap is measured only at report
+  boundaries (marks, after a forced GC): at most 2,212 MB there, against 4,232 MB before (`.data/memprof/A2`). Its
+  in-use heap peaked at 4,359 MB during the first (import) report, 179 s in (`.data/memprof2/A2/series.tsv`).
 - The design's targets for the command (5,120 MB) and the 60 pairs (6,144 MB) are not met.
 
 ## [0.5.0] - 2026-10-19

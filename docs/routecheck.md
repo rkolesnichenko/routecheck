@@ -643,19 +643,18 @@ Both spellings of 0xFFFFFF03 are read, in any case:
     whole R run on pair 2, after pair 1, at 8,224 MB
     (`.data/provenance-R-stopped.log`); pair 2 alone was stopped at 8,255 MB
     in R and 8,249 MB in V (`.data/provenance-R2.log`, `-V2.log`).
-    - The likely cause, not measured: with fewer route objects, its AS-SEABONE
-      expansions may come in under 2,097,152 prefixes, and deciding against
-      them may cost more memory than giving up (the design's settled point 1
-      foresaw this). Both runs were stopped before pair 2 logged a report,
-      and no log gives AS-SEABONE's size in R or V.
+    - Superseded by the measured cause below ("Since the streaming change"): this bullet was a guess. With
+      fewer route objects, its AS-SEABONE expansions may come in under 2,097,152 prefixes, and deciding against
+      them may cost more memory than giving up (the design's settled point 1 foresaw this). Both runs were stopped
+      before pair 2 logged a report, and no log gives AS-SEABONE's size in R or V.
     - R and V ran the other 59 pairs (peak 6,202 and 5,046 MB; A peaked at
       7,148 MB). Pair 2's routes are "no verdict" in both comparisons, and the
       shares below leave them out.
-    - Since then (v0.6.0, reports handed over as they are built), pair 2 alone
-      completes in R and in V: peak 5,337 and 4,526 MB (`.data/stream-R2.log`,
-      `.data/stream-V2.log`). The memory profile found the cause: in R and V,
-      the 21 AS-SEABONE reports that are over the limit in A fit under it, and
-      each kept its expansion until the check ended (design
+    - Since the streaming change (CHANGELOG, [Unreleased]: reports handed over as they are built, and the test
+      spooling its rejected lines), pair 2 alone completes in R and in V: peak 5,337 and 4,526 MB
+      (`.data/stream-R2.log`, `.data/stream-V2.log`). The memory profile found the cause: in R and V, the 21
+      AS-SEABONE reports that are over the limit in A fit under it, and each was kept until the check ended; the
+      test also held its rejected lines (design
       `docs/superpowers/specs/2026-10-19-memory-profile-design.md`, addendum).
       The shares below still leave pair 2 out; redoing them is a follow-up.
   - **Route-object answers** (`.data/provenance-AR.log`):
@@ -724,26 +723,34 @@ Both spellings of 0xFFFFFF03 are read, in any case:
   - With `-irrd`, the marking asks at most one extra query per (origin,
     family) whose answer is "yes" (the verified sources are asked only then),
     plus one probe per verified source at startup.
-- **Memory since v0.6.0.** `Checker.CheckEach` hands each report over as it is
+- **Memory since the streaming change** (CHANGELOG, [Unreleased]). `Checker.CheckEach` hands each report over as it is
   built, and the command and the real-data test let it go (design
   `docs/superpowers/specs/2026-10-19-stream-reports-design.md`). Measured
   2026-10-19 under the guard (MB = MiB), with output unchanged:
   - The command on AS9086 from AS6762, every registry, `-max-prefixes 2097152`:
     5,959 MB (`.data/stream-cli-2097152.log`), against 6,421 MB in v0.5.0. Its
-    output equals v0.5.0's.
+    output equals the v0.5.0 run's (`.data/verified-counts-2097152.log`, built two commits before the v0.5.0 tag,
+    with equivalent code for this collector run).
   - The real-data test's 60 pairs with `ROUTECHECK_REALDATA_OUT`: 6,635 MB
     (`.data/stream-A.log`), against 7,148 MB. Its TOTALS and every output file
     equal the earlier run's.
   - Pair 2 alone in runs R and V: completes, 5,337 and 4,526 MB.
-  - What remains is mostly the Go heap's room between collections. Profiled
-    (`.data/memprof2/`), pair 2's live heap now peaks at 2,212 MB (4,232 MB
-    before) while its in-use heap reaches 4,359 MB. The command's live heap at
-    its last profiled collection is 2,498 MB, mostly the registry, the
-    route-object lookups and the observations, while its in-use heap swings
-    between about 2.8 and 5.2 GB.
+  - What remains is mostly the Go heap's room between collections. This is inferred: the 60-pair run was not
+    profiled, and the explanation rests on pair 2 alone and the command's profile. Pair 2's live heap is measured
+    only at report boundaries (marks, after a forced GC): at most 2,212 MB there (4,232 MB before,
+    `.data/memprof/A2`). Its in-use heap peaked at 4,359 MB during the first (import) report, 179 s in
+    (`.data/memprof2/A2/series.tsv`); the two figures are not one moment.
+  - The command's live heap: 2,696 MiB in the highest profile (`peak-009`) and 2,498 MiB in the last
+    (`peak-010`), both in `.data/memprof2/cmd`; a peak profile shows the heap at the last completed GC. In
+    `peak-010` the registry's load path (`loadPolicy`) holds 1,465 MiB, the route-object lookups (`hygiene`,
+    `resolve.Cache`) 554 and the per-neighbour and collector structures 447, of 2,498 (the other 31 are the
+    family index and the runtime; `go tool pprof -sample_index=inuse_space -top -nodefraction=0` with
+    `-focus`/`-ignore` on those names).
+    Its in-use heap, sampled each second, ran between 2,750 and 5,218 MiB from 39 s to 66 s of the 66.6 s run
+    (`.data/memprof2/cmd/series.tsv`).
   - The design's targets for the command (5,120 MB) and the 60 pairs
-    (6,144 MB) are not met. A lower GC target, or a smaller registry in rpsl,
-    is what would reach them; neither is built.
+    (6,144 MB) are not met. The command's live heap is now mostly the registry, so a lower GC target or a smaller
+    registry in rpsl are the next candidates; neither is measured or built.
 - **Out of scope** (spec §12):
   - ASPA path verification;
   - BMP and RIS Live;
