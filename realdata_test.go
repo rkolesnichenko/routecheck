@@ -26,6 +26,7 @@ import (
 	"github.com/rkolesnichenko/mrt"
 	"github.com/rkolesnichenko/mrt/bgp"
 	"github.com/rkolesnichenko/routecheck"
+	"github.com/rkolesnichenko/routecheck/internal/memprof"
 	"github.com/rkolesnichenko/routecheck/internal/mrtgen"
 	"github.com/rkolesnichenko/routecheck/observe"
 	"github.com/rkolesnichenko/routecheck/verdict"
@@ -141,6 +142,15 @@ import (
 // 1-20,31; default all) checks only those pairs; the others are logged as
 // "not selected", added to no total and written as "none" in tracked.tsv.
 //
+// ROUTECHECK_REALDATA_MEMPROF=DIR profiles the heap (internal/memprof) into
+// DIR: a series.tsv sampled every second, a profile at each new high of the
+// heap in use, and a mark (a forced GC, then a profile of the live heap, and a
+// "MEMPROF: <label> live <MiB> MiB" log line) at "load" (after the registry
+// load), "pair-<i>-start" and "pair-<i>-end" around each checked pair (i is
+// the pair's 1-based index, as PAIRS selects it) and, within a pair, at each
+// fetch of the aut-num of its L or of its X ("pair-<i>-autnum-<n>-AS<n>").
+// Unset, nothing is sampled or marked and the run is as before.
+//
 // ROUTECHECK_REALDATA_SAMPLE (default 50), ROUTECHECK_REALDATA_REGEXP_SAMPLE
 // (default 10: the pairs added whose import term has an AS-path regexp,
 // which the plain sample may not draw at all) and ROUTECHECK_REALDATA_SEED
@@ -168,6 +178,18 @@ func TestRealData(t *testing.T) {
 		}
 		defer out.abort()
 	}
+	var prof *memprof.Sampler
+	if dir := os.Getenv("ROUTECHECK_REALDATA_MEMPROF"); dir != "" {
+		var err error
+		if prof, err = memprof.Start(dir, time.Second); err != nil {
+			t.Fatalf("ROUTECHECK_REALDATA_MEMPROF: %v", err)
+		}
+		defer func() {
+			if err := prof.Stop(); err != nil {
+				t.Errorf("ROUTECHECK_REALDATA_MEMPROF: %v", err)
+			}
+		}()
+	}
 	start := time.Now()
 
 	t0 := time.Now()
@@ -191,6 +213,7 @@ func TestRealData(t *testing.T) {
 	}
 	t.Logf("registry: %d objects from %d dumps of %d registries (%s), sources in precedence order %s, objects per source %s; %d RIPE aut-nums, %d naming a literal import peer (%d with an AS-path regexp toward one), in %s (heap in use %s)",
 		reg.objects, nDumps, len(reg.registries), strings.Join(reg.registries, ","), strings.Join(reg.sources, ","), strings.Join(per, ", "), len(reg.autnums), len(reg.imports), len(reg.reImports), loadTime, heapInUse())
+	markHeap(prof, t.Logf, "load")
 	if routesFrom == nil {
 		t.Logf("routes from: every registry")
 	} else {
@@ -281,7 +304,9 @@ func TestRealData(t *testing.T) {
 			out.setStatus(p, "not selected")
 			continue
 		}
-		r := checkPair(t, reg, vrps, p, files[bgp.ASN(p.X)], timeout, resolve.Expander{MaxPrefixes: maxPrefixes}, out.trackSet(), out.routesWriter())
+		markHeap(prof, t.Logf, fmt.Sprintf("pair-%d-start", i+1))
+		r := checkPair(t, reg, vrps, p, files[bgp.ASN(p.X)], timeout, resolve.Expander{MaxPrefixes: maxPrefixes}, out.trackSet(), out.routesWriter(), prof, i+1)
+		markHeap(prof, t.Logf, fmt.Sprintf("pair-%d-end", i+1))
 		r.log(t, i+1, len(pairs))
 		if r.dupKeys > 0 {
 			t.Errorf("AS%d from AS%d: %d routes share a key with another route of their report", p.L, p.X, r.dupKeys)
@@ -1334,12 +1359,12 @@ type pairResult struct {
 }
 
 // checkPair runs one collector-mode Check and summarizes it.
-func checkPair(tb testing.TB, reg *irrRegistry, vrps *rpki.VRPs, p pair, file string, timeout time.Duration, exp resolve.Expander, track map[string]bool, routes *bufio.Writer) pairResult {
+func checkPair(tb testing.TB, reg *irrRegistry, vrps *rpki.VRPs, p pair, file string, timeout time.Duration, exp resolve.Expander, track map[string]bool, routes *bufio.Writer, prof *memprof.Sampler, idx int) pairResult {
 	tb.Helper()
 	r := pairResult{p: p, reasons: [2]tally{{}, {}}, tooExp: tally{}, unevaluable: tally{}, anySets: tally{},
 		missingSets: [2]tally{{}, {}}, routeObj: [2]tally{{}, {}}, track: track, routes: routes}
 	counter := &countingSource{Source: reg.src}
-	c := &routecheck.Checker{Eval: peval.Evaluator{Src: reg.src, Expander: exp}, Routes: counter}
+	c := &routecheck.Checker{Eval: peval.Evaluator{Src: policySourceFor(reg, prof, idx, p, tb.Logf), Expander: exp}, Routes: counter}
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	start := time.Now()
 	res, err := c.Check(ctx, routecheck.ModeCollector, readMRT(file), routecheck.Options{Local: p.L, Peer: p.X, VRPs: vrps})

@@ -292,6 +292,11 @@ Packages, imports strictly downward:
     the RIBs (all 16: 35.871 s, peak RSS 3,534 MB, `.data/load-all.log`).
   - `ROUTECHECK_REALDATA_SAMPLE`, `_REGEXP_SAMPLE` and `_SEED` choose the sample.
   - `ROUTECHECK_CHECK_TIMEOUT` (default 600s) is the per-pair timeout.
+  - `ROUTECHECK_REALDATA_MEMPROF=DIR` profiles the heap with `internal/memprof` into DIR (`series.tsv`
+    every second, a profile at each new high) and marks it (forced GC, profile of the live heap, a
+    `MEMPROF: <label> live <MiB> MiB` log line) at `load`, `pair-<i>-start`/`-end` (i as `PAIRS`
+    selects it) and each fetch of the pair's L or X aut-num (`pair-<i>-autnum-<n>-AS<n>`). Unset, the
+    run is as before.
   - `ROUTECHECK_REALDATA_OUT=DIR` writes `missing-sets.tsv` and `rejected-missing.tsv` (every route
     rejected with a missing set). With `ROUTECHECK_REALDATA_TRACK=FILE` (a `rejected-missing.tsv`) it
     also writes `tracked.tsv`: this run's verdict for each of FILE's routes, `none` when the pair was not

@@ -730,3 +730,8 @@ Both spellings of 0xFFFFFF03 are read, in any case:
 
 `TestRealData` and the benchmarks are opt-in: see CLAUDE.md, "Commands". Every
 figure is in CHANGELOG.md, with the log it comes from.
+
+`ROUTECHECK_REALDATA_MEMPROF=DIR` makes `TestRealData` profile its heap into
+DIR: `series.tsv`, a profile at each new high, and a profile of the live heap
+(after a forced GC, logged as `MEMPROF: <label> live <MiB> MiB`) at the end of
+the load, around each pair and at each fetch of the pair's two aut-nums.
