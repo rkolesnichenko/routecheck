@@ -148,8 +148,15 @@ import (
 // "MEMPROF: <label> live <MiB> MiB" log line) at "load" (after the registry
 // load), "pair-<i>-start" and "pair-<i>-end" around each checked pair (i is
 // the pair's 1-based index, as PAIRS selects it) and, within a pair, at each
-// fetch of the aut-num of its L or of its X ("pair-<i>-autnum-<n>-AS<n>").
-// Unset, nothing is sampled or marked and the run is as before.
+// fetch of the aut-num of its L or of its X ("pair-<i>-autnum-<n>-AS<asn>").
+// Those run per address family (IPv4, then IPv6): L's import report first,
+// then X's export report toward each neighbour in ascending ASN order, and
+// each report starts with exactly one marked fetch, of its policy owner's
+// aut-num (peval fetches it once per evaluation). The marks run inside the
+// pair's timeout and count against ROUTECHECK_CHECK_TIMEOUT: raise it when
+// profiling a large pair. A "MEMPROF: pair-<i> marks <n> in <duration>" line
+// says what they took. Unset, nothing is sampled or marked and the run is as
+// before.
 //
 // ROUTECHECK_REALDATA_SAMPLE (default 50), ROUTECHECK_REALDATA_REGEXP_SAMPLE
 // (default 10: the pairs added whose import term has an AS-path regexp,
@@ -1364,12 +1371,17 @@ func checkPair(tb testing.TB, reg *irrRegistry, vrps *rpki.VRPs, p pair, file st
 	r := pairResult{p: p, reasons: [2]tally{{}, {}}, tooExp: tally{}, unevaluable: tally{}, anySets: tally{},
 		missingSets: [2]tally{{}, {}}, routeObj: [2]tally{{}, {}}, track: track, routes: routes}
 	counter := &countingSource{Source: reg.src}
-	c := &routecheck.Checker{Eval: peval.Evaluator{Src: policySourceFor(reg, prof, idx, p, tb.Logf), Expander: exp}, Routes: counter}
+	src := policySourceFor(reg, prof, idx, p, tb.Logf)
+	c := &routecheck.Checker{Eval: peval.Evaluator{Src: src, Expander: exp}, Routes: counter}
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	start := time.Now()
 	res, err := c.Check(ctx, routecheck.ModeCollector, readMRT(file), routecheck.Options{Local: p.L, Peer: p.X, VRPs: vrps})
 	r.elapsed = time.Since(start)
 	cancel()
+	if ms, ok := src.(*markingSource); ok {
+		n, d := ms.spent()
+		tb.Logf("MEMPROF: pair-%d marks %d in %s", idx, n, d)
+	}
 	r.heap = heapInUse()
 	r.hygCalls, r.hygKeys = counter.calls, len(counter.keys)
 	var tooLarge *resolve.SetTooLargeError

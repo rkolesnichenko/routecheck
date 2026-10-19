@@ -295,8 +295,12 @@ Packages, imports strictly downward:
   - `ROUTECHECK_REALDATA_MEMPROF=DIR` profiles the heap with `internal/memprof` into DIR (`series.tsv`
     every second, a profile at each new high) and marks it (forced GC, profile of the live heap, a
     `MEMPROF: <label> live <MiB> MiB` log line) at `load`, `pair-<i>-start`/`-end` (i as `PAIRS`
-    selects it) and each fetch of the pair's L or X aut-num (`pair-<i>-autnum-<n>-AS<n>`). Unset, the
-    run is as before.
+    selects it) and each fetch of the pair's L or X aut-num (`pair-<i>-autnum-<n>-AS<asn>`): per address
+    family (IPv4, then IPv6), L's import report first, then X's export report toward each neighbour in
+    ascending ASN order, each report starting with exactly one marked fetch (peval fetches the policy
+    owner's aut-num once per evaluation). The marks run inside the per-pair timeout and count against
+    `ROUTECHECK_CHECK_TIMEOUT`: raise it when profiling a large pair; a `MEMPROF: pair-<i> marks <n> in
+    <duration>` line says what they took. Unset, the run is as before.
   - `ROUTECHECK_REALDATA_OUT=DIR` writes `missing-sets.tsv` and `rejected-missing.tsv` (every route
     rejected with a missing set). With `ROUTECHECK_REALDATA_TRACK=FILE` (a `rejected-missing.tsv`) it
     also writes `tracked.tsv`: this run's verdict for each of FILE's routes, `none` when the pair was not

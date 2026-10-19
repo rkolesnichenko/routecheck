@@ -72,6 +72,9 @@ func TestMarkingSourceDelegates(t *testing.T) {
 	src := policySourceFor(reg, s, 7, p, logf)
 	ctx := context.Background()
 
+	// got != want compares pointers: it relies on the Cache returning the
+	// pointer it cached on the first call (a bare KeepPolicy Corpus decodes a
+	// new object per call).
 	for _, as := range []types.ASN{65001, 65003, 65002, 65001} {
 		got, gotErr := src.AutNum(ctx, as, "")
 		want, wantErr := reg.src.AutNum(ctx, as, "")
@@ -83,8 +86,11 @@ func TestMarkingSourceDelegates(t *testing.T) {
 	if n := len(markFiles(t, dir)); n != 3 {
 		t.Errorf("%d mark files, want 3", n)
 	}
-	if len(logged) != 3 || logged[0][:len("MEMPROF: pair-7-autnum-1-AS65001 live ")] != "MEMPROF: pair-7-autnum-1-AS65001 live " {
+	if len(logged) != 3 {
 		t.Errorf("log lines %q", logged)
+	}
+	if n, d := src.(*markingSource).spent(); n != 3 || d <= 0 {
+		t.Errorf("spent = %d marks in %v, want 3 in a positive time", n, d)
 	}
 	for i, w := range []string{"pair-7-autnum-1-AS65001", "pair-7-autnum-2-AS65002", "pair-7-autnum-3-AS65001"} {
 		if len(logged) > i && !bytes.Contains([]byte(logged[i]), []byte(w+" live ")) {

@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"sync"
+	"time"
 
 	"github.com/rkolesnichenko/routecheck/internal/memprof"
 	"github.com/rkolesnichenko/rpsl/object"
@@ -25,17 +26,28 @@ type markingSource struct {
 	logf func(string, ...any)
 
 	mu sync.Mutex
-	n  int // marked calls so far
+	n  int           // marked calls so far
+	d  time.Duration // wall time spent in those marks
 }
 
 func (m *markingSource) AutNum(ctx context.Context, as types.ASN, source string) (*object.AutNum, error) {
 	if as == m.p.L || as == m.p.X {
 		m.mu.Lock()
 		m.n++
+		t0 := time.Now()
 		markHeap(m.s, m.logf, fmt.Sprintf("pair-%d-autnum-%d-%s", m.idx, m.n, as))
+		m.d += time.Since(t0)
 		m.mu.Unlock()
 	}
 	return m.PolicySource.AutNum(ctx, as, source)
+}
+
+// spent reports how many marks the source made and the wall time they took:
+// they run inside the pair's timeout, so a pair's log says what they cost.
+func (m *markingSource) spent() (int, time.Duration) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.n, m.d
 }
 
 // markHeap marks s under label and logs the live heap, if logf is set. A nil

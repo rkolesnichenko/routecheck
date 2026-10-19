@@ -734,4 +734,10 @@ figure is in CHANGELOG.md, with the log it comes from.
 `ROUTECHECK_REALDATA_MEMPROF=DIR` makes `TestRealData` profile its heap into
 DIR: `series.tsv`, a profile at each new high, and a profile of the live heap
 (after a forced GC, logged as `MEMPROF: <label> live <MiB> MiB`) at the end of
-the load, around each pair and at each fetch of the pair's two aut-nums.
+the load, around each pair and at each fetch of the pair's two aut-nums
+(`pair-<i>-autnum-<n>-AS<asn>`: per address family, IPv4 then IPv6, L's import
+report first, then X's export report toward each neighbour in ascending ASN
+order; each report starts with exactly one marked fetch). The marks run inside
+the per-pair timeout and count against `ROUTECHECK_CHECK_TIMEOUT`: raise it
+when profiling a large pair. A `MEMPROF: pair-<i> marks <n> in <duration>` line
+says what they took.
