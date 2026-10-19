@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"bufio"
 	"fmt"
 	"io"
 	"net/netip"
@@ -9,9 +10,9 @@ import (
 	"strings"
 
 	"github.com/rkolesnichenko/routecheck"
+	"github.com/rkolesnichenko/routecheck/observe"
 	"github.com/rkolesnichenko/routecheck/verdict"
 	"github.com/rkolesnichenko/rpsl/policy"
-	"github.com/rkolesnichenko/rpsl/resolve/peval"
 	"github.com/rkolesnichenko/rpsl/types"
 )
 
@@ -19,26 +20,61 @@ import (
 // coverage warnings, then per family and direction the counts, the
 // policy's clauses, the Rejected routes grouped by the first failing test
 // of the first clause, the Undecided routes grouped by reason, and the
-// routes -routes asks for; last, the router-address hint. Nothing in it
-// depends on the time of the run or the working directory: file names are
-// printed as given.
-func writeText(w io.Writer, cfg *config, results []routecheck.Result) error {
-	p := &printer{cfg: cfg, x: cfg.opts.Peer, l: cfg.opts.Local}
+// routes -routes asks for; last, the router-address hint. The reports are
+// out's, rendered as CheckEach handed them over (renderText); results are
+// CheckEach's, without reports. Nothing in it depends on the time of the run
+// or the working directory: file names are printed as given.
+func writeText(w io.Writer, cfg *config, results []routecheck.Result, out *output) error {
 	var cov routecheck.Coverage
 	if len(results) > 0 {
 		cov = results[0].Coverage
 	}
-	if !cfg.localGiven && cov.Session != nil {
-		p.l = cov.Session.LocalAS
+	p := &printer{cfg: cfg, x: cfg.opts.Peer, l: localAS(cfg, cov.Session)}
+	bw := bufio.NewWriter(w)
+	flush := func() {
+		bw.WriteString(p.b.String())
+		p.b.Reset()
 	}
 	p.header()
-	p.coverage(results, cov)
+	p.coverage(results, cov, out)
+	flush()
 	for _, r := range results {
-		p.result(r)
+		f := out.family(r.AF)
+		p.family(r)
+		flush()
+		bw.Write(f.imp)
+		if r.Export != nil && len(f.exports) == 0 {
+			p.line("  export, %s: no neighbour seen", p.x)
+			flush()
+		}
+		for _, e := range f.exports {
+			bw.Write(e)
+		}
 	}
-	p.hint(results, cov)
-	_, err := io.WriteString(w, p.b.String())
-	return err
+	p.hint(out.hint, cov)
+	flush()
+	return bw.Flush() // the first write error, if any
+}
+
+// localAS is L: -local, or in session mode without it the capture's local
+// AS, from s, any Result's Coverage.Session (0 when not known).
+func localAS(cfg *config, s *observe.SessionInfo) types.ASN {
+	if !cfg.localGiven && s != nil {
+		return s.LocalAS
+	}
+	return cfg.opts.Local
+}
+
+// renderText is rep's part of the text, as writeText writes it: res is its
+// family's Result, dir its direction.
+func renderText(cfg *config, res *routecheck.Result, dir routecheck.Direction, rep *routecheck.Report) []byte {
+	p := &printer{cfg: cfg, x: cfg.opts.Peer, l: localAS(cfg, res.Coverage.Session)}
+	if dir == routecheck.DirImport {
+		p.report("import", *rep, fmt.Sprintf("import, %s from %s", p.local(), rep.Toward), p.local())
+	} else {
+		p.report("export", *rep, fmt.Sprintf("export, %s to %s", p.x, rep.Toward), p.x.String())
+	}
+	return []byte(p.b.String())
 }
 
 type printer struct {
@@ -111,7 +147,7 @@ func (p *printer) header() {
 // coverage writes what the input says about its own completeness, once:
 // observe's info and the other families' count are the same in every
 // Result.
-func (p *printer) coverage(results []routecheck.Result, cov routecheck.Coverage) {
+func (p *printer) coverage(results []routecheck.Result, cov routecheck.Coverage, out *output) {
 	x := p.x.String()
 	if s := cov.Session; s != nil {
 		if w := localMismatch(p.cfg, s); w != "" {
@@ -134,7 +170,7 @@ func (p *printer) coverage(results []routecheck.Result, cov routecheck.Coverage)
 		}
 		if n := s.NotFirstAS; n > 0 {
 			p.line("warning: %s did not start with %s: skipped, each withdrawing the route it replaced", count(n, "announcement", "announcements"), x)
-			if held, ok := heldRoutes(results, cov); ok && n > held {
+			if held, ok := heldRoutes(results, cov, out); ok && n > held {
 				p.line("warning: most routes seen do not start with %s: %s looks like a transparent route server, which routecheck does not support", x, x)
 			}
 		}
@@ -172,53 +208,28 @@ func (p *printer) coverage(results []routecheck.Result, cov routecheck.Coverage)
 
 // heldRoutes is the routes held at the end of the capture, over the
 // families checked and the others: each family's count is its reports'
-// (every session-mode report covers all of the family's routes). It is not
-// known when a family has only "no policy" reports, which list no routes.
-func heldRoutes(results []routecheck.Result, cov routecheck.Coverage) (int, bool) {
+// (every session-mode report covers all of the family's routes), as out
+// kept it. It is not known when a family has only "no policy" reports,
+// which list no routes.
+func heldRoutes(results []routecheck.Result, cov routecheck.Coverage, out *output) (int, bool) {
 	held := cov.OtherFamilies
 	for _, r := range results {
-		known := false
-		for _, rep := range reports(r) {
-			if !rep.NoPolicy {
-				held += len(rep.Routes)
-				known = true
-				break
-			}
-		}
-		if !known {
+		f := out.family(r.AF)
+		if !f.heldKnown {
 			return 0, false
 		}
+		held += f.held
 	}
 	return held, true
 }
 
-// reports lists a Result's reports, import first.
-func reports(r routecheck.Result) []*routecheck.Report {
-	var out []*routecheck.Report
-	if r.Import != nil {
-		out = append(out, r.Import)
-	}
-	for i := range r.Export {
-		out = append(out, &r.Export[i])
-	}
-	return out
-}
-
-func (p *printer) result(r routecheck.Result) {
+// family writes a family's first lines, before its reports.
+func (p *printer) family(r routecheck.Result) {
 	p.line("")
 	p.line("%s", r.AF)
 	if n := r.Coverage.DirectNotChecked; n > 0 {
 		x := p.x.String()
 		p.line("  warning: %s seen on %s's own feed to a collector: that sighting is checked toward no neighbour (one also seen announced to a neighbour is checked toward it)", count(n, "route", "routes"), x)
-	}
-	if r.Import != nil {
-		p.report("import", *r.Import, fmt.Sprintf("import, %s from %s", p.local(), r.Import.Toward), p.local())
-	}
-	if r.Export != nil && len(r.Export) == 0 {
-		p.line("  export, %s: no neighbour seen", p.x)
-	}
-	for _, e := range r.Export {
-		p.report("export", e, fmt.Sprintf("export, %s to %s", p.x, e.Toward), p.x.String())
 	}
 }
 
@@ -530,18 +541,10 @@ func refs(rs []types.SetRef) string {
 	return strings.Join(ss, ", ")
 }
 
-// hint writes, when a term was undecided for want of a router address, the
-// capture's addresses as candidates for -local-rtr and -peer-rtr (spec §5:
-// never taken from the capture, only offered).
-func (p *printer) hint(results []routecheck.Result, cov routecheck.Coverage) {
-	need := false
-	for _, r := range results {
-		for _, rep := range reports(r) {
-			for _, u := range rep.Policy.Undecided {
-				need = need || u.Why == peval.WhyLocalRouter || u.Why == peval.WhyPeerRouter
-			}
-		}
-	}
+// hint writes, when a term was undecided for want of a router address
+// (need), the capture's addresses as candidates for -local-rtr and
+// -peer-rtr (spec §5: never taken from the capture, only offered).
+func (p *printer) hint(need bool, cov routecheck.Coverage) {
 	if !need {
 		return
 	}
