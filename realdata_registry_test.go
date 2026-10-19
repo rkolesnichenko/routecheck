@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"runtime"
 	"slices"
 	"strings"
 	"testing"
@@ -308,6 +309,38 @@ func TestReadTrackKeys(t *testing.T) {
 	keys, err := readTrackKeys(f)
 	if err != nil || !slices.Equal(keys, []string{"a|b", "c|d"}) {
 		t.Errorf("readTrackKeys = %q, %v", keys, err)
+	}
+}
+
+// TestReadTrackKeysDoesNotRetainLines holds that a kept key does not keep the
+// (long) line it was cut from alive.
+func TestReadTrackKeysDoesNotRetainLines(t *testing.T) {
+	const lines = 200
+	sets := strings.Repeat("AS-X,", 20000) // 100 KB of missing sets per line
+	var b strings.Builder
+	for i := 0; i < lines; i++ {
+		fmt.Fprintf(&b, "AS1-AS2|k%d\trejected\t\t%s\n", i, sets)
+	}
+	f := filepath.Join(t.TempDir(), "track.tsv")
+	if err := os.WriteFile(f, []byte(b.String()), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	b.Reset()
+	heap := func() uint64 {
+		var m runtime.MemStats
+		runtime.GC()
+		runtime.ReadMemStats(&m)
+		return m.HeapAlloc
+	}
+	before := heap()
+	keys, err := readTrackKeys(f)
+	if err != nil || len(keys) != lines {
+		t.Fatalf("readTrackKeys = %d keys, %v", len(keys), err)
+	}
+	after := heap()
+	runtime.KeepAlive(keys)
+	if after > before+2<<20 {
+		t.Errorf("keys retain %d bytes of heap for %d lines of %d KB; want under 2 MB", after-before, lines, len(sets)>>10)
 	}
 }
 

@@ -2,6 +2,7 @@ package routecheck_test
 
 import (
 	"bufio"
+	"bytes"
 	"cmp"
 	"compress/gzip"
 	"context"
@@ -447,8 +448,10 @@ func readTrackKeys(file string) ([]string, error) {
 	sc := bufio.NewScanner(f)
 	sc.Buffer(nil, 1<<20)
 	for sc.Scan() {
-		if k, _, _ := strings.Cut(sc.Text(), "\t"); k != "" {
-			keys = append(keys, k)
+		// Copy only the key: sc.Text() would allocate the whole line, and a
+		// substring of it keeps all of it alive.
+		if k, _, _ := bytes.Cut(sc.Bytes(), []byte{'\t'}); len(k) > 0 {
+			keys = append(keys, string(k))
 		}
 	}
 	return keys, sc.Err()
