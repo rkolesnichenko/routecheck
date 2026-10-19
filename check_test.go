@@ -6,8 +6,10 @@ import (
 	"errors"
 	"fmt"
 	"net/netip"
+	"reflect"
 	"slices"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -1238,5 +1240,133 @@ func TestCheckCancelDuringDecide(t *testing.T) {
 	})
 	if !errors.Is(err, context.Canceled) || res != nil {
 		t.Errorf("Check = %v, %v; want context.Canceled", res, err)
+	}
+}
+
+// countingRoutes is a Source that counts the origins OriginatedRoutes is
+// asked for and may fail for one.
+type countingRoutes struct {
+	resolve.Source
+	mu     sync.Mutex
+	asked  map[types.ASN]int
+	failAS types.ASN
+}
+
+func (c *countingRoutes) OriginatedRoutes(ctx context.Context, as types.ASN, afi types.AFI) ([]netip.Prefix, error) {
+	c.mu.Lock()
+	if c.asked == nil {
+		c.asked = map[types.ASN]int{}
+	}
+	c.asked[as]++
+	c.mu.Unlock()
+	if as == c.failAS {
+		return nil, errSource
+	}
+	return c.Source.OriginatedRoutes(ctx, as, afi)
+}
+
+// verifiedRegistry holds only X's 192.0.2.0/24: the one route object a
+// verified registry backs.
+func verifiedRegistry(t testing.TB) *resolve.MemSource {
+	t.Helper()
+	l := &resolve.DumpLoader{}
+	if err := l.Read(strings.NewReader("route: 192.0.2.0/24\norigin: AS64500\nsource: RIR\n")); err != nil {
+		t.Fatal(err)
+	}
+	return l.Source()
+}
+
+func marking(rv routecheck.RouteVerdict) string {
+	f := func(b *bool) string {
+		if b == nil {
+			return "nil"
+		}
+		return fmt.Sprint(*b)
+	}
+	return rv.Route.Prefix.String() + " " + f(rv.RouteObj) + " " + f(rv.RouteObjVerified)
+}
+
+func TestRouteObjVerified(t *testing.T) {
+	src := registry(t, autL, autX)
+	recs := [][]byte{
+		pitRec(at(0), cpeer(1, asN2), cpeer(2, asN1), cpeer(3, asX)),
+		ribRec(at(0), "192.0.2.0/24", ent(2, asX)),               // yes, verified
+		ribRec(at(0), "198.51.100.0/24", ent(1, asN1, asX, asY)), // yes, unverified only
+		ribRec(at(0), "203.0.113.0/24", ent(2, asX, asZ)),        // no
+	}
+	o := routecheck.Options{Local: types.ASN(asL), Peer: types.ASN(asX), AF: []types.AddrFamily{af(t, "ipv4.unicast")}, Directions: routecheck.DirImport}
+	ver := &countingRoutes{Source: verifiedRegistry(t)}
+	c := checker(src)
+	c.VerifiedRoutes = ver
+	res := run(t, c, routecheck.ModeCollector, recs, o)
+	imp := res[0].Import
+	got := make([]string, len(imp.Routes))
+	for i, rv := range imp.Routes {
+		got[i] = marking(rv)
+	}
+	want := []string{"192.0.2.0/24 true true", "198.51.100.0/24 true false", "203.0.113.0/24 false false"}
+	if !slices.Equal(got, want) {
+		t.Errorf("markings:\n got %q\nwant %q", got, want)
+	}
+	if imp.RouteObjYes != 2 || imp.RouteObjUnverifiedOnly != 1 || imp.RouteObjNo != 1 {
+		t.Errorf("counts yes/unverified/no = %d/%d/%d, want 2/1/1", imp.RouteObjYes, imp.RouteObjUnverifiedOnly, imp.RouteObjNo)
+	}
+	if n := ver.asked[types.ASN(asZ)]; n != 0 {
+		t.Errorf("VerifiedRoutes asked %d times for the origin of a route with no object", n)
+	}
+	if ver.asked[types.ASN(asX)] != 1 || ver.asked[types.ASN(asY)] != 1 {
+		t.Errorf("VerifiedRoutes asked %v, want X and Y once each", ver.asked)
+	}
+
+	// Marking off: same verdicts, no RouteObjVerified, same counts of yes/no.
+	off := run(t, checker(src), routecheck.ModeCollector, recs, o)[0].Import
+	if len(off.Routes) != len(imp.Routes) {
+		t.Fatalf("routes: %d vs %d", len(off.Routes), len(imp.Routes))
+	}
+	for i := range off.Routes {
+		a, b := off.Routes[i], imp.Routes[i]
+		if a.RouteObjVerified != nil {
+			t.Errorf("%s: RouteObjVerified set without VerifiedRoutes", a.Route.Prefix)
+		}
+		if a.Route.Prefix != b.Route.Prefix || !reflect.DeepEqual(a.Verdict, b.Verdict) || !reflect.DeepEqual(a.RouteObj, b.RouteObj) || !reflect.DeepEqual(a.RPKI, b.RPKI) {
+			t.Errorf("route %d differs with the marking on: %+v vs %+v", i, a, b)
+		}
+	}
+	if off.RouteObjYes != 2 || off.RouteObjUnverifiedOnly != 0 || off.RouteObjNo != 1 {
+		t.Errorf("marking off: counts %d/%d/%d, want 2/0/1", off.RouteObjYes, off.RouteObjUnverifiedOnly, off.RouteObjNo)
+	}
+}
+
+func TestRouteObjVerifiedNoOrigin(t *testing.T) {
+	c := checker(registry(t, autL, autX))
+	c.VerifiedRoutes = verifiedRegistry(t)
+	res := run(t, c, routecheck.ModeSession, capture(), routecheck.Options{
+		Local: types.ASN(asL), Peer: types.ASN(asX), AF: []types.AddrFamily{af(t, "ipv4.unicast")}, Directions: routecheck.DirImport,
+	})
+	imp := res[0].Import
+	for _, rv := range imp.Routes {
+		if rv.Route.Prefix == pfx("10.0.0.0/8") {
+			if rv.RouteObj != nil || rv.RouteObjVerified != nil {
+				t.Errorf("AS_SET origin: %s", marking(rv))
+			}
+			continue
+		}
+		if rv.RouteObj == nil {
+			t.Errorf("%s: RouteObj nil", rv.Route.Prefix)
+		}
+	}
+	if len(imp.Routes) != 4 || imp.RouteObjYes+imp.RouteObjNo != 3 {
+		t.Errorf("%d routes, counts yes %d no %d; the AS_SET route is in neither", len(imp.Routes), imp.RouteObjYes, imp.RouteObjNo)
+	}
+}
+
+func TestVerifiedLookupError(t *testing.T) {
+	c := checker(registry(t, autL, autX))
+	c.VerifiedRoutes = &countingRoutes{Source: verifiedRegistry(t), failAS: types.ASN(asX)}
+	res, err := c.Check(context.Background(), routecheck.ModeSession, records(capture()), routecheck.Options{
+		Local: types.ASN(asL), Peer: types.ASN(asX), AF: []types.AddrFamily{af(t, "ipv4.unicast")},
+	})
+	if !errors.Is(err, errSource) || res != nil {
+		t.Errorf("Check = %v, %v; want errSource", res, err)
 	}
 }

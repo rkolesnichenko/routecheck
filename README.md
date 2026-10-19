@@ -56,7 +56,7 @@ warning: capture starts mid-session; routes announced earlier are not seen
 warning: 1 announcement did not start with AS64500: skipped, each withdrawing the route it replaced
 
 ipv4.unicast
-  import, AS64496 from AS64500: 5 routes: 2 accepted, 2 rejected, 1 undecided
+  import, AS64496 from AS64500: 5 routes: 2 accepted, 2 rejected, 1 undecided; route objects 2 yes, 2 no
     clause 1 (import attribute 4): from AS64500 accept AS64500
     clause 2 (import attribute 5): from AS64500 accept <^AS64500 AS64501$>
     rejected, by the first failing test of clause 1:
@@ -72,7 +72,7 @@ ipv4.unicast
       198.51.100.0/24  AS64500 AS64501  accepted by clause 2  rpki not_found  route object yes
       203.0.113.0/24  AS64500 AS64502  rejected: clause 1: prefix not in filter; clause 2: <^ AS64500 AS64501 $>  rpki invalid  route object no
       203.0.113.128/25  AS64500 AS64502  rejected: clause 1: prefix not in filter; clause 2: <^ AS64500 AS64501 $>  rpki invalid  route object no
-  export, AS64500 to AS64496: 5 routes: 1 accepted, 4 rejected, 0 undecided
+  export, AS64500 to AS64496: 5 routes: 1 accepted, 4 rejected, 0 undecided; route objects 2 yes, 2 no
     clause 1 (export attribute 1): to AS64496 announce AS64500
     rejected, by the first failing test of clause 1:
       prefix not in filter: 4 routes
@@ -88,7 +88,7 @@ ipv4.unicast
       203.0.113.128/25  AS64500 AS64502  rejected: clause 1: prefix not in filter  rpki invalid  route object no
 
 ipv6.unicast
-  import, AS64496 from AS64500: 2 routes: 1 accepted, 1 rejected, 0 undecided
+  import, AS64496 from AS64500: 2 routes: 1 accepted, 1 rejected, 0 undecided; route objects 1 yes, 1 no
     clause 1 (import attribute 6): from AS64500 accept AS64500
     rejected, by the first failing test of clause 1:
       prefix not in filter: 1 route
@@ -96,7 +96,7 @@ ipv6.unicast
     routes (all):
       2001:db8:1::/48  AS64500  accepted by clause 1  rpki valid  route object yes
       2001:db8:dead::/48  AS64500 AS64502  rejected: clause 1: prefix not in filter  rpki invalid  route object no
-  export, AS64500 to AS64496: 2 routes: 1 accepted, 1 rejected, 0 undecided
+  export, AS64500 to AS64496: 2 routes: 1 accepted, 1 rejected, 0 undecided; route objects 1 yes, 1 no
     clause 1 (export attribute 2): to AS64496 announce AS64500
     rejected, by the first failing test of clause 1:
       prefix not in filter: 1 route
@@ -133,7 +133,7 @@ note: collector mode: these are routes AS4766 announced to someone. AS4766 may n
 collector: 31782 RIB entries read, 179 through AS4766 (0 on AS4766's own feed to a collector)
 
 ipv4.unicast
-  import, AS64496 from AS4766: 19 routes: 19 accepted, 0 rejected, 0 undecided
+  import, AS64496 from AS4766: 19 routes: 19 accepted, 0 rejected, 0 undecided; route objects 5 yes, 14 no
     clause 1 (import attribute 1): from AS4766 accept AS-GOLDEN-BEHIND
     clause 2 (import attribute 2): from AS4766 accept community(4766:100)
     clause 3 (import attribute 3): from AS4766 accept <^AS4766+ .*>

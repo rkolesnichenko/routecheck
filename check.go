@@ -89,6 +89,11 @@ type Checker struct {
 	// (Source.OriginatedRoutes); usually Eval.Src. Nil: not checked, and
 	// RouteVerdict.RouteObj is nil.
 	Routes resolve.Source
+	// VerifiedRoutes answers the same question for the verified registries
+	// only (usually a subset of Routes): it is asked only for routes whose
+	// RouteObj is true, and sets RouteVerdict.RouteObjVerified. Nil turns
+	// the marking off.
+	VerifiedRoutes resolve.Source
 }
 
 // Result is what Check found for one address family.
@@ -156,6 +161,10 @@ type Report struct {
 	Routes []RouteVerdict
 	// The counts of Routes by outcome.
 	Accepted, Rejected, Undecided int
+	// The counts of Routes by RouteObj: RouteObjYes true, RouteObjNo false
+	// (a route with RouteObj nil is in neither). RouteObjUnverifiedOnly,
+	// a subset of RouteObjYes, counts those whose RouteObjVerified is false.
+	RouteObjYes, RouteObjUnverifiedOnly, RouteObjNo int
 }
 
 // RouteVerdict is one route's verdict, with what it rests on.
@@ -170,6 +179,12 @@ type RouteVerdict struct {
 	// origin (an AS_SET at the end of its path, spec §6.6). RPKI and
 	// RouteObj are shared by every report that holds the route.
 	RouteObj *bool
+	// RouteObjVerified reports whether a verified registry
+	// (Checker.VerifiedRoutes) holds that route object: nil when RouteObj
+	// is nil or VerifiedRoutes is nil, false (without a query) when
+	// RouteObj is false. RouteObj true with RouteObjVerified false is
+	// weaker evidence: only unverified registries back the route.
+	RouteObjVerified *bool
 }
 
 // ErrOptions is wrapped by every error Check returns for options it cannot
@@ -215,9 +230,9 @@ const ctxEvery = 4096
 // Check returns an error, and no Results, for options it cannot use, an
 // input observe cannot read (a truncated stream, observe.ErrRIBNotPrePolicy),
 // any other policy peval cannot evaluate (a missing aut-num), an
-// error from Routes, and ctx's error once it is done (also while observe
-// reads the input, which it reads whole before yielding a route). Errors for
-// options wrap ErrOptions.
+// error from Routes or from VerifiedRoutes, and ctx's error once it is done
+// (also while observe reads the input, which it reads whole before yielding a
+// route). Errors for options wrap ErrOptions.
 func (c *Checker) Check(ctx context.Context, mode Mode, records iter.Seq2[mrt.Record, error], o Options) ([]Result, error) {
 	afs, dirs, err := o.check(mode)
 	if err != nil {
@@ -229,7 +244,7 @@ func (c *Checker) Check(ctx context.Context, mode Mode, records iter.Seq2[mrt.Re
 	r := &run{
 		ctx: ctx,
 		c:   c,
-		hyg: &hygiene.Checker{VRPs: o.VRPs, Src: c.Routes},
+		hyg: &hygiene.Checker{VRPs: o.VRPs, Src: c.Routes, Verified: c.VerifiedRoutes},
 	}
 
 	// The observations, by family.
@@ -455,6 +470,8 @@ type routeHygiene struct {
 	done bool
 	rpki *rpki.State
 	obj  *bool
+	// verified is the verified registries' answer; see RouteVerdict.RouteObjVerified.
+	verified *bool
 }
 
 func (r *run) family(a types.AddrFamily, obs []observe.Observation) *famRun {
@@ -527,7 +544,8 @@ func (f *famRun) report(s peval.Session, export bool, idx []int) (Report, error)
 		default:
 			rep.Undecided++
 		}
-		rep.Routes = append(rep.Routes, RouteVerdict{Route: ob.Route, Evidence: ob.Evidence, Verdict: v, RPKI: h.rpki, RouteObj: h.obj})
+		rep.Routes = append(rep.Routes, RouteVerdict{Route: ob.Route, Evidence: ob.Evidence, Verdict: v, RPKI: h.rpki, RouteObj: h.obj, RouteObjVerified: h.verified})
+		rep.countRouteObj(h)
 	}
 	return rep, nil
 }
@@ -557,12 +575,27 @@ func (f *famRun) unevaluable(rep Report, idx []int) (Report, error) {
 		ob := &f.obs[i]
 		v := verdict.Verdict{Outcome: verdict.Undecided, Reasons: []verdict.Reason{{Kind: verdict.ReasonUnevaluable, Why: rep.Unevaluable, Clause: -1, Index: -1}}}
 		rep.Undecided++
-		rep.Routes = append(rep.Routes, RouteVerdict{Route: ob.Route, Evidence: ob.Evidence, Verdict: v, RPKI: h.rpki, RouteObj: h.obj})
+		rep.Routes = append(rep.Routes, RouteVerdict{Route: ob.Route, Evidence: ob.Evidence, Verdict: v, RPKI: h.rpki, RouteObj: h.obj, RouteObjVerified: h.verified})
+		rep.countRouteObj(h)
 	}
 	return rep, nil
 }
 
-// hygiene returns observation i's RPKI state and route-object answer,
+// countRouteObj counts one route's route-object answer into the report.
+func (rep *Report) countRouteObj(h routeHygiene) {
+	switch {
+	case h.obj == nil:
+	case !*h.obj:
+		rep.RouteObjNo++
+	default:
+		rep.RouteObjYes++
+		if h.verified != nil && !*h.verified {
+			rep.RouteObjUnverifiedOnly++
+		}
+	}
+}
+
+// hygiene returns observation i's RPKI state and route-object answers,
 // computing them on first use.
 func (f *famRun) hygiene(i int) (routeHygiene, error) {
 	h := &f.memo[i]
@@ -572,7 +605,17 @@ func (f *famRun) hygiene(i int) (routeHygiene, error) {
 		if err != nil {
 			return routeHygiene{}, err
 		}
-		h.rpki, h.obj, h.done = f.hyg.RPKI(r), obj, true
+		var verified *bool
+		switch {
+		case obj == nil || f.hyg.Verified == nil:
+		case !*obj:
+			verified = new(bool)
+		default:
+			if verified, err = f.hyg.VerifiedRouteObject(f.ctx, r, f.afi); err != nil {
+				return routeHygiene{}, err
+			}
+		}
+		h.rpki, h.obj, h.verified, h.done = f.hyg.RPKI(r), obj, verified, true
 	}
 	return *h, nil
 }

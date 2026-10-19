@@ -8,6 +8,7 @@ var ErrOptions = errors.New(…)
 type Checker struct
 	Eval peval.Evaluator
 	Routes resolve.Source
+	VerifiedRoutes resolve.Source
 func (*Checker) Check(ctx context.Context, mode Mode, records iter.Seq2[mrt.Record, error], o Options) ([]Result, error)
 type Coverage struct
 	Session *observe.SessionInfo
@@ -38,6 +39,9 @@ type Report struct
 	Accepted int
 	Rejected int
 	Undecided int
+	RouteObjYes int
+	RouteObjUnverifiedOnly int
+	RouteObjNo int
 type Result struct
 	AF types.AddrFamily
 	Import *Report
@@ -49,3 +53,4 @@ type RouteVerdict struct
 	Verdict verdict.Verdict
 	RPKI *rpki.State
 	RouteObj *bool
+	RouteObjVerified *bool

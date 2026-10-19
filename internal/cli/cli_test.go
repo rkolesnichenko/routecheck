@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net"
 	"net/netip"
@@ -99,7 +100,8 @@ func TestHelp(t *testing.T) {
 	wantContains(t, "usage", stdout,
 		"routecheck -peer AS (-session FILE [-local AS] | -collector FILE -local AS)",
 		"-irrd", "-sources", "-policy", "-vrps", "-af", "-direction", "-peer-addr", "-at", "-pre-policy",
-		"-local-rtr", "-peer-rtr", "-max-prefixes", "[-max-prefixes N]", "-format", "-routes", "repeatable", "Exit status",
+		"-local-rtr", "-peer-rtr", "-max-prefixes", "[-max-prefixes N]", "-verified-sources", "[-verified-sources LIST]",
+		"the registries whose route objects count as verified", "-format", "-routes", "repeatable", "Exit status",
 		"a key that does not parse", "cut mid-record", "the session in the capture")
 }
 
@@ -164,12 +166,19 @@ func TestLocalFromCapture(t *testing.T) {
 	if code != exitUsage {
 		t.Errorf("capture's local AS is the peer: exit %d, want %d; stderr %s", code, exitUsage, stderr)
 	}
+	// A usage error found by Check prints no route-object note.
+	if strings.Contains(stderr, "route objects:") {
+		t.Errorf("capture's local AS is the peer: the note before a usage error:\n%s", stderr)
+	}
 	empty := write(t, "empty.mrt", nil)
 	code, _, stderr = run(t, "-peer", "AS64500", "-session", empty, "-dump", registry)
 	if code != exitUsage {
 		t.Errorf("capture naming no local AS: exit %d, want %d; stderr %s", code, exitUsage, stderr)
 	}
 	wantContains(t, "stderr", stderr, "give -local")
+	if strings.Contains(stderr, "route objects:") {
+		t.Errorf("capture naming no local AS: the note before a usage error:\n%s", stderr)
+	}
 }
 
 // TestNoSession: a capture with no record of the session selected is not
@@ -196,6 +205,9 @@ func TestNoSession(t *testing.T) {
 				t.Errorf("stdout %q, want nothing", stdout)
 			}
 			wantContains(t, "stderr", stderr, tc.want)
+			if strings.Contains(stderr, "route objects") {
+				t.Errorf("stderr %q has the route-object note, want none without a session", stderr)
+			}
 		})
 	}
 	// The right address is a session.
@@ -270,6 +282,10 @@ func TestFailures(t *testing.T) {
 				t.Errorf("stdout %q, want nothing", stdout)
 			}
 			wantContains(t, "stderr", stderr, tc.want)
+			// A run that fails before or in Check prints no route-object note.
+			if strings.Contains(stderr, "route objects:") {
+				t.Errorf("the route-object note on a failed run:\n%s", stderr)
+			}
 		})
 	}
 	// A truncated capture is named as such.
@@ -496,7 +512,7 @@ func TestSeveralInputs(t *testing.T) {
 	wantContains(t, "in order", out, "1 route: 1 accepted")
 	_, out, _ = run(t, "-local", "AS64496", "-peer", "AS64500", "-session", second, "-session", first, "-dump", dump, "-af", "ipv4", "-direction", "import")
 	wantContains(t, "reversed", out, "2 routes: 1 accepted, 1 rejected")
-	if stderr != "" {
+	if stderr != noneNote {
 		t.Errorf("stderr %s", stderr)
 	}
 }
@@ -876,8 +892,8 @@ source: TEST
 		file, counts, line string
 		exit               int
 	}{
-		{f, "1 route: 1 accepted, 0 rejected, 0 undecided", "AS-ANYSET (1 route)", exitOK},
-		{two, "3 routes: 2 accepted, 1 rejected, 0 undecided", "AS-ANYSET (2 routes)", exitRejected},
+		{f, "1 route: 1 accepted, 0 rejected, 0 undecided; route objects 1 yes, 0 no", "AS-ANYSET (1 route)", exitOK},
+		{two, "3 routes: 2 accepted, 1 rejected, 0 undecided; route objects 1 yes, 2 no", "AS-ANYSET (2 routes)", exitRejected},
 	} {
 		dflt := []string{"-local", "AS64496", "-peer", "AS64500", "-session", c.file, "-dump", reg, "-af", "ipv4", "-direction", "import"}
 		code, out, stderr = run(t, dflt...)
@@ -1014,19 +1030,36 @@ source: TEST
 // port until the test ends, and returns its address.
 func serve(t *testing.T, text string) string {
 	t.Helper()
-	c := &resolve.Corpus{KeepPolicy: true, KeepRouteText: true}
-	for o, diags := range rpsl.Parse(strings.NewReader(text)) {
-		if o == nil {
-			t.Fatalf("%v", diags)
+	return serveRegistries(t, registryText{"TEST", text})
+}
+
+// registryText is one registry an in-process IRRd serves: its name and its
+// objects, as RPSL text of that one source.
+type registryText struct{ name, text string }
+
+// serveRegistries serves the registries on a localhost port until the test
+// ends, with all of them, in the order given, as the server's default
+// source list, and returns its address.
+func serveRegistries(t *testing.T, regs ...registryText) string {
+	t.Helper()
+	var built []*irrdq.Registry
+	var names []string
+	for _, r := range regs {
+		c := &resolve.Corpus{KeepPolicy: true, KeepRouteText: true}
+		for o, diags := range rpsl.Parse(strings.NewReader(r.text)) {
+			if o == nil {
+				t.Fatalf("%v", diags)
+			}
+			obj, _ := rpsl.Decode(o)
+			c.Put(obj)
 		}
-		obj, _ := rpsl.Decode(o)
-		c.Put(obj)
+		reg, err := irrdq.NewRegistry(r.name, 0, c)
+		if err != nil {
+			t.Fatal(err)
+		}
+		built, names = append(built, reg), append(names, r.name)
 	}
-	reg, err := irrdq.NewRegistry("TEST", 0, c)
-	if err != nil {
-		t.Fatal(err)
-	}
-	snap, err := irrdq.NewSnapshot([]*irrdq.Registry{reg}, irrdq.SnapshotOptions{Default: []string{"TEST"}})
+	snap, err := irrdq.NewSnapshot(built, irrdq.SnapshotOptions{Default: names})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1235,7 +1268,7 @@ func TestJSONView(t *testing.T) {
 	for _, g := range goldens {
 		t.Run(g.name, func(t *testing.T) {
 			_, out, stderr := run(t, append(slices.Clone(g.args), "-format", "json")...)
-			if stderr != "" {
+			if stderr != noneNote {
 				t.Fatalf("stderr %s", stderr)
 			}
 			dec := json.NewDecoder(strings.NewReader(out))
@@ -1317,4 +1350,333 @@ func compact(t *testing.T, s string) string {
 		t.Fatal(err)
 	}
 	return b.String()
+}
+
+// noneNote is the stderr line of a run whose registry holds none of the
+// default verified sources (the golden policy's source is TEST).
+const noneNote = "routecheck: route objects: none of the verified sources (RIPE, APNIC, ARIN, AFRINIC, LACNIC) is present; answers are not marked\n"
+
+func TestParseVerifiedSources(t *testing.T) {
+	got, err := parseVerifiedSources(" ripe , arin ")
+	if err != nil || !slices.Equal(got, []string{"RIPE", "ARIN"}) {
+		t.Errorf(`parseVerifiedSources(" ripe , arin ") = %q, %v; want [RIPE ARIN]`, got, err)
+	}
+	for _, c := range []struct{ in, want string }{
+		{"", "-verified-sources"},
+		{",", "empty"},
+		{"RIPE,ripe", "RIPE"},
+		{"RIPE,,ARIN", "empty"},
+		{"RIPE!", `"RIPE!"`},
+		{"RIPE,AR IN", `"AR IN"`},
+	} {
+		got, err := parseVerifiedSources(c.in)
+		if err == nil {
+			t.Errorf("parseVerifiedSources(%q) = %q, want an error", c.in, got)
+			continue
+		}
+		wantContains(t, fmt.Sprintf("parseVerifiedSources(%q)", c.in), err.Error(), c.want)
+	}
+}
+
+// The verified-marking fixture: a RADB registry with the policies and two
+// routes, and a RIPE one (its source: in lower case) holding one of them.
+// AS64500 announces both, and a third with no route object.
+const (
+	verifiedRADB = `aut-num: AS64496
+import: from AS64500 accept ANY
+source: RADB
+
+aut-num: AS64500
+export: to AS64496 announce ANY
+source: RADB
+
+route: 192.0.2.0/24
+origin: AS64500
+source: RADB
+
+route: 203.0.113.0/24
+origin: AS64500
+source: RADB
+`
+	verifiedRIPE = `route: 192.0.2.0/24
+origin: AS64500
+source: ripe
+`
+)
+
+// verifiedCapture is AS64500 announcing 192.0.2.0/24 (in RIPE and RADB),
+// 203.0.113.0/24 (in RADB alone) and 198.51.100.0/24 (in neither).
+func verifiedCapture(t *testing.T) string {
+	t.Helper()
+	return write(t, "verified.mrt", gUpdate(gAt(1), gX, gL, "192.0.2.1", "192.0.2.2", nil,
+		gNLRI("192.0.2.0/24", "203.0.113.0/24", "198.51.100.0/24"), gAttrs("192.0.2.1", gSeq(gX))))
+}
+
+// verifiedDumps writes the fixture's two dumps, RADB's first.
+func verifiedDumps(t *testing.T) (radb, ripe string) {
+	t.Helper()
+	return write(t, "radb.txt", []byte(verifiedRADB)), write(t, "ripe.txt", []byte(verifiedRIPE))
+}
+
+// routeObjAnswers reads a -format json output's route-object answers, by
+// prefix, as "RouteObj/RouteObjVerified" in JSON ("true/null"), from every
+// report; two reports that disagree on a route are an error.
+func routeObjAnswers(t *testing.T, out string) map[string]string {
+	t.Helper()
+	var doc []map[string]any
+	if err := json.Unmarshal([]byte(out), &doc); err != nil {
+		t.Fatalf("%v\n%s", err, out)
+	}
+	text := func(v any) string {
+		b, err := json.Marshal(v)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return string(b)
+	}
+	got := map[string]string{}
+	add := func(rep any) {
+		m, _ := rep.(map[string]any)
+		routes, _ := m["Routes"].([]any)
+		for _, r := range routes {
+			rv := r.(map[string]any)
+			p := rv["Route"].(map[string]any)["Prefix"].(string)
+			a := text(rv["RouteObj"]) + "/" + text(rv["RouteObjVerified"])
+			if old, ok := got[p]; ok && old != a {
+				t.Errorf("%s: %s in one report, %s in another", p, old, a)
+			}
+			got[p] = a
+		}
+	}
+	for _, res := range doc {
+		add(res["Import"])
+		exps, _ := res["Export"].([]any)
+		for _, e := range exps {
+			add(e)
+		}
+	}
+	return got
+}
+
+// wantDumpAnswers are the fixture's answers with RIPE the verified source.
+var wantDumpAnswers = map[string]string{
+	"192.0.2.0/24":    "true/true",
+	"203.0.113.0/24":  "true/false",
+	"198.51.100.0/24": "false/false",
+}
+
+// TestVerifiedNoneLoaded: a registry holding no verified source turns the
+// marking off, with one stderr note: every answer's RouteObjVerified is null
+// and the text never says "unverified only".
+func TestVerifiedNoneLoaded(t *testing.T) {
+	code, out, stderr := run(t, session("-format", "json")...)
+	if code != exitRejected {
+		t.Fatalf("exit %d; stderr %s", code, stderr)
+	}
+	if stderr != noneNote {
+		t.Errorf("stderr %q, want %q", stderr, noneNote)
+	}
+	answers := routeObjAnswers(t, out)
+	if len(answers) == 0 {
+		t.Fatalf("no route-object answer:\n%s", out)
+	}
+	for p, a := range answers {
+		if !strings.HasSuffix(a, "/null") {
+			t.Errorf("%s: %s, want RouteObjVerified null", p, a)
+		}
+	}
+	_, out, _ = run(t, session("-routes", "all")...)
+	if strings.Contains(out, "unverified only") {
+		t.Errorf("text says unverified only with the marking off:\n%s", out)
+	}
+
+	// A -policy draft's source does not make a verified source present: it
+	// supplies no route object.
+	draft := write(t, "draft.txt", []byte("aut-num: AS64496\nimport: from AS64500 accept ANY\nsource: RIPE\n"))
+	_, out, stderr = run(t, session("-policy", draft, "-format", "json")...)
+	wantContains(t, "stderr", stderr, strings.TrimSuffix(noneNote, "\n"))
+	for p, a := range routeObjAnswers(t, out) {
+		if !strings.HasSuffix(a, "/null") {
+			t.Errorf("draft in RIPE: %s: %s, want RouteObjVerified null", p, a)
+		}
+	}
+}
+
+// TestVerifiedDump: with -dump the verified answer is over the dumps' own
+// verified sources (compared without regard to case).
+func TestVerifiedDump(t *testing.T) {
+	radb, ripe := verifiedDumps(t)
+	code, out, stderr := run(t, "-local", "AS64496", "-peer", "AS64500", "-session", verifiedCapture(t),
+		"-dump", radb, "-dump", ripe, "-af", "ipv4", "-format", "json")
+	if code != exitOK {
+		t.Fatalf("exit %d; stderr %s\n%s", code, stderr, out)
+	}
+	if want := "routecheck: route objects: verified sources RIPE; absent: APNIC, ARIN, AFRINIC, LACNIC\n"; stderr != want {
+		t.Errorf("stderr %q, want %q", stderr, want)
+	}
+	if got := routeObjAnswers(t, out); !reflect.DeepEqual(got, wantDumpAnswers) {
+		t.Errorf("answers %v, want %v", got, wantDumpAnswers)
+	}
+}
+
+// TestTextUnverifiedOnly: with the marking on, the text says "unverified
+// only" on a route object only RADB holds, and the report line counts them.
+func TestTextUnverifiedOnly(t *testing.T) {
+	radb, ripe := verifiedDumps(t)
+	code, out, stderr := run(t, "-local", "AS64496", "-peer", "AS64500", "-session", verifiedCapture(t),
+		"-dump", radb, "-dump", ripe, "-af", "ipv4", "-direction", "import", "-routes", "all")
+	if code != exitOK {
+		t.Fatalf("exit %d; stderr %s\n%s", code, stderr, out)
+	}
+	wantContains(t, "text", out,
+		"; route objects 2 yes (1 unverified only), 1 no\n",
+		"192.0.2.0/24  AS64500  accepted by clause 1  route object yes\n",
+		"203.0.113.0/24  AS64500  accepted by clause 1  route object yes (unverified only)\n",
+		"198.51.100.0/24  AS64500  accepted by clause 1  route object no\n")
+
+	// A dump with no verified source turns the marking off: no mention.
+	code, out, stderr = run(t, "-local", "AS64496", "-peer", "AS64500", "-session", verifiedCapture(t),
+		"-dump", radb, "-af", "ipv4", "-direction", "import", "-routes", "all")
+	if code != exitOK {
+		t.Fatalf("radb only: exit %d; stderr %s\n%s", code, stderr, out)
+	}
+	wantContains(t, "marking off", out, "; route objects 2 yes, 1 no\n", "203.0.113.0/24  AS64500  accepted by clause 1  route object yes\n")
+	if strings.Contains(out, "unverified") {
+		t.Errorf("marking off, but the text says unverified:\n%s", out)
+	}
+}
+
+// TestJSONRouteObjVerified: the JSON holds RouteObjVerified per route and
+// the report's three counts.
+func TestJSONRouteObjVerified(t *testing.T) {
+	radb, ripe := verifiedDumps(t)
+	code, out, stderr := run(t, "-local", "AS64496", "-peer", "AS64500", "-session", verifiedCapture(t),
+		"-dump", radb, "-dump", ripe, "-af", "ipv4", "-direction", "import", "-format", "json")
+	if code != exitOK {
+		t.Fatalf("exit %d; stderr %s\n%s", code, stderr, out)
+	}
+	var doc []struct{ Import map[string]any }
+	if err := json.Unmarshal([]byte(out), &doc); err != nil || len(doc) != 1 {
+		t.Fatalf("%v\n%s", err, out)
+	}
+	rep := doc[0].Import
+	for k, want := range map[string]float64{"RouteObjYes": 2, "RouteObjUnverifiedOnly": 1, "RouteObjNo": 1} {
+		if rep[k] != want {
+			t.Errorf("%s = %v, want %v", k, rep[k], want)
+		}
+	}
+	if got := routeObjAnswers(t, out); !reflect.DeepEqual(got, wantDumpAnswers) {
+		t.Errorf("answers %v, want %v", got, wantDumpAnswers)
+	}
+}
+
+// TestVerifiedIRRdPartial: a server serving only some verified sources. IRRd
+// refuses a whole "!s" list naming one it does not serve, so each is probed
+// alone: the run succeeds, names the absent ones, and answers as over the
+// same registries' dumps.
+func TestVerifiedIRRdPartial(t *testing.T) {
+	srv := serveRegistries(t, registryText{"RADB", verifiedRADB}, registryText{"RIPE", verifiedRIPE})
+	args := []string{"-local", "AS64496", "-peer", "AS64500", "-session", verifiedCapture(t), "-irrd", srv, "-af", "ipv4", "-format", "json"}
+	code, out, stderr := run(t, args...)
+	if code != exitOK {
+		t.Fatalf("exit %d; stderr %s\n%s", code, stderr, out)
+	}
+	if want := "routecheck: route objects: verified sources RIPE; absent: APNIC, ARIN, AFRINIC, LACNIC\n"; stderr != want {
+		t.Errorf("stderr %q, want %q", stderr, want)
+	}
+	if got := routeObjAnswers(t, out); !reflect.DeepEqual(got, wantDumpAnswers) {
+		t.Errorf("answers %v, want %v", got, wantDumpAnswers)
+	}
+
+	// The verified sources are limited to -sources: RIPE left out turns the
+	// marking off.
+	code, out, stderr = run(t, append(slices.Clone(args), "-sources", "RADB")...)
+	if code != exitOK {
+		t.Fatalf("-sources RADB: exit %d; stderr %s\n%s", code, stderr, out)
+	}
+	if stderr != noneNote {
+		t.Errorf("-sources RADB: stderr %q, want %q", stderr, noneNote)
+	}
+	for p, a := range routeObjAnswers(t, out) {
+		if !strings.HasSuffix(a, "/null") {
+			t.Errorf("-sources RADB: %s: %s, want RouteObjVerified null", p, a)
+		}
+	}
+
+	// A probe that fails otherwise than by a refusal fails the run, naming
+	// the source probed.
+	dead := closedPort(t)
+	code, _, stderr = run(t, "-local", "AS64496", "-peer", "AS64500", "-session", verifiedCapture(t), "-irrd", dead)
+	if code != exitFailed {
+		t.Errorf("unreachable: exit %d, want %d; stderr %s", code, exitFailed, stderr)
+	}
+	wantContains(t, "unreachable stderr", stderr, "RIPE", dead)
+}
+
+// TestVerifiedProbes: a source named in -sources that the server refuses is
+// absent, and a context error during a probe fails the load (never
+// "absent").
+func TestVerifiedProbes(t *testing.T) {
+	srv := serveRegistries(t, registryText{"RADB", verifiedRADB}, registryText{"RIPE", verifiedRIPE})
+	defaults, err := parseVerifiedSources("RIPE,APNIC,ARIN,AFRINIC,LACNIC")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	cfg := &config{irrd: srv, sources: []string{"RIPE", "APNIC"}, verified: defaults}
+	reg, err := loadPolicy(context.Background(), cfg, io.Discard)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer reg.close()
+	if want := "route objects: verified sources RIPE; absent: APNIC, ARIN, AFRINIC, LACNIC"; reg.verifiedNote != want {
+		t.Errorf("-sources RIPE,APNIC: note %q, want %q", reg.verifiedNote, want)
+	}
+	if reg.verified == nil {
+		t.Error("-sources RIPE,APNIC: the marking is off, want it on over RIPE")
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	reg, err = loadPolicy(ctx, &config{irrd: srv, verified: defaults}, io.Discard)
+	if err == nil {
+		reg.close()
+		t.Fatalf("cancelled: loaded with note %q, want an error", reg.verifiedNote)
+	}
+	if !errors.Is(err, context.Canceled) {
+		t.Errorf("cancelled: %v, want context.Canceled", err)
+	}
+	wantContains(t, "cancelled error", err.Error(), "probing the verified source RIPE")
+}
+
+// TestVerifiedSourcesFlag: -verified-sources replaces the list; the present
+// ones are named in the order the dumps' sources first appear.
+func TestVerifiedSourcesFlag(t *testing.T) {
+	radb, ripe := verifiedDumps(t)
+	args := []string{"-local", "AS64496", "-peer", "AS64500", "-session", verifiedCapture(t),
+		"-dump", radb, "-dump", ripe, "-af", "ipv4", "-format", "json"}
+
+	code, out, stderr := run(t, append(slices.Clone(args), "-verified-sources", "RADB")...)
+	if code != exitOK {
+		t.Fatalf("RADB: exit %d; stderr %s\n%s", code, stderr, out)
+	}
+	if want := "routecheck: route objects: verified sources RADB\n"; stderr != want {
+		t.Errorf("RADB: stderr %q, want %q", stderr, want)
+	}
+	want := map[string]string{"192.0.2.0/24": "true/true", "203.0.113.0/24": "true/true", "198.51.100.0/24": "false/false"}
+	if got := routeObjAnswers(t, out); !reflect.DeepEqual(got, want) {
+		t.Errorf("RADB: answers %v, want %v", got, want)
+	}
+
+	_, _, stderr = run(t, append(slices.Clone(args), "-verified-sources", "ripe,JPIRR,radb")...)
+	if want := "routecheck: route objects: verified sources RADB, RIPE; absent: JPIRR\n"; stderr != want {
+		t.Errorf("ripe,JPIRR,radb: stderr %q, want %q", stderr, want)
+	}
+
+	for _, bad := range []string{"", "RIPE,ripe", "RIPE!"} {
+		code, _, stderr = run(t, append(slices.Clone(args), "-verified-sources", bad)...)
+		if code != exitUsage {
+			t.Errorf("-verified-sources %q: exit %d, want %d; stderr %s", bad, code, exitUsage, stderr)
+		}
+	}
 }

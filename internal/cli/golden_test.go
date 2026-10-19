@@ -150,8 +150,8 @@ func TestGoldens(t *testing.T) {
 				if code != g.exit {
 					t.Errorf("exit %d, want %d; stderr:\n%s", code, g.exit, stderr.String())
 				}
-				if stderr.Len() > 0 {
-					t.Errorf("stderr:\n%s", stderr.String())
+				if stderr.String() != noneNote {
+					t.Errorf("stderr:\n%s\nwant only:\n%s", stderr.String(), noneNote)
 				}
 				checkFile(t, filepath.Join("testdata", "golden", g.name+"."+ext), stdout.Bytes())
 			})

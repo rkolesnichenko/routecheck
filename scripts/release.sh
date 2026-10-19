@@ -14,9 +14,10 @@
 # published go.mod is the tagged one, and that
 # `go install .../cmd/routecheck@vX.Y.Z` builds a binary that prints
 # testdata/golden/session.txt byte for byte (with exit status 1: that session
-# has Rejected routes); build routecheck for five platforms from the published
-# module, and create the GitHub release (from the changelog section) with the
-# archives and SHA256SUMS attached, using gh.
+# has Rejected routes, and only the verified-sources note on stderr); build
+# routecheck for five platforms from the published module, and create the
+# GitHub release (from the changelog section) with the archives and
+# SHA256SUMS attached, using gh.
 #
 # Adapted from mrt's scripts/release.sh (github.com/rkolesnichenko/mrt).
 #
@@ -56,9 +57,11 @@ case $V in *[!0-9v.a-zA-Z+-]*) usage ;; esac
 X=${V#v} # the version as CHANGELOG.md writes it
 M=github.com/rkolesnichenko/routecheck
 # The golden the installed binary must print, run from the module's root (it
-# prints file names as given), and the exit status it must give.
+# prints file names as given), the exit status it must give, and its one
+# stderr line (the golden registry holds no verified source).
 GOLDEN=testdata/golden/session.txt
 GOLDEN_EXIT=1
+GOLDEN_ERR='routecheck: route objects: none of the verified sources (RIPE, APNIC, ARIN, AFRINIC, LACNIC) is present; answers are not marked'
 golden_run() {
 	"$1" -local AS64496 -peer AS64500 -session testdata/session/golden.mrt \
 		-dump testdata/irr/golden-policy.txt -vrps testdata/rpki/vrps.json -routes all
@@ -242,7 +245,8 @@ check_golden() {
 	(cd "$dir" && golden_run "$1") >"$tmp/golden.out" 2>"$tmp/golden.err" || rc=$?
 	[ "$rc" -eq "$GOLDEN_EXIT" ] || { cat "$tmp/golden.err" >&2; fail "$2: exit status $rc on the golden session, not $GOLDEN_EXIT"; }
 	cmp -s "$tmp/golden.out" "$dir/$GOLDEN" || fail "$2: the output differs from $GOLDEN"
-	[ ! -s "$tmp/golden.err" ] || { cat "$tmp/golden.err" >&2; fail "$2: wrote to stderr on the golden session"; }
+	printf '%s\n' "$GOLDEN_ERR" >"$tmp/golden.err.want"
+	cmp -s "$tmp/golden.err" "$tmp/golden.err.want" || { cat "$tmp/golden.err" >&2; fail "$2: wrote to stderr on the golden session other than: $GOLDEN_ERR"; }
 }
 check_golden "$tmp/bin/routecheck" "the installed routecheck"
 echo "routecheck@$V installs and prints $GOLDEN"

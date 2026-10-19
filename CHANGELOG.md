@@ -8,6 +8,44 @@ a minor version may change the API.
 
 ## [Unreleased]
 
+### Added
+
+- Each route-object answer says whether a verified registry backs it. By default the verified sources are the
+  five RIRs (RIPE, APNIC, ARIN, AFRINIC, LACNIC); `-verified-sources LIST` replaces them (an empty list, an empty
+  item or a duplicate is refused with exit status 2). A "yes" that only other registries (by default RADB and its
+  mirrors) back reads "yes (unverified only)": weaker evidence, not wrong. Verdicts, filters and exit status do not
+  change.
+  - The verified sources are those present: loaded with `-dump`, or, with `-irrd`, served (each probed alone at
+    startup, within `-sources` when given). One stderr line names them and the absent ones; when none is
+    present, the answers are not marked.
+  - Library: `Checker.VerifiedRoutes`, `RouteVerdict.RouteObjVerified` (asked only when `RouteObj` is true),
+    `Report.RouteObjYes`, `RouteObjUnverifiedOnly` and `RouteObjNo`; `hygiene.Checker.Verified` and
+    `VerifiedRouteObject`.
+
+### Changed
+
+- The text report line ends with the route-object counts (`; route objects N yes (M unverified only), K no`; without
+  the parenthesis when the answers are not marked), and a route listed by `-routes` reads `route object yes
+  (unverified only)` where that applies. The JSON gains `RouteObjVerified` and the three counts.
+- Every run that checks routes prints one `routecheck: route objects: ...` line on stderr after the check.
+- With `-irrd`, a server that cannot be reached while the verified sources are probed is exit status 3 even when
+  the capture would otherwise give a usage error (exit status 2): the probe comes first.
+
+### Measured, verified marking
+
+The command on AS9086 from AS6762, every registry, `-max-prefixes 2097152`, on the 2026-10-18 files, under the
+memory guard (8 GB cap, normal priority, `GOMAXPROCS=4`, `GOMEMLIMIT=6GiB`), on the machine of v0.4.0's
+figures (`.data/verified-counts-2097152.log`):
+
+| | "yes" | of them unverified only | "no" |
+|---|---|---|---|
+| AS9086's import (1 report with routes) | 717,629 | 253,107 (35.27%) | 260,560 |
+| AS6762's export (55 reports with routes) | 1,133,392 | 394,877 (34.84%) | 495,720 |
+
+- Verdicts equal v0.4.0's (978,368 import routes accepted; export 1,194,673 accepted / 33,968 rejected / 400,748
+  undecided over 75 reports).
+- Peak RSS 6,421 MB (6,322 MB in a run without the text counts, `.data/verified-cli-2097152.log`; v0.4.0: 6,511 MB).
+
 ### Added (tests only)
 
 - The opt-in real-data test writes its missing sets and its rejected routes (`ROUTECHECK_REALDATA_OUT`), tracks a
