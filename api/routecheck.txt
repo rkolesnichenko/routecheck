@@ -10,6 +10,7 @@ type Checker struct
 	Routes resolve.Source
 	VerifiedRoutes resolve.Source
 func (*Checker) Check(ctx context.Context, mode Mode, records iter.Seq2[mrt.Record, error], o Options) ([]Result, error)
+func (*Checker) CheckEach(ctx context.Context, mode Mode, records iter.Seq2[mrt.Record, error], o Options, f func(res *Result, dir Direction, rep *Report) error) ([]Result, error)
 type Coverage struct
 	Session *observe.SessionInfo
 	Collector *observe.CollectorInfo

@@ -233,7 +233,51 @@ const ctxEvery = 4096
 // error from Routes or from VerifiedRoutes, and ctx's error once it is done
 // (also while observe reads the input, which it reads whole before yielding a
 // route). Errors for options wrap ErrOptions.
+//
+// Check holds every Report, each with its policy's expanded sets and its
+// route verdicts, until it returns; CheckEach hands each one over as it is
+// built and keeps none.
 func (c *Checker) Check(ctx context.Context, mode Mode, records iter.Seq2[mrt.Record, error], o Options) ([]Result, error) {
+	imports := map[types.AddrFamily]*Report{}
+	exports := map[types.AddrFamily][]Report{}
+	results, err := c.CheckEach(ctx, mode, records, o, func(res *Result, dir Direction, rep *Report) error {
+		if dir == DirImport {
+			imports[res.AF] = rep
+		} else {
+			exports[res.AF] = append(exports[res.AF], *rep)
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	for i := range results {
+		r := &results[i]
+		r.Import = imports[r.AF]
+		if r.Export != nil {
+			r.Export = append(r.Export, exports[r.AF]...)
+		}
+	}
+	return results, nil
+}
+
+// CheckEach is Check, handing each finished report to f instead of keeping
+// it. f is called per family, in o.AF's order, first with the import report
+// (dir DirImport), then with the export reports (DirExport) in Check's
+// order: toward L in session mode, by neighbour AS in collector mode.
+//
+// res is that family's Result, complete before its first report (its
+// Coverage, DirectNotChecked included), with Import and Export nil; f must
+// not modify it. f may keep rep: CheckEach holds no reference to it once f
+// returns, so a report f drops can be freed while the check goes on.
+//
+// CheckEach returns Check's Results with every report removed: Import nil,
+// and Export nil when the export direction is not checked and an empty
+// non-nil slice when it is, whatever the number of reports. An error from f
+// stops the check, and CheckEach returns it as is, with no Results; it
+// returns every other error as Check does.
+func (c *Checker) CheckEach(ctx context.Context, mode Mode, records iter.Seq2[mrt.Record, error], o Options,
+	f func(res *Result, dir Direction, rep *Report) error) ([]Result, error) {
 	afs, dirs, err := o.check(mode)
 	if err != nil {
 		return nil, err
@@ -317,12 +361,17 @@ func (c *Checker) Check(ctx context.Context, mode Mode, records iter.Seq2[mrt.Re
 			res.Coverage.Collector = &ci
 		}
 		fam := r.family(a, byAF[a])
+		if mode == ModeCollector && dirs&DirExport != 0 {
+			res.Coverage.DirectNotChecked = fam.direct()
+		}
 		if dirs&DirImport != 0 {
 			rep, err := fam.report(peval.Session{Local: local, Peer: o.Peer, LocalRtr: o.LocalRtr, PeerRtr: o.PeerRtr, AF: a}, false, nil)
 			if err != nil {
 				return nil, err
 			}
-			res.Import = &rep
+			if err := f(&res, DirImport, &rep); err != nil {
+				return nil, err
+			}
 		}
 		if dirs&DirExport != 0 {
 			if mode == ModeSession {
@@ -330,14 +379,13 @@ func (c *Checker) Check(ctx context.Context, mode Mode, records iter.Seq2[mrt.Re
 				if err != nil {
 					return nil, err
 				}
-				res.Export = []Report{rep}
-			} else {
-				reps, direct, err := fam.perNeighbour(o.Peer)
-				if err != nil {
+				if err := f(&res, DirExport, &rep); err != nil {
 					return nil, err
 				}
-				res.Export, res.Coverage.DirectNotChecked = reps, direct
+			} else if err := fam.perNeighbour(o.Peer, func(rep *Report) error { return f(&res, DirExport, rep) }); err != nil {
+				return nil, err
 			}
+			res.Export = []Report{}
 		}
 		results = append(results, res)
 		// Its reports are built: release the family's observations (R14).
@@ -620,18 +668,25 @@ func (f *famRun) hygiene(i int) (routeHygiene, error) {
 	return *h, nil
 }
 
+// direct counts the observations seen on X's direct feed to a collector
+// (Coverage.DirectNotChecked).
+func (f *famRun) direct() int {
+	n := 0
+	for i := range f.obs {
+		if f.obs[i].Evidence.Direct {
+			n++
+		}
+	}
+	return n
+}
+
 // perNeighbour is collector mode's export: one Report per neighbour AS X
-// was seen announcing to, by AS, over the observations naming it, and the
-// count of observations seen on a direct feed.
-func (f *famRun) perNeighbour(x types.ASN) ([]Report, int, error) {
-	direct := 0
+// was seen announcing to, by AS, over the observations naming it, each
+// handed to each as soon as it is built and kept no longer.
+func (f *famRun) perNeighbour(x types.ASN, each func(rep *Report) error) error {
 	byN := map[types.ASN][]int{}
 	for i := range f.obs {
-		e := &f.obs[i].Evidence
-		if e.Direct {
-			direct++
-		}
-		for _, n := range e.Neighbours {
+		for _, n := range f.obs[i].Evidence.Neighbours {
 			byN[n] = append(byN[n], i)
 		}
 	}
@@ -640,13 +695,14 @@ func (f *famRun) perNeighbour(x types.ASN) ([]Report, int, error) {
 		ns = append(ns, n)
 	}
 	slices.Sort(ns)
-	reps := make([]Report, 0, len(ns))
 	for _, n := range ns {
 		rep, err := f.report(peval.Session{Local: x, Peer: n, AF: f.af}, true, byN[n])
 		if err != nil {
-			return nil, 0, err
+			return err
 		}
-		reps = append(reps, rep)
+		if err := each(&rep); err != nil {
+			return err
+		}
 	}
-	return reps, direct, nil
+	return nil
 }
