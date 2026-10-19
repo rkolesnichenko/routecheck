@@ -77,6 +77,9 @@ func TestParseRADB(t *testing.T) {
 		{"none cut short", radbNone[:20], "bad", nil},
 		{"error", "%% ERROR: Unknown source FOO\n\n\n", "bad", nil},
 		{"another class", radbFound("aut-num: AS1\nsource: RADB\n"), "bad", nil},
+		{"found, CRLF", strings.ReplaceAll(radbFound(x), "\n", "\r\n"), "found", []string{x}},
+		{"none, CRLF", strings.ReplaceAll(radbNone, "\n", "\r\n"), "none", nil},
+		{"found, CRLF, cut short", strings.ReplaceAll(radbFound(x), "\n", "\r\n")[:len(x)], "bad", nil},
 	} {
 		objs, kind := parseRADB(c.text)
 		if kind != c.kind || !slices.Equal(objs, c.objs) {
@@ -90,6 +93,8 @@ func TestParseRIPEHistory(t *testing.T) {
 		{"deleted", ripeHistDeleted, "deleted", "2024-02-09"},
 		{"none", ripeHistNone, "none", ""},
 		{"exists", ripeHistVersions, "exists", ""},
+		{"re-created after a deletion", strings.Replace(ripeHistVersions, "rev#       Date",
+			"% This object was deleted on 2024-02-09T21:50:56Z\n\nrev#       Date", 1), "exists", ""},
 		{"banner only (AS-ISPSERVICES)", ripeBanner, "bad", ""},
 		{"empty", "", "bad", ""},
 		{"versions cut short", ripeHistVersions[:len(ripeHistVersions)-90], "bad", ""},
@@ -322,17 +327,27 @@ func whoisServer(t *testing.T, serve func(c net.Conn, query string)) (string, *a
 
 func TestWhoisCutShort(t *testing.T) {
 	found := radbFound(asSet("AS-X", "LEVEL3"))
+	hold := func(c net.Conn, text string) { io.WriteString(c, text); io.Copy(io.Discard, c) }
 	for _, c := range []struct {
-		name  string
-		serve func(c net.Conn, q string)
+		name string
+		svc  string // the service cut short; the other answers none
+		cut  func(c net.Conn)
 	}{
-		{"half an answer", func(c net.Conn, q string) { io.WriteString(c, found[:len(found)/2]) }},
-		{"nothing", func(net.Conn, string) {}},
-		{"no answer before the deadline", func(c net.Conn, _ string) { io.Copy(io.Discard, c) }},
+		{"half an answer", "radb", func(c net.Conn) { io.WriteString(c, found[:len(found)/2]) }},
+		{"nothing", "radb", func(net.Conn) {}},
+		{"no answer before the deadline", "radb", func(c net.Conn) { hold(c, "") }},
+		{"full answer, then the deadline", "radb", func(c net.Conn) { hold(c, radbNone) }},
+		{"history: full answer, then the deadline", "ripe", func(c net.Conn) { hold(c, ripeHistNone) }},
+		{"history: deleted, then the deadline", "ripe", func(c net.Conn) { hold(c, ripeHistDeleted) }},
 	} {
 		t.Run(c.name, func(t *testing.T) {
-			radb, radbConns := whoisServer(t, c.serve)
-			ripe, ripeConns := whoisServer(t, func(c net.Conn, _ string) { io.WriteString(c, ripeHistNone) })
+			serve := map[string]func(net.Conn, string){
+				"radb": func(conn net.Conn, _ string) { io.WriteString(conn, radbNone) },
+				"ripe": func(conn net.Conn, _ string) { io.WriteString(conn, ripeHistNone) },
+			}
+			serve[c.svc] = func(conn net.Conn, _ string) { c.cut(conn) }
+			radb, radbConns := whoisServer(t, serve["radb"])
+			ripe, ripeConns := whoisServer(t, serve["ripe"])
 			var waits int
 			r := testRun(t, t.TempDir(), (&net.Dialer{}).DialContext, 100, &waits)
 			r.radbAddr, r.ripeAddr, r.timeout = radb, ripe, 300*time.Millisecond
@@ -340,16 +355,20 @@ func TestWhoisCutShort(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if row.Class != "inconclusive" || radbConns.Load() != 2 || ripeConns.Load() != 1 || waits != 1 || r.asked != 3 {
-				t.Errorf("class %q after %d RADB and %d RIPE connections, %d waits, %d queries; want inconclusive after 2, 1, 1, 3",
-					row.Class, radbConns.Load(), ripeConns.Load(), waits, r.asked)
+			conns := map[string]int32{"radb": radbConns.Load(), "ripe": ripeConns.Load()}
+			if row.Class != "inconclusive" || conns[c.svc] != 2 || radbConns.Load()+ripeConns.Load() != 3 || waits != 1 || r.asked != 3 {
+				t.Errorf("class %q after %d RADB and %d RIPE connections, %d waits, %d queries; want inconclusive after 2 to %s and 1 to the other, 1, 3",
+					row.Class, radbConns.Load(), ripeConns.Load(), waits, r.asked, c.svc)
 			}
 			name := cacheName("AS-X")
-			if _, err := os.Stat(filepath.Join(r.dir, "cache", "radb", name+".txt")); !errors.Is(err, os.ErrNotExist) {
-				t.Errorf("an inconclusive answer is cached (%v); it must be asked again", err)
-			}
-			if _, err := os.Stat(filepath.Join(r.dir, "cache", "ripe", name+".txt")); err != nil {
-				t.Errorf("RIPE's answer is not cached: %v", err)
+			for _, svc := range []string{"radb", "ripe"} {
+				_, err := os.Stat(filepath.Join(r.dir, "cache", svc, name+".txt"))
+				if svc == c.svc && !errors.Is(err, os.ErrNotExist) {
+					t.Errorf("%s: an inconclusive answer is cached (%v); it must be asked again", svc, err)
+				}
+				if svc != c.svc && err != nil {
+					t.Errorf("%s: a conclusive answer is not cached: %v", svc, err)
+				}
 			}
 		})
 	}
@@ -357,6 +376,88 @@ func TestWhoisCutShort(t *testing.T) {
 	big, _ := whoisServer(t, func(c net.Conn, _ string) { c.Write(make([]byte, 4<<20+1)) })
 	if _, err := whoisQuery(context.Background(), (&net.Dialer{}).DialContext, big, "AS-X"); err == nil {
 		t.Error("an answer over 4 MiB is not an error")
+	}
+}
+
+func TestCachedAnswerRechecked(t *testing.T) {
+	dir := t.TempDir()
+	f := &fakeWhois{answer: func(string, string) string { return radbNone }}
+	r := testRun(t, dir, f.dial, 100, nil)
+	cached := map[string]string{
+		"RADB::AS-A": radbNone[:20],                        // cut short
+		"RADB::AS-B": radbFound(asSet("AS-OTHER", "RADB")), // names another set
+		"RADB::AS-C": radbNone,                             // conclusive
+	}
+	var refs []types.SetRef
+	for _, s := range []string{"RADB::AS-A", "RADB::AS-B", "RADB::AS-C"} {
+		refs = append(refs, mustRef(t, s))
+		if err := os.WriteFile(filepath.Join(dir, "cache", "radb", cacheName(s)+".txt"), []byte(cached[s]), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	rows, err := r.lookupAll(context.Background(), refs)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, row := range rows {
+		if row.Class != "not found" {
+			t.Errorf("%s: class %q, want not found", row.Set, row.Class)
+		}
+	}
+	want := []string{
+		"radb.test:43 -r -s RADB -T " + setClasses + " AS-A",
+		"radb.test:43 -r -s RADB -T " + setClasses + " AS-B",
+	}
+	if !slices.Equal(f.queries, want) {
+		t.Errorf("queries = %q, want %q", f.queries, want)
+	}
+	for _, s := range []string{"RADB::AS-A", "RADB::AS-B"} {
+		file := filepath.Join(dir, "cache", "radb", cacheName(s))
+		if b, err := os.ReadFile(file + ".txt"); err != nil || string(b) != radbNone {
+			t.Errorf("%s: cache holds %q (%v), want the new answer", s, b, err)
+		}
+		if b, err := os.ReadFile(file + ".bad.txt"); err != nil || string(b) != cached[s] {
+			t.Errorf("%s: .bad.txt holds %q (%v), want the old answer", s, b, err)
+		}
+	}
+	ents, _ := os.ReadDir(filepath.Join(dir, "cache", "radb"))
+	for _, e := range ents {
+		if strings.HasPrefix(e.Name(), ".tmp-") {
+			t.Errorf("a temp file is left: %s", e.Name())
+		}
+	}
+}
+
+func TestServiceStops(t *testing.T) {
+	dir := t.TempDir()
+	reset := func(context.Context, string, string) (net.Conn, error) {
+		return nil, errors.New("read tcp: connection reset by peer")
+	}
+	r := testRun(t, dir, reset, 100, nil)
+	r.stopAfter = 5
+	var refs []types.SetRef
+	for i := 1; i <= 7; i++ {
+		refs = append(refs, mustRef(t, fmt.Sprintf("RADB::AS-S%d", i)))
+	}
+	rows, err := r.lookupAll(context.Background(), refs)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for i, row := range rows {
+		want := "inconclusive"
+		if i >= 5 {
+			want = "not looked up"
+		}
+		if row.Class != want {
+			t.Errorf("%s: class %q, want %q", row.Set, row.Class, want)
+		}
+	}
+	b, err := os.ReadFile(filepath.Join(dir, "queries.log"))
+	if err != nil || strings.Count(string(b), "\tradb\t") != 10 || strings.Count(string(b), "\n") != 10 {
+		t.Errorf("queries.log = %q (%v), want 10 RADB lines (5 sets, each retried once)", b, err)
+	}
+	if !strings.Contains(r.stopped, "radb.test:43 after 5 inconclusive lookups in a row") || !strings.Contains(r.stopped, "connection reset") {
+		t.Errorf("stopped = %q", r.stopped)
 	}
 }
 
@@ -483,7 +584,10 @@ func TestQueryCap(t *testing.T) {
 // Every conclusive answer is kept in DIR/cache/<service>/<cacheName>.txt and
 // never asked again; an inconclusive one (an error, or an answer neither a
 // set object nor "no entries", after one retry 5 s later) is kept as
-// <cacheName>.bad.txt and asked again by the next run. Every query is a line
+// <cacheName>.bad.txt and asked again by the next run (so is a cached answer
+// that is no longer conclusive). After 5 inconclusive lookups in a row from one
+// service the run stops asking, logs why, and the sets left are "not looked
+// up". Cache files are written whole (a temp file renamed). Every query is a line
 // of DIR/queries.log (time, service, query, bytes, error), and the lines
 // count against the measurement's cap of 5,000: past it, the sets left are
 // "not looked up". Sets are asked most routes first. It skips unless
@@ -535,6 +639,9 @@ func TestMissingSetsLookup(t *testing.T) {
 	}
 	t.Logf("queries: %d this run, %d in total of the cap of %d (cap hit: %v); undated copies: %d; in %s",
 		r.asked, r.used, r.limit, r.capped, undated, since(t0))
+	if r.stopped != "" {
+		t.Logf("STOPPED asking: %s; the sets after it are not looked up", r.stopped)
+	}
 }
 
 const (
@@ -777,7 +884,7 @@ func paragraphs(text string) (objs []string, other bool) {
 func parseRADB(text string) (objs []string, kind string) {
 	objs, other := paragraphs(text)
 	switch {
-	case !strings.HasSuffix(text, "\n\n") || other:
+	case !strings.HasSuffix(strings.ReplaceAll(text, "\r\n", "\n"), "\n\n") || other:
 		return nil, "bad"
 	case len(objs) > 0:
 		return objs, "found"
@@ -804,6 +911,9 @@ func parseRIPEHistory(text string) (kind, deleted string) {
 	if !ripeComplete(text) {
 		return "bad", ""
 	}
+	if ripeVersionRow.MatchString(text) {
+		return "exists", "" // a re-created object's rows win over an old deletion
+	}
 	if m := ripeDeletedLine.FindStringSubmatch(text); m != nil {
 		at, err := time.Parse(time.RFC3339, m[1])
 		if err != nil {
@@ -816,8 +926,6 @@ func parseRIPEHistory(text string) (kind, deleted string) {
 		return "none", ""
 	case strings.Contains(text, "%ERROR:"):
 		return "bad", ""
-	case ripeVersionRow.MatchString(text):
-		return "exists", ""
 	}
 	return "bad", ""
 }
@@ -958,10 +1066,22 @@ type lookupRun struct {
 	timeout            time.Duration // per query
 	wait               func(time.Duration)
 	held               heldIndex
-	used, asked        int  // queries.log's lines; queries this run
-	capped             bool // a query was not asked for the cap
+	stopAfter          int            // inconclusive lookups in a row that stop a service
+	used, asked        int            // queries.log's lines; queries this run
+	capped             bool           // a query was not asked for the cap
+	fails              map[string]int // inconclusive lookups in a row, by address
+	stopped            string         // why the run stopped asking, "" while it asks
 	log                *os.File
 }
+
+// askResult is how ask ended.
+type askResult int
+
+const (
+	answered     askResult = iota // a conclusive answer, cached or asked
+	inconclusive                  // an error or an answer not conclusive, after the retry
+	notAsked                      // the cap or a stopped service kept it from being asked
+)
 
 // newLookupRun makes dir's cache directories and opens its queries.log.
 func newLookupRun(dir string, dial dialFunc, radbAddr, ripeAddr string, limit int) (*lookupRun, error) {
@@ -980,26 +1100,40 @@ func newLookupRun(dir string, dial dialFunc, radbAddr, ripeAddr string, limit in
 		return nil, err
 	}
 	return &lookupRun{dir: dir, dial: dial, radbAddr: radbAddr, ripeAddr: ripeAddr, limit: limit,
-		timeout: 30 * time.Second, wait: time.Sleep, used: strings.Count(string(b), "\n"), log: f}, nil
+		timeout: 30 * time.Second, wait: time.Sleep, stopAfter: 5, used: strings.Count(string(b), "\n"),
+		fails: map[string]int{}, log: f}, nil
 }
 
 func (r *lookupRun) close() error { return r.log.Close() }
 
-// ask returns svc's cached answer to ref's query or asks it of addr, once
-// more r.wait(5 s) later when the first answer is an error or not
-// conclusive. ok is false when the cap stopped it; an inconclusive answer is
-// returned too, kept as .bad.txt and not cached.
-func (r *lookupRun) ask(ctx context.Context, svc, addr string, ref types.SetRef, query string, conclusive func(string) bool) (text string, ok bool, err error) {
+// ask returns svc's cached answer to ref's query, when conclusive says it
+// is one, or asks it of addr, once more r.wait(5 s) later when the first
+// answer is an error or not conclusive. A cached answer that is not
+// conclusive is moved to .bad.txt and asked again. A conclusive answer is
+// cached (.txt); an inconclusive one is returned only for the record, kept as
+// .bad.txt, and counts toward stopping addr: after r.stopAfter of them in a
+// row the run asks nothing more of any service (a rate limit or a refused
+// query form would otherwise spend the cap).
+func (r *lookupRun) ask(ctx context.Context, svc, addr string, ref types.SetRef, query string, conclusive func(string) bool) (string, askResult, error) {
 	file := filepath.Join(r.dir, "cache", svc, cacheName(ref.String()))
 	if b, err := os.ReadFile(file + ".txt"); err == nil {
-		return string(b), true, nil
+		if conclusive(string(b)) {
+			return string(b), answered, nil
+		}
+		if err := os.Rename(file+".txt", file+".bad.txt"); err != nil {
+			return "", notAsked, err
+		}
 	} else if !errors.Is(err, os.ErrNotExist) {
-		return "", false, err
+		return "", notAsked, err
 	}
+	var text, why string
 	for try := range 2 {
+		if r.stopped != "" {
+			return "", notAsked, nil
+		}
 		if r.used >= r.limit {
 			r.capped = true
-			return "", false, nil
+			return "", notAsked, nil
 		}
 		if try > 0 {
 			r.wait(5 * time.Second)
@@ -1010,18 +1144,44 @@ func (r *lookupRun) ask(ctx context.Context, svc, addr string, ref types.SetRef,
 		cancel()
 		r.used++
 		r.asked++
+		why = "an answer that is not conclusive"
 		msg := ""
 		if qerr != nil {
 			msg = strings.Join(strings.Fields(qerr.Error()), " ")
+			why = msg
 		}
 		if _, err := fmt.Fprintf(r.log, "%s\t%s\t%s\t%d\t%s\n", time.Now().UTC().Format(time.RFC3339), svc, query, len(text), msg); err != nil {
-			return "", false, err
+			return "", notAsked, err
 		}
 		if qerr == nil && conclusive(text) {
-			return text, true, os.WriteFile(file+".txt", []byte(text), 0o644)
+			r.fails[addr] = 0
+			return text, answered, writeAtomic(file+".txt", text)
 		}
 	}
-	return text, true, os.WriteFile(file+".bad.txt", []byte(text), 0o644)
+	if r.fails[addr]++; r.fails[addr] >= r.stopAfter {
+		r.stopped = fmt.Sprintf("%s after %d inconclusive lookups in a row (the last: %s)", addr, r.fails[addr], why)
+	}
+	return text, inconclusive, writeAtomic(file+".bad.txt", text)
+}
+
+// writeAtomic writes file through a temp file in its directory and a
+// rename, so a cache file is whole or absent.
+func writeAtomic(file, text string) error {
+	f, err := os.CreateTemp(filepath.Dir(file), ".tmp-*")
+	if err != nil {
+		return err
+	}
+	_, err = f.WriteString(text)
+	if cerr := f.Close(); err == nil {
+		err = cerr
+	}
+	if err == nil {
+		err = os.Rename(f.Name(), file)
+	}
+	if err != nil {
+		os.Remove(f.Name())
+	}
+	return err
 }
 
 // naming is the objects whose class line names name.
@@ -1035,40 +1195,53 @@ func naming(objs []string, name types.SetName) []string {
 	return out
 }
 
-// lookupSet classifies ref (see TestMissingSetsLookup) and returns its copies.
-// A RADB answer whose objects do not name the set is "bad".
+// lookupSet classifies ref (see TestMissingSetsLookup) and returns its
+// copies. An answer is read only when ask found it conclusive: a found answer
+// with no object naming the set is not, and an inconclusive lookup is "bad"
+// whatever its text holds.
 func (r *lookupRun) lookupSet(ctx context.Context, ref types.SetRef) (setLookup, []string, error) {
-	row := setLookup{Class: "not looked up"}
+	name := ref.Name()
+	notLooked := func(err error) (setLookup, []string, error) {
+		return setLookup{Set: ref.String(), Class: "not looked up"}, nil, err
+	}
+	names := func(parse func(string) ([]string, string)) func(string) bool {
+		return func(s string) bool {
+			objs, k := parse(s)
+			return k == "none" || k == "found" && len(naming(objs, name)) > 0
+		}
+	}
 	held, radb, ripe, deleted := r.held.has(ref), "", ripeSkipped, ""
 	var radbObjs, ripeObjs []string
 	if !held {
-		text, ok, err := r.ask(ctx, "radb", r.radbAddr, ref, radbQuery(ref), func(s string) bool { _, k := parseRADB(s); return k != "bad" })
-		if err != nil || !ok {
-			row.Set = ref.String()
-			return row, nil, err
+		text, res, err := r.ask(ctx, "radb", r.radbAddr, ref, radbQuery(ref), names(parseRADB))
+		if err != nil || res == notAsked {
+			return notLooked(err)
 		}
-		radbObjs, radb = parseRADB(text)
-		if radbObjs = naming(radbObjs, ref.Name()); radb == "found" && len(radbObjs) == 0 {
-			radb = "bad"
+		if radb = "bad"; res == answered {
+			radbObjs, radb = parseRADB(text)
+			radbObjs = naming(radbObjs, name)
 		}
 		if radb != "found" && (!ref.IsScoped() || ref.Source() == "RIPE") {
-			text, ok, err := r.ask(ctx, "ripe", r.ripeAddr, ref, ripeQuery(ref), func(s string) bool { k, _ := parseRIPEHistory(s); return k != "bad" })
-			if err != nil || !ok {
-				row.Set = ref.String()
-				return row, nil, err
+			text, res, err := r.ask(ctx, "ripe", r.ripeAddr, ref, ripeQuery(ref), func(s string) bool { k, _ := parseRIPEHistory(s); return k != "bad" })
+			if err != nil || res == notAsked {
+				return notLooked(err)
 			}
-			if ripe, deleted = parseRIPEHistory(text); ripe == "exists" {
-				text, ok, err := r.ask(ctx, "ripe-obj", r.ripeAddr, ref, ripeObjQuery(ref), func(s string) bool { _, k := parseRIPEObjects(s); return k != "bad" })
-				if err != nil || !ok {
-					row.Set = ref.String()
-					return row, nil, err
+			if ripe = "bad"; res == answered {
+				ripe, deleted = parseRIPEHistory(text)
+			}
+			if ripe == "exists" {
+				text, res, err := r.ask(ctx, "ripe-obj", r.ripeAddr, ref, ripeObjQuery(ref), names(parseRIPEObjects))
+				if err != nil || res == notAsked {
+					return notLooked(err)
 				}
-				objs, _ := parseRIPEObjects(text)
-				ripeObjs = naming(objs, ref.Name())
+				if res == answered {
+					objs, _ := parseRIPEObjects(text)
+					ripeObjs = naming(objs, name)
+				}
 			}
 		}
 	}
-	row = classifySet(held, radb, radbObjs, ripe, deleted, ripeObjs)
+	row := classifySet(held, radb, radbObjs, ripe, deleted, ripeObjs)
 	row.Set = ref.String()
 	return row, slices.Concat(radbObjs, ripeObjs), nil
 }
