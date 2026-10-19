@@ -83,8 +83,8 @@ resources; RADB and the mirrors do not, and a mirror may be stale. That is why
 they come after the regional registries in the order above, and why an answer
 that rests on an object found only there (a route accepted through it, a route
 object it supplies) rests on unchecked data. For route objects the output marks
-this: a route object only RADB or its mirrors hold reads "yes (unverified
-only)" (see "Each route also gets"). In the real-data test's load-only mode, loading all 16
+this: a route object only registries outside `-verified-sources` hold (by
+default RADB and its mirrors) reads "yes (unverified only)" (see "Each route also gets"). In the real-data test's load-only mode, loading all 16
 registries took 35.871 s and a peak RSS of 3,534 MB, against 7.468 s and
 1,130 MB for RIPE alone (`.data/load-all.log`, `.data/load-ripe.log`); these are
 not the command's own figures. See "Known limitations" for what
@@ -201,8 +201,8 @@ Each route also gets:
 - whether a route object exists for exactly that (prefix, origin). There are
   three answers: "yes", "yes (unverified only)" and "no". "Yes (unverified
   only)" means the object exists, but only in registries that are not verified
-  sources (RADB and its mirrors, which do not check that the registrant holds
-  the resources): weaker evidence, not wrong. A route object is "yes" when a
+  sources (by default RADB and its mirrors, which do not check that the
+  registrant holds the resources): weaker evidence, not wrong. A route object is "yes" when a
   verified source holds it. The verified sources are those of `-verified-sources`
   that are present in the policy source. When none is present the marking is off:
   answers are "yes" or "no" only. Each run writes one note to stderr, once the
@@ -319,7 +319,7 @@ One attribute with REFINE or EXCEPT gives several clauses that share one `Index`
 | 0 | Nothing was Rejected. Undecided routes and "no policy" alone exit 0: they are listed, not failures. |
 | 1 | Some route was Rejected, in either direction. |
 | 2 | A bad command line, including options the library refuses (`routecheck.ErrOptions`, such as a session mode run with no `-local` whose capture names no local AS; when the capture holds no record of the session at all, the message says so). |
-| 3 | The run could not complete. Causes: an unreadable file; a capture cut mid-record ("truncated record"), such as a file the daemon is still writing; in session mode, a capture with no record of a session with X (at `-peer-addr`, when given), which is not "X announced nothing" (ruling R23; a 2-byte BGP4MP capture shows a 4-byte X as AS23456, so it holds no record of X); a missing aut-num; peval failing (a Source error; but not AS-ANY or RS-ANY in filter position, nor a set over an expansion limit, which make that report "unevaluable"); an unreachable server (with `-irrd`, also one unreachable while the verified sources are probed, which happens before the options are validated, so it is exit 3 even when the capture would otherwise give a usage error, exit 2); a RIB dump in session mode without `-pre-policy`; a broken `-policy` draft; or an interrupted run. |
+| 3 | The run could not complete. Causes: an unreadable file; a capture cut mid-record ("truncated record"), such as a file the daemon is still writing; in session mode, a capture with no record of a session with X (at `-peer-addr`, when given), which is not "X announced nothing" (ruling R23; a 2-byte BGP4MP capture shows a 4-byte X as AS23456, so it holds no record of X); a missing aut-num; peval failing (a Source error; but not AS-ANY or RS-ANY in filter position, nor a set over an expansion limit, which make that report "unevaluable"); an unreachable server (with `-irrd`, also one unreachable while the verified sources are probed, which happens before the library validates the options (`routecheck.ErrOptions`), so it is exit 3 even when the capture would otherwise give a usage error, exit 2); a RIB dump in session mode without `-pre-policy`; a broken `-policy` draft; or an interrupted run. |
 
 ## Which captures qualify for -session
 
@@ -687,6 +687,25 @@ Both spellings of 0xFFFFFF03 are read, in any case:
       objects;
     - whether any unverified object is right;
     - how JPIRR or any other mirror verifies.
+- **The marking on the command run.** The command on AS9086 from AS6762, every
+  registry, `-max-prefixes 2097152`, with the marking (2026-10-19,
+  `.data/verified-counts-2097152.log`; the stderr note named all five RIRs as
+  present):
+  - Verdicts equal v0.4.0's: AS9086's import 978,368 accepted, AS6762's export
+    1,194,673 accepted / 33,968 rejected / 400,748 undecided over 75 reports.
+  - AS9086's import: 717,629 "yes", of them 253,107 "yes (unverified only)"
+    (35.27%), and 260,560 "no" (179 routes have no origin to ask about).
+  - AS6762's export, over its 55 reports with routes: 1,133,392 "yes", of them
+    394,877 unverified only (34.84%), and 495,720 "no".
+  - This is pair 2, which the provenance measurement above could not include,
+    so the two shares are not of the same routes.
+  - Peak RSS 6,421 MB; the same command without the counts in the text
+    (`.data/verified-cli-2097152.log`) peaked at 6,322 MB, and v0.4.0 at
+    6,511 MB (`.data/max-prefixes-cli-2097152.log`). The marking's second view
+    of the registries stays within the variation between runs.
+  - With `-irrd`, the marking asks at most one extra query per (origin,
+    family) whose answer is "yes" (the verified sources are asked only then),
+    plus one probe per verified source at startup.
 - **Out of scope** (spec §12):
   - ASPA path verification;
   - BMP and RIS Live;

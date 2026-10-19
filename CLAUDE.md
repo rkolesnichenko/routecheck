@@ -195,6 +195,13 @@ Packages, imports strictly downward:
   R19's (0 or 1 by the Rejected routes, never 3 for it). There is no new reason kind. The CLI's
   `-max-prefixes N` (internal/cli) sets `Expander.MaxPrefixes`; absent, it is the zero `Expander`
   (rpsl's default); 0 and negatives are refused (a negative is unlimited in rpsl).
+- **R28. The verified marking is evidence, never an input.** `RouteVerdict.RouteObjVerified` says whether a
+  verified source (`Checker.VerifiedRoutes`; the CLI's `-verified-sources`, default the five RIRs) holds the route
+  object; it is asked only when `RouteObj` is true, so it is nil (not asked, or the marking is off), false or true.
+  It never changes a verdict, a filter or the exit status. The CLI decides once, before Check, which verified
+  sources are present (`-dump`: loaded; `-irrd`: each probed alone with `!g`, a refusal is absent, any other
+  error exit 3); none present turns the marking off. Once on, a verified lookup error fails the run like
+  `RouteObj`'s. The stderr note is printed after Check succeeds; scripts/release.sh pins its "none" form.
 - **AnySets.** `Verdict.AnySets` is, on an Accepted verdict only, the canonical names (sorted,
   deduplicated) of the sets reaching AS-ANY named by the AS-path tests, either polarity, of the
   conjunct that accepted the route: per conjunct, not per clause. It is nil otherwise, and always
