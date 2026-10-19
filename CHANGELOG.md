@@ -12,9 +12,10 @@ a minor version may change the API.
 
 - `TestProvenanceCompare` reads a run whose shards interleave (each pair from the shard that checked it).
 - The real-data test combines `ROUTECHECK_REALDATA_ROUTES_FROM` with `_EXTRA` (the extra dump's route objects are
-  dropped like any registry's not named). Tracked keys no longer keep their whole lines, and tracked routes share
-  their set lists: on pair 2 with 252,133 tracked keys, the peak fell from 7,686 to 5,494 MB
-  (`.data/pair2-rejections-control-first.log`, `.data/pair2-rejections-control.log`).
+  dropped like any registry's not named). Tracked keys no longer keep their whole lines: on pair 2 with 252,133
+  tracked keys the peak fell from 7,686 to 5,494 MB (`.data/pair2-rejections-control-first.log`,
+  `.data/pair2-rejections-control.log`). Tracked routes also share their set lists (its effect was not measured
+  separately).
 - `TestMissingSetsClassify` streams its tracked file, and has `_RIR_ONLY` (class names for a run with route objects
   from the RIRs only), `_A_ROUTES`/`_R_ROUTES` (splits by A's outcome and by the route-object answer) and
   `_TAKE_NOT_FOUND` (a sensitivity table).
@@ -46,8 +47,9 @@ extended comparer reproduces the published logs exactly, apart from timing, peak
   24 found elsewhere, 1 inconclusive: AS-CONCERTAP). In V, 712 sets are named by all 263,472 rejections, 476 of them
   looked up.
 - Pair 2 alone holds 1,851,021 of the 6,400,790 "yes" answers (28.92%).
-- Not measured: whether the 469 (R) and 471 (V) never-looked-up sets exist anywhere, and whether loading the "found
-  elsewhere" sets would flip any of these rejections.
+- Not measured here: whether the 469 (R) and 471 (V) never-looked-up sets exist anywhere, and whether loading the
+  "found elsewhere" sets would flip any of these rejections. R's are answered below ("Measured, pair 2's rejections
+  without RADB"); V's 362 sets still never looked up (all in non-RIR dumps V does not load) are open.
 
 ### Measured, pair 2's rejections without RADB
 
@@ -59,9 +61,12 @@ Pair 2's 252,133 export rejections in run R were classified with the missing-set
 - **No gap:** with the 56 found copies loaded, run B still rejects all 252,133.
 - **All are unknown,** for one reason: every rejection names AS-CONCERTAP, whose lookup is inconclusive. Taking it as
   not found, all are real for a filter built from RIR route objects.
-- **By route-object answer, A → R:** 88,475 "yes → no" (resting on unverified route objects), 155,541 "no → no",
-  8,080 "yes → yes" and 37 "unknown". Of the 214,472 undecided in A (all ipv4), 82,415 are "yes → no" and 125,607
-  are "no → no".
+- **By route-object answer, A → R:** 88,475 "yes → no" (a route object for exactly the prefix and origin only in the
+  registries R drops), 155,541 "no → no", 8,080 "yes → yes" and 37 "unknown". Of the 214,472 undecided in A (all
+  ipv4), 82,415 are "yes → no" and 125,607 are "no → no". That answer cannot tell how much is a RADB effect: it asks
+  about exactly this prefix and origin, and A and R differ only in the dropped route objects and their member-of:
+  claims. Among pair 2's ipv6 routes, which A decides, all 212 "accepted, no → no" and all 10 "accepted, yes → yes"
+  went from accepted in A to rejected in R, and 2,589 "yes → no" are rejected in A too.
 - **Controls:** pair 2 in R with nothing extra loaded reproduces R2 byte for byte, and the 33,968 rejected in A too
   are all "unknown, inconclusive set".
 

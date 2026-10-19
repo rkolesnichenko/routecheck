@@ -736,7 +736,10 @@ Both spellings of 0xFFFFFF03 are read, in any case:
           rejects all 252,133. It needed one round: it named no set not yet
           looked up (`.data/pair2-rejections-rounds.log`,
           `.data/pair2-rejections-round1-B.log`; peak RSS 5,625 MB). Missing
-          sets left fell from 1,276 to 1,253.
+          sets left fell from 1,276 to 1,253: 26 found sets are no longer
+          missing, and 3 sets nested in loaded copies are newly missing
+          (AS-GOLIGHTSPEED, AS150470:AS-ID and AS151544:AS-PANDAWANETWORK, all
+          not found).
         - **Classes** (`.data/pair2-rejections-classify.log`; in R they mean
           "for a filter built from RIR route objects only"):
           - no gap: no rejection is accepted with the found sets loaded;
@@ -759,10 +762,11 @@ Both spellings of 0xFFFFFF03 are read, in any case:
           | rejected (ipv6) | 2,589 | 29,722 | 1,657 | 0 | 33,968 |
           | sum | 88,475 | 155,541 | 8,080 | 37 | 252,133 |
 
-          - "yes → no": the route's origin has a route object only in the
-            registries R drops. These 88,475 rest on unverified route objects.
-          - "no → no": the route's origin has no route object for the prefix
-            in either run. Dropping RADB did not change its own answer. The
+          - "yes → no": the route has a route object for exactly this prefix
+            and origin only in the registries R drops. Only its route-object
+            answer rests on them.
+          - "no → no": the route has no route object for exactly this prefix
+            and origin in either run. Its own answer did not change, but the
             route can still have been inside AS-SEABONE's filter in A through
             another origin's route object, which A could not show (unevaluable).
           - "yes → yes": a route object in the RIRs too; rejected anyway.
@@ -792,9 +796,19 @@ Both spellings of 0xFFFFFF03 are read, in any case:
       - Whether they stand turns on one set, AS-CONCERTAP: inconclusive under
         the method, so all are unknown; taken as not found, all are real for a
         filter built from RIR route objects.
-      - They are not all a RADB effect. Of the 214,472, 82,415 have a route
-        object only in the dropped registries ("yes → no"); 125,607 have none
-        for their origin even with RADB ("no → no").
+      - The route-object answer cannot tell how much of the 214,472 is a RADB
+        effect. It asks whether a route object exists for exactly the route's
+        prefix and origin; AS-SEABONE's filter is made of the route objects of
+        all its members, by prefix. A and R differ only in the dropped route
+        objects and their member-of: claims, so any route accepted in A and
+        rejected in R moves because of them, whatever its own answer. Of the
+        214,472, 82,415 have a route object for exactly their prefix and origin
+        only in the dropped registries ("yes → no") and 125,607 have none in
+        either run ("no → no"); those are the routes' own answers only.
+        - Pair 2's ipv6 routes, which A decides, show it
+          (`.data/pair2-rejections-cross.txt`): all 212 "accepted (ipv6)" routes
+          with "no → no" and all 10 with "yes → yes" went from accepted in A to
+          rejected in R, and 2,589 "yes → no" are rejected in A too.
     - These shares are weighted by routes, and the sample is concentrated
       (`.data/provenance-AR2.log`, "concentration"):
       - pair 2 alone holds 1,851,021 of the 6,400,790 "yes" answers (28.92%);
@@ -813,8 +827,8 @@ Both spellings of 0xFFFFFF03 are read, in any case:
     - how JPIRR or any other mirror verifies;
     - whether AS-CONCERTAP exists anywhere: RIPE's history answer stays
       inconclusive, so pair 2's R rejections stay unknown under the method;
-    - V's rejections: 471 of its sets were never looked up (362 of them are in
-      the non-RIR dumps V does not load), and V was not classified;
+    - V's rejections: 362 of its sets were never looked up, all in the
+      non-RIR dumps V does not load, and V was not classified;
     - what A's filter would decide for pair 2's ipv4 routes: AS-SEABONE is over
       the limit in A.
 - **The marking on the command run.** The command on AS9086 from AS6762, every
