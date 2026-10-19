@@ -314,7 +314,7 @@ func (o *realOut) addPair(r *pairResult) error {
 	if o == nil {
 		return nil
 	}
-	defer func() { r.lines, r.rejLines, r.keys = nil, nil, nil }()
+	defer func() { r.lines, r.rejLines = nil, nil }()
 	if r.err != nil {
 		return nil
 	}
@@ -1115,7 +1115,6 @@ type pairResult struct {
 	lines    map[string]string
 	rejLines []string
 	dupKeys  int
-	keys     map[string]struct{} // every key of the pair, to find duplicates
 }
 
 // checkPair runs one collector-mode Check and summarizes it.
@@ -1265,24 +1264,32 @@ func routeKey(pair, dir, family, neighbour string, r verdict.Route) string {
 // id is the pair as routeKey names it.
 func (p pair) id() string { return fmt.Sprintf("AS%d-AS%d", p.L, p.X) }
 
-// routeLine is the TSV line of one route: key, outcome, the Undecided reason
-// kinds (sorted, comma-joined) and the missing sets of its failing clauses
-// (sorted, deduplicated, comma-joined). sets is those sets, sorted.
-func routeLine(key string, v *verdict.Verdict) (line string, sets []string) {
-	var kinds []string
-	for _, rs := range v.Reasons {
-		kinds = append(kinds, rs.Kind)
-	}
-	slices.Sort(kinds)
-	kinds = slices.Compact(kinds)
+// missingSetNames is the sets the failing clauses of v name as missing,
+// sorted and deduplicated; nil when there are none.
+func missingSetNames(v *verdict.Verdict) []string {
+	var sets []string
 	for _, f := range v.Fails {
 		for _, m := range f.Missing {
 			sets = append(sets, m.String())
 		}
 	}
 	slices.Sort(sets)
-	sets = slices.Compact(sets)
-	return key + "\t" + v.Outcome.String() + "\t" + strings.Join(kinds, ",") + "\t" + strings.Join(sets, ","), sets
+	return slices.Compact(sets)
+}
+
+// routeLine is the TSV line of one route: key, outcome, the reason kinds of an
+// Undecided verdict (sorted, comma-joined; empty for any other outcome, whose
+// Reasons are not the cause of it) and sets, comma-joined.
+func routeLine(key string, v *verdict.Verdict, sets []string) string {
+	var kinds []string
+	if v.Outcome == verdict.Undecided {
+		for _, rs := range v.Reasons {
+			kinds = append(kinds, rs.Kind)
+		}
+		slices.Sort(kinds)
+		kinds = slices.Compact(kinds)
+	}
+	return key + "\t" + v.Outcome.String() + "\t" + strings.Join(kinds, ",") + "\t" + strings.Join(sets, ",")
 }
 
 // report tallies one report's Undecided reasons, path-too-expensive terms,
@@ -1294,25 +1301,30 @@ func (r *pairResult) report(rep *routecheck.Report, dir int, label string, rc re
 	}
 	examples := 0
 	dirName := [2]string{"import", "export"}[dir]
+	keys := make(map[string]struct{}, len(rep.Routes)) // dies with this report: keys differ across reports
 	for i := range rep.Routes {
 		rv := &rep.Routes[i]
 		key := routeKey(rc.pair, dirName, rc.family, rc.neighbour, rv.Route)
-		if r.keys == nil {
-			r.keys = map[string]struct{}{}
-		}
-		if _, dup := r.keys[key]; dup {
+		if _, dup := keys[key]; dup {
 			r.dupKeys++
 		}
-		r.keys[key] = struct{}{}
-		line, sets := routeLine(key, &rv.Verdict)
-		if r.track[key] {
-			if r.lines == nil {
-				r.lines = map[string]string{}
-			}
-			r.lines[key] = line
+		keys[key] = struct{}{}
+		tracked := r.track[key]
+		var sets []string
+		if rv.Verdict.Outcome == verdict.Rejected {
+			sets = missingSetNames(&rv.Verdict)
 		}
-		if rv.Verdict.Outcome == verdict.Rejected && len(sets) > 0 {
-			r.rejLines = append(r.rejLines, line)
+		if tracked || len(sets) > 0 {
+			line := routeLine(key, &rv.Verdict, sets)
+			if tracked {
+				if r.lines == nil {
+					r.lines = map[string]string{}
+				}
+				r.lines[key] = line
+			}
+			if len(sets) > 0 {
+				r.rejLines = append(r.rejLines, line)
+			}
 		}
 		if rv.Verdict.Outcome == verdict.Undecided {
 			seen := map[string]bool{}

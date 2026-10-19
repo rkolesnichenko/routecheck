@@ -254,11 +254,12 @@ func TestTrackedLines(t *testing.T) {
 			{Kind: verdict.ReasonUnevaluable}, {Kind: verdict.ReasonPeval, Why: "x"},
 		}}},
 		{Route: route("203.0.113.0/24"), Verdict: verdict.Verdict{Outcome: verdict.Accepted}},
+		{Route: route("100.64.0.0/10"), Verdict: verdict.Verdict{Outcome: verdict.Accepted, Reasons: []verdict.Reason{{Kind: verdict.ReasonPeval, Why: "x"}}}},
 	}}
 	r := newTestPair()
 	ctx := reportCtx{pair: "AS1-AS2", family: "ipv4.unicast", neighbour: "AS2"}
 	r.track = map[string]bool{}
-	for _, p := range []string{"192.0.2.0/24", "198.51.100.0/24", "203.0.113.0/24"} {
+	for _, p := range []string{"192.0.2.0/24", "198.51.100.0/24", "203.0.113.0/24", "100.64.0.0/10"} {
 		r.track[routeKey(ctx.pair, "import", ctx.family, ctx.neighbour, route(p))] = true
 	}
 	r.report(&rep, 0, "x", ctx)
@@ -267,6 +268,7 @@ func TestTrackedLines(t *testing.T) {
 		pre + "192.0.2.0/24|AS2":    pre + "192.0.2.0/24|AS2\trejected\t\tAS-A,AS-B",
 		pre + "198.51.100.0/24|AS2": pre + "198.51.100.0/24|AS2\tundecided\tpeval,unevaluable\t",
 		pre + "203.0.113.0/24|AS2":  pre + "203.0.113.0/24|AS2\taccepted\t\t",
+		pre + "100.64.0.0/10|AS2":   pre + "100.64.0.0/10|AS2\taccepted\t\t",
 	}
 	if !reflect.DeepEqual(r.lines, want) {
 		t.Errorf("lines = %q, want %q", r.lines, want)
