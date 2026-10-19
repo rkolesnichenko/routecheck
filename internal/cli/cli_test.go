@@ -889,8 +889,8 @@ source: TEST
 		file, counts, line string
 		exit               int
 	}{
-		{f, "1 route: 1 accepted, 0 rejected, 0 undecided", "AS-ANYSET (1 route)", exitOK},
-		{two, "3 routes: 2 accepted, 1 rejected, 0 undecided", "AS-ANYSET (2 routes)", exitRejected},
+		{f, "1 route: 1 accepted, 0 rejected, 0 undecided; route objects 1 yes, 0 no", "AS-ANYSET (1 route)", exitOK},
+		{two, "3 routes: 2 accepted, 1 rejected, 0 undecided; route objects 1 yes, 2 no", "AS-ANYSET (2 routes)", exitRejected},
 	} {
 		dflt := []string{"-local", "AS64496", "-peer", "AS64500", "-session", c.file, "-dump", reg, "-af", "ipv4", "-direction", "import"}
 		code, out, stderr = run(t, dflt...)
@@ -1508,6 +1508,57 @@ func TestVerifiedDump(t *testing.T) {
 	}
 	if want := "routecheck: route objects: verified sources RIPE; absent: APNIC, ARIN, AFRINIC, LACNIC\n"; stderr != want {
 		t.Errorf("stderr %q, want %q", stderr, want)
+	}
+	if got := routeObjAnswers(t, out); !reflect.DeepEqual(got, wantDumpAnswers) {
+		t.Errorf("answers %v, want %v", got, wantDumpAnswers)
+	}
+}
+
+// TestTextUnverifiedOnly: with the marking on, the text says "unverified
+// only" on a route object only RADB holds, and the report line counts them.
+func TestTextUnverifiedOnly(t *testing.T) {
+	radb, ripe := verifiedDumps(t)
+	code, out, stderr := run(t, "-local", "AS64496", "-peer", "AS64500", "-session", verifiedCapture(t),
+		"-dump", radb, "-dump", ripe, "-af", "ipv4", "-direction", "import", "-routes", "all")
+	if code != exitOK {
+		t.Fatalf("exit %d; stderr %s\n%s", code, stderr, out)
+	}
+	wantContains(t, "text", out,
+		"; route objects 2 yes (1 unverified only), 1 no\n",
+		"192.0.2.0/24  AS64500  accepted by clause 1  route object yes\n",
+		"203.0.113.0/24  AS64500  accepted by clause 1  route object yes (unverified only)\n",
+		"198.51.100.0/24  AS64500  accepted by clause 1  route object no\n")
+
+	// A dump with no verified source turns the marking off: no mention.
+	code, out, stderr = run(t, "-local", "AS64496", "-peer", "AS64500", "-session", verifiedCapture(t),
+		"-dump", radb, "-af", "ipv4", "-direction", "import", "-routes", "all")
+	if code != exitOK {
+		t.Fatalf("radb only: exit %d; stderr %s\n%s", code, stderr, out)
+	}
+	wantContains(t, "marking off", out, "; route objects 2 yes, 1 no\n", "203.0.113.0/24  AS64500  accepted by clause 1  route object yes\n")
+	if strings.Contains(out, "unverified") {
+		t.Errorf("marking off, but the text says unverified:\n%s", out)
+	}
+}
+
+// TestJSONRouteObjVerified: the JSON holds RouteObjVerified per route and
+// the report's three counts.
+func TestJSONRouteObjVerified(t *testing.T) {
+	radb, ripe := verifiedDumps(t)
+	code, out, stderr := run(t, "-local", "AS64496", "-peer", "AS64500", "-session", verifiedCapture(t),
+		"-dump", radb, "-dump", ripe, "-af", "ipv4", "-direction", "import", "-format", "json")
+	if code != exitOK {
+		t.Fatalf("exit %d; stderr %s\n%s", code, stderr, out)
+	}
+	var doc []struct{ Import map[string]any }
+	if err := json.Unmarshal([]byte(out), &doc); err != nil || len(doc) != 1 {
+		t.Fatalf("%v\n%s", err, out)
+	}
+	rep := doc[0].Import
+	for k, want := range map[string]float64{"RouteObjYes": 2, "RouteObjUnverifiedOnly": 1, "RouteObjNo": 1} {
+		if rep[k] != want {
+			t.Errorf("%s = %v, want %v", k, rep[k], want)
+		}
 	}
 	if got := routeObjAnswers(t, out); !reflect.DeepEqual(got, wantDumpAnswers) {
 		t.Errorf("answers %v, want %v", got, wantDumpAnswers)

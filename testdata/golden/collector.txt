@@ -9,7 +9,7 @@ note: collector mode: these are routes AS4766 announced to someone. AS4766 may n
 collector: 31782 RIB entries read, 179 through AS4766 (0 on AS4766's own feed to a collector)
 
 ipv4.unicast
-  import, AS64496 from AS4766: 19 routes: 19 accepted, 0 rejected, 0 undecided
+  import, AS64496 from AS4766: 19 routes: 19 accepted, 0 rejected, 0 undecided; route objects 5 yes, 14 no
     clause 1 (import attribute 1): from AS4766 accept AS-GOLDEN-BEHIND
     clause 2 (import attribute 2): from AS4766 accept community(4766:100)
     clause 3 (import attribute 3): from AS4766 accept <^AS4766+ .*>

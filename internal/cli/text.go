@@ -229,7 +229,7 @@ func (p *printer) report(dir string, rep routecheck.Report, label, owner string)
 		p.line("  %s: no policy: %s has no %s term toward %s in this family; its routes are not decided", label, owner, dir, rep.Toward)
 		return
 	}
-	p.line("  %s: %s: %d accepted, %d rejected, %d undecided", label, count(len(rep.Routes), "route", "routes"), rep.Accepted, rep.Rejected, rep.Undecided)
+	p.line("  %s: %s: %d accepted, %d rejected, %d undecided%s", label, count(len(rep.Routes), "route", "routes"), rep.Accepted, rep.Rejected, rep.Undecided, routeObjCounts(rep))
 	for pos, c := range rep.Policy.Clauses {
 		p.line("    clause %d (%s attribute %d): %s", pos+1, dir, c.Index+1, termText(dir, c.Term))
 	}
@@ -461,7 +461,29 @@ func outcome(dir string, v verdict.Verdict) string {
 	return "no verdict"
 }
 
+// routeObjCounts is the report line's route-object part: "; route objects 2
+// yes (1 unverified only), 1 no", empty when no route has an answer. The
+// unverified-only count appears only when the marking is on, which is when a
+// route's RouteObjVerified is set.
+func routeObjCounts(rep routecheck.Report) string {
+	if rep.RouteObjYes+rep.RouteObjNo == 0 {
+		return ""
+	}
+	marked := false
+	for _, rv := range rep.Routes {
+		if rv.RouteObjVerified != nil {
+			marked = true
+			break
+		}
+	}
+	if marked {
+		return fmt.Sprintf("; route objects %d yes (%d unverified only), %d no", rep.RouteObjYes, rep.RouteObjUnverifiedOnly, rep.RouteObjNo)
+	}
+	return fmt.Sprintf("; route objects %d yes, %d no", rep.RouteObjYes, rep.RouteObjNo)
+}
+
 // hygiene is a route's RPKI state and route-object answer, when known.
+// "Unverified only" is said when only unverified registries hold the object.
 func hygiene(rv routecheck.RouteVerdict) string {
 	s := ""
 	if rv.RPKI != nil {
@@ -470,6 +492,9 @@ func hygiene(rv routecheck.RouteVerdict) string {
 	if rv.RouteObj != nil {
 		if *rv.RouteObj {
 			s += "  route object yes"
+			if rv.RouteObjVerified != nil && !*rv.RouteObjVerified {
+				s += " (unverified only)"
+			}
 		} else {
 			s += "  route object no"
 		}

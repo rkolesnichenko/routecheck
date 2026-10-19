@@ -22,10 +22,10 @@ The design, with every rule this page summarizes, is in
 ```
 routecheck -peer AS (-session FILE [-local AS] | -collector FILE -local AS)
            (-dump FILE | -irrd HOST:PORT [-sources LIST]) [-policy FILE]
-           [-vrps FILE] [-af ipv4|ipv6|both] [-direction import|export|both]
-           [-peer-addr IP] [-at TIME] [-pre-policy]
-           [-local-rtr IP] [-peer-rtr IP] [-max-prefixes N] [-format text|json]
-           [-routes all|rejected|undecided|none]
+           [-verified-sources LIST] [-vrps FILE] [-af ipv4|ipv6|both]
+           [-direction import|export|both] [-peer-addr IP] [-at TIME]
+           [-pre-policy] [-local-rtr IP] [-peer-rtr IP] [-max-prefixes N]
+           [-format text|json] [-routes all|rejected|undecided|none]
 ```
 
 `-session`, `-collector` and `-dump` can be repeated, one file per flag. Files
@@ -43,6 +43,7 @@ before any other argument. A stray argument is refused with exit status 2.
 | `-irrd HOST:PORT` | A live IRRd, used instead of `-dump`. Port 43 when none is given. |
 | `-sources LIST` | Only with `-irrd`. The registries, comma-separated, in precedence order. The default is the server's own order. |
 | `-policy FILE` | A local RPSL file: a draft that is not yet published. Its aut-nums and inet-rtrs answer before the registry's, under any `source:`. See "A -policy draft" below. |
+| `-verified-sources LIST` | The registries whose route objects count as verified, comma-separated (the help text calls the placeholder `names`; here it is `LIST`). The default is `RIPE,APNIC,ARIN,AFRINIC,LACNIC`, the five registries that check that whoever registers an object holds the resources. Names are compared without regard to case. Only the ones present in the policy source are used: those loaded with `-dump`, or those the server serves with `-irrd` (within `-sources` when given). See "Each route also gets" below. |
 | `-vrps FILE` | A VRP JSON file in rpki-client or Routinator format. With it, each route gets an RPKI origin-validation state. |
 | `-af` | `ipv4`, `ipv6` or `both` (the default): the unicast families checked. Routes of any other family are dropped and counted. |
 | `-direction` | `import` (L's policy), `export` (X's policy) or `both` (the default). |
@@ -81,7 +82,9 @@ APNIC, ARIN, AFRINIC, LACNIC) check that whoever registers an object holds the
 resources; RADB and the mirrors do not, and a mirror may be stale. That is why
 they come after the regional registries in the order above, and why an answer
 that rests on an object found only there (a route accepted through it, a route
-object it supplies) rests on unchecked data. In the real-data test's load-only mode, loading all 16
+object it supplies) rests on unchecked data. For route objects the output marks
+this: a route object only RADB or its mirrors hold reads "yes (unverified
+only)" (see "Each route also gets"). In the real-data test's load-only mode, loading all 16
 registries took 35.871 s and a peak RSS of 3,534 MB, against 7.468 s and
 1,130 MB for RIPE alone (`.data/load-all.log`, `.data/load-ripe.log`); these are
 not the command's own figures. See "Known limitations" for what
@@ -195,7 +198,28 @@ conjuncts. The clauses are then taken in order.
 Each route also gets:
 
 - an RPKI state (`valid`, `invalid` or `not_found`) when `-vrps` is given;
-- whether a route object exists for exactly that (prefix, origin).
+- whether a route object exists for exactly that (prefix, origin). There are
+  three answers: "yes", "yes (unverified only)" and "no". "Yes (unverified
+  only)" means the object exists, but only in registries that are not verified
+  sources (RADB and its mirrors, which do not check that the registrant holds
+  the resources): weaker evidence, not wrong. A route object is "yes" when a
+  verified source holds it. The verified sources are those of `-verified-sources`
+  that are present in the policy source. When none is present the marking is off:
+  answers are "yes" or "no" only. Each run writes one note to stderr, once the
+  check has succeeded and before the report, naming the verified sources it
+  found:
+
+  ```
+  routecheck: route objects: verified sources RIPE, ARIN; absent: APNIC, AFRINIC, LACNIC
+  routecheck: route objects: none of the verified sources (RIPE, APNIC, ARIN, AFRINIC, LACNIC) is present; answers are not marked
+  ```
+
+  The first form is printed when some verified source is present (`; absent: ...`
+  only when some are absent), the second when none is. In the text, each report
+  line ends with `; route objects 2 yes (1 unverified only), 1 no` (with the
+  marking off, `; route objects 2 yes, 1 no`; omitted when no route has an
+  answer), and a route listed by `-routes` reads `route object yes (unverified
+  only)`.
 
 ## A -policy draft
 
@@ -266,6 +290,13 @@ in a form that needs no Go source to read:
 - communities are `"hi:lo"`;
 - a policy is its clauses, each as `{Index, Term, Filter}`, and its undecided
   terms, each as `{Index, Term, Why}`;
+- a route's `RouteObjVerified` is `null` when `RouteObj` is `null` or the
+  marking is off, `false` when `RouteObj` is `false`, and otherwise whether a
+  verified source holds the route object (`RouteObj` true with
+  `RouteObjVerified` false is "yes (unverified only)"); a report's
+  `RouteObjYes`, `RouteObjUnverifiedOnly` and `RouteObjNo` count its routes by
+  that answer (`RouteObjUnverifiedOnly` is part of `RouteObjYes`; a route with
+  no answer is in none);
 - `Unevaluable` holds peval's error text for an unevaluable report, and is `""`
   otherwise;
 - `Verdict.AnySets` is, on an accepted route, the names (canonical spelling,
@@ -288,7 +319,7 @@ One attribute with REFINE or EXCEPT gives several clauses that share one `Index`
 | 0 | Nothing was Rejected. Undecided routes and "no policy" alone exit 0: they are listed, not failures. |
 | 1 | Some route was Rejected, in either direction. |
 | 2 | A bad command line, including options the library refuses (`routecheck.ErrOptions`, such as a session mode run with no `-local` whose capture names no local AS; when the capture holds no record of the session at all, the message says so). |
-| 3 | The run could not complete. Causes: an unreadable file; a capture cut mid-record ("truncated record"), such as a file the daemon is still writing; in session mode, a capture with no record of a session with X (at `-peer-addr`, when given), which is not "X announced nothing" (ruling R23; a 2-byte BGP4MP capture shows a 4-byte X as AS23456, so it holds no record of X); a missing aut-num; peval failing (a Source error; but not AS-ANY or RS-ANY in filter position, nor a set over an expansion limit, which make that report "unevaluable"); an unreachable server; a RIB dump in session mode without `-pre-policy`; a broken `-policy` draft; or an interrupted run. |
+| 3 | The run could not complete. Causes: an unreadable file; a capture cut mid-record ("truncated record"), such as a file the daemon is still writing; in session mode, a capture with no record of a session with X (at `-peer-addr`, when given), which is not "X announced nothing" (ruling R23; a 2-byte BGP4MP capture shows a 4-byte X as AS23456, so it holds no record of X); a missing aut-num; peval failing (a Source error; but not AS-ANY or RS-ANY in filter position, nor a set over an expansion limit, which make that report "unevaluable"); an unreachable server (with `-irrd`, also one unreachable while the verified sources are probed, which happens before the options are validated, so it is exit 3 even when the capture would otherwise give a usage error, exit 2); a RIB dump in session mode without `-pre-policy`; a broken `-policy` draft; or an interrupted run. |
 
 ## Which captures qualify for -session
 
