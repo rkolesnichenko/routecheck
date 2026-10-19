@@ -8,6 +8,87 @@ a minor version may change the API.
 
 ## [Unreleased]
 
+### Added (tests only)
+
+- The opt-in real-data test writes its missing sets and its rejected routes (`ROUTECHECK_REALDATA_OUT`), tracks a
+  given list of routes into a later run (`ROUTECHECK_REALDATA_TRACK`), loads one extra dump last in precedence
+  (`ROUTECHECK_REALDATA_EXTRA`) and checks only some of its pairs (`ROUTECHECK_REALDATA_PAIRS`).
+- `TestMissingSetsLookup` (opt-in, live, `ROUTECHECK_MISSINGSETS_LIVE=1`) classifies missing sets through
+  whois.radb.net and RIPE's version history, cached and capped at 5,000 queries. `TestMissingSetsClassify`
+  classifies the tracked routes. The command, the API and go.mod do not change.
+
+### Measured, missing sets
+
+The runs of 2026-10-19, on the same pinned 2026-10-18 files, every registry, `ROUTECHECK_REALDATA_MAX_PREFIXES=2097152`,
+under the memory guard (8 GB cap, normal priority, `GOMAXPROCS=4`, `GOMEMLIMIT=6GiB`, one run at a time), on the
+machine of `.data/max-prefixes-machine.log`. The design is `docs/superpowers/specs/2026-10-19-missing-sets-design.md`.
+The logs are kept by the maintainer and are not committed.
+
+- Run A (`.data/missing-sets-A.log`): PASS, 60 of 60 pairs, every TOTALS line equal to
+  `.data/realdata-max-prefixes.log`'s. It listed 106,529 routes rejected with a missing set in a failing clause
+  (106,526 export + 3 import) and 809 missing sets (808 export + 1 import). Peak RSS 6,991 MB, 280 s (6,565 MB
+  before the new outputs, `.data/realdata-max-prefixes.log`).
+- Lookup (`.data/missing-sets-round1-lookup.log` to `-round4-lookup.log`, `.data/missing-sets-rounds.log`; the sets'
+  classes, copies and dates are in `.data/missing-sets/lookup/sets.tsv`, the queries in `queries.log` beside it):
+  - 4 rounds: 809 sets, then 22, 10, 1 and 0 new names after rounds 1 to 4.
+  - The 842 sets: 407 deleted, 380 not found, 54 elsewhere, 1 inconclusive, 0 held but refused
+    (407 + 380 + 54 + 1 = 842).
+  - "Not found" cannot tell "deleted" from "never existed" outside RIPE, the one registry asked that publishes
+    history: a set deleted from any other registry reads "not found".
+  - Of the 54 found elsewhere, 51 are in a source routecheck does not load (copies: LEVEL3 33, IDNIC 17,
+    RIPE-NONAUTH 1) and 3 in a loaded registry but not in its dump (copies: RIPE 2, ARIN 1). The copies are dated
+    2014-03-20 to 2026-10-18: none is dated after 2026-10-18 (the design's rule is by day), and none is undated.
+    - The two RIPE copies (AS204464:AS-JUSTINFRANKE, AS204464:AS-DOWNSTREAMS) were created on 2026-10-18 at
+      03:23:29Z and 03:24:49Z (`.data/missing-sets/lookup/extra.db.gz`), after RIPE's snapshot (its newest
+      `last-modified:` is 2026-10-17T21:04:19Z, `.data/realdata/ripe.db.as-set.gz`). 59,397 listed routes name
+      AS204464:AS-JUSTINFRANKE (`.data/missing-sets/A/rejected-missing.tsv`); B still rejected them with both loaded.
+    - The ARIN copy, AS-RACKIFI (2025-11-19, from whois.radb.net), is likely a stale mirror copy, not proven: ARIN's
+      own dump has no AS-RACKIFI, and has AS-RACK with the same `mnt-by:` and `last-modified:`
+      (`.data/realdata/arin.db.gz`).
+  - 110 of the 407 deletions are from 2026, none after 2026-10-18.
+  - 1,641 queries of the 5,000 cap (10 of them a five-set smoke run first, `.data/missing-sets-smoke.log`). None
+    failed in transport (the error column of `queries.log` is empty on all 1,641 lines), and no service was stopped.
+    The round-1 lookup ran three times: the memory guard refused run B twice for lack of free memory
+    (`.data/missing-sets-rounds-try1.log`, `-try2.log`).
+  - The one inconclusive set is AS-CONCERTAP. RIPE's history answers it with an empty table and no deletion line
+    (the answer kept: `.data/missing-sets/lookup/cache/ripe/as-concertap.bad.txt`), and it stayed inconclusive each
+    of the 12 times it was asked, over 6 lookup runs. RIPE holds no object of that name: one query by hand to
+    whois.ripe.net, `-r -B -T as-set AS-CONCERTAP`, outside `queries.log`; the answer is
+    `.data/missing-sets/concertap-ripe-obj.txt`, and its time, 2026-10-19T10:22:37Z, is that file's mtime.
+- Runs B1 to B4 (`.data/missing-sets-round1-B.log` to `-round4-B.log`): PASS, 60 of 60, peak RSS 7,382, 7,229,
+  7,456 and 7,480 MB.
+  - B4 loaded the 54 found objects (sources IDNIC 17, LEVEL3 33, RIPE-NONAUTH 1, beside the loaded ones).
+  - Every route count in its TOTALS equals run A's: 106,712 export rejections, and the same 24 unevaluable reports
+    with the same routes. Distinct export missing sets fell from 808 to 787: 406 deleted, 380 not found and
+    AS-CONCERTAP (`.data/missing-sets/B4/missing-sets.tsv`, with the classes from `sets.tsv`). Only the "reached" figures of the 24
+    moved (AS-SEABONE 2,097,154 to 2,097,153; AS-UAIX 2,100,534 to 2,100,684; AS-DECIX 2,097,192 to 2,097,225).
+  - All 106,529 tracked routes are still rejected. 59,403 of them had a found set in a failing clause, and each of
+    those routes' lists of missing sets got shorter (`.data/missing-sets/A/rejected-missing.tsv` against
+    `.data/missing-sets/B4/tracked.tsv`).
+- Classification (`.data/missing-sets-classify.log`):
+
+  | | gap | real | real for any IRR filter | unknown | sum |
+  |---|---|---|---|---|---|
+  | all tracked routes | 0 | 0 | 72,561 | 33,968 | 106,529 |
+  | export | 0 | 0 | 72,558 | 33,968 | 106,526 |
+  | import | 0 | 0 | 3 | 0 | 3 |
+  | the 59,395 0.4.0 newly decided (10 pairs) | 0 | 0 | 25,427 | 33,968 | 59,395 |
+
+  - No route is a gap; all 33,968 unknown routes are AS9086-AS6762's ipv6 export, for one reason: an inconclusive
+    set (AS-CONCERTAP).
+  - Of the 842 sets, 54 were found and loaded; the sets still missing in B are ones none of the sources asked holds.
+    Over both directions 787 of the 842 are deleted or not found (407 + 380, the import set FLTR-BOGONS-V6 among the
+    deleted; not the same 787 as B's export count above, which holds AS-CONCERTAP instead), and 407 of them (51.7%)
+    were deleted.
+  - Hand-checked (`.data/missing-sets/B4/tracked.tsv`, with the classes from `sets.tsv`):
+    - AS20771 to AS174, 37.143.152.0/22 is "real for any IRR filter": its 247 missing sets in B4 are 176 deleted
+      and 71 not found, and the first three answer "no entries" at both services.
+    - AS6762 to AS1257, 2803:57c0:ff00::/48 is "unknown": its 727 sets are 370 deleted, 356 not found and
+      AS-CONCERTAP.
+- Not measured:
+  - route objects that live only in IDNIC, RIPE-NONAUTH or LEVEL3;
+  - any sample other than the 60 pairs.
+
 ## [0.4.0] - 2026-10-19
 
 ### Added
