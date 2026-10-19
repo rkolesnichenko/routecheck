@@ -336,7 +336,8 @@ Packages, imports strictly downward:
     - `.data/missing-sets-rounds.zsh` drives the rounds.
   - The registry-provenance measurement (CHANGELOG, "Measured, registry provenance"):
     - `ROUTECHECK_REALDATA_ROUTES_FROM` (registry names) keeps route and route6 objects only from those
-      registries. It cannot be combined with `_EXTRA`.
+      registries. With `_EXTRA` the extra dump's routes are dropped too (its registry, "extra", is never in
+      the list); its sets and other objects load.
     - Under OUT, the test also streams `routes.tsv.gz` (one line per route of every report with a
       policy) and writes `pairs.tsv` (each pair's status).
     - `TestProvenanceCompare` (`ROUTECHECK_PROVENANCE_A`, `_B`, `_LABEL`, `_EXCLUDE`) compares two runs

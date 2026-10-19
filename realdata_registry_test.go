@@ -12,6 +12,7 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"unsafe"
 
 	"github.com/rkolesnichenko/routecheck"
 	"github.com/rkolesnichenko/routecheck/verdict"
@@ -280,8 +281,12 @@ func TestTrackedLines(t *testing.T) {
 		pre + "203.0.113.0/24|AS2":  pre + "203.0.113.0/24|AS2\taccepted\t\t",
 		pre + "100.64.0.0/10|AS2":   pre + "100.64.0.0/10|AS2\taccepted\t\t",
 	}
-	if !reflect.DeepEqual(r.lines, want) {
-		t.Errorf("lines = %q, want %q", r.lines, want)
+	got := map[string]string{}
+	for k, tr := range r.lines {
+		got[k] = tr.line(k)
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("lines = %q, want %q", got, want)
 	}
 	if err := r.spool.close(); err != nil {
 		t.Fatal(err)
@@ -321,7 +326,7 @@ func TestRealOutTracked(t *testing.T) {
 	defer o.abort()
 	r := newTestPair()
 	r.p = pair{L: 1, X: 2}
-	r.lines = map[string]string{"AS1-AS2|k1": "AS1-AS2|k1\taccepted\t\t"}
+	r.lines = map[string]trackedResult{"AS1-AS2|k1": {Outcome: "accepted"}}
 	if r.spool, err = o.spool(1); err != nil {
 		t.Fatal(err)
 	}
@@ -611,5 +616,102 @@ func TestRealOutRoutesStream(t *testing.T) {
 	}
 	if want := "AS1-AS2\tchecked\nAS5-AS6\tnot selected\nAS3-AS4\ttimeout\n"; string(ps) != want {
 		t.Errorf("pairs.tsv = %q, want %q", ps, want)
+	}
+}
+
+func TestLoadRegistryRoutesFromWithExtra(t *testing.T) {
+	dir := t.TempDir()
+	dumps := []string{
+		writeGzip(t, dir, "ripe.db.gz", "route: 192.0.2.0/24\norigin: AS64496\nsource: RIPE"),
+	}
+	extra := writeGzip(t, dir, "extra.db.gz",
+		"as-set: AS-NEW\nmembers: AS64504\nsource: LEVEL3",
+		"route: 198.51.100.0/24\norigin: AS64497\nsource: LEVEL3")
+	reg := loadRegistry(t, dumps, extra, map[string]bool{"ripe": true})
+	prefixes := func(as types.ASN) []netip.Prefix {
+		ps, err := reg.src.OriginatedRoutes(context.Background(), as, types.AFIv4)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return ps
+	}
+	ref, err := types.ParseSetRef("AS-NEW")
+	if err != nil {
+		t.Fatal(err)
+	}
+	res, err := (&resolve.Expander{Src: reg.src}).ExpandAS(context.Background(), ref)
+	if err != nil || !slices.Equal(res.List(), []types.ASN{64504}) {
+		t.Errorf("ExpandAS(AS-NEW) = %v, %v, want [64504]: the extra's sets must load", res.List(), err)
+	}
+	if got := prefixes(64497); len(got) != 0 {
+		t.Errorf("AS64497 routes = %v, want none: the extra's routes are dropped", got)
+	}
+	if got := prefixes(64496); len(got) != 1 || got[0].String() != "192.0.2.0/24" {
+		t.Errorf("AS64496 routes = %v, want [192.0.2.0/24]", got)
+	}
+	if want := map[string]int{"extra": 1}; !reflect.DeepEqual(reg.droppedRoutes, want) {
+		t.Errorf("droppedRoutes = %v, want %v", reg.droppedRoutes, want)
+	}
+}
+
+func TestTrackedSetsInterned(t *testing.T) {
+	ref := func(s string) types.SetRef {
+		r, err := types.ParseSetRef(s)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return r
+	}
+	route := func(pfx string) verdict.Route {
+		return verdict.Route{Prefix: netip.MustParsePrefix(pfx), Path: []types.ASN{2}, PathKnown: true}
+	}
+	rejected := func(pfx string) routecheck.RouteVerdict {
+		return routecheck.RouteVerdict{Route: route(pfx), Verdict: verdict.Verdict{Outcome: verdict.Rejected, Fails: []verdict.Fail{
+			{Missing: []types.SetRef{ref("AS-B"), ref("AS-A")}},
+		}}}
+	}
+	rep := routecheck.Report{Policy: peval.Policy{Clauses: make([]peval.Clause, 1)},
+		Routes: []routecheck.RouteVerdict{rejected("192.0.2.0/24"), rejected("198.51.100.0/24")}}
+	ctx := reportCtx{pair: "AS1-AS2", family: "ipv4.unicast", neighbour: "AS2"}
+	k1 := routeKey(ctx.pair, "import", ctx.family, ctx.neighbour, route("192.0.2.0/24"))
+	k2 := routeKey(ctx.pair, "import", ctx.family, ctx.neighbour, route("198.51.100.0/24"))
+
+	dir := t.TempDir()
+	track := filepath.Join(dir, "track.tsv")
+	if err := os.WriteFile(track, []byte(k1+"\trejected\t\tAS-A\n"+k2+"\trejected\t\tAS-A\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	o, err := openRealOut(filepath.Join(dir, "out"), track)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer o.abort()
+	r := newTestPair()
+	r.p = pair{L: 1, X: 2}
+	r.track = o.trackSet()
+	r.intern = o.internSets()
+	if r.spool, err = o.spool(1); err != nil {
+		t.Fatal(err)
+	}
+	r.report(&rep, 0, "x", ctx)
+	a, b := r.lines[k1], r.lines[k2]
+	if a.Sets != "AS-A,AS-B" || b.Sets != "AS-A,AS-B" {
+		t.Fatalf("Sets = %q, %q; want AS-A,AS-B twice", a.Sets, b.Sets)
+	}
+	if unsafe.StringData(a.Sets) != unsafe.StringData(b.Sets) {
+		t.Error("two tracked routes with the same missing sets hold two copies of the list")
+	}
+	if err := o.addPair(&r); err != nil {
+		t.Fatal(err)
+	}
+	if err := o.finish(&totals{}, func(f string, a ...any) { t.Errorf(f, a...) }); err != nil {
+		t.Fatal(err)
+	}
+	got, err := os.ReadFile(filepath.Join(dir, "out", "tracked.tsv"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := k1 + "\trejected\t\tAS-A,AS-B\n" + k2 + "\trejected\t\tAS-A,AS-B\n"; string(got) != want {
+		t.Errorf("tracked.tsv = %q, want %q", got, want)
 	}
 }

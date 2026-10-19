@@ -142,8 +142,9 @@ import (
 // names; default every registry) keeps route and route6 objects only from
 // those registries' dumps: every other registry still supplies its sets,
 // aut-nums and the rest, but its routes (and their member-of: claims) are
-// dropped, and a routes from: line logs the count dropped. It cannot be used
-// with ROUTECHECK_REALDATA_EXTRA.
+// dropped, and a routes from: line logs the count dropped. It can be used with
+// ROUTECHECK_REALDATA_EXTRA: the "extra" registry is never in the list, so the
+// extra dump's routes are dropped and its sets and other objects load.
 // ROUTECHECK_REALDATA_PAIRS=SEL (1-based indices into the PAIRS: list, such as
 // 1-20,31; default all) checks only those pairs; the others are logged as
 // "not selected", added to no total and written as "none" in tracked.tsv.
@@ -211,9 +212,6 @@ func TestRealData(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ROUTECHECK_REALDATA_ROUTES_FROM: %v", err)
 	}
-	if routesFrom != nil && extra != "" {
-		t.Fatal("ROUTECHECK_REALDATA_ROUTES_FROM with ROUTECHECK_REALDATA_EXTRA is not supported")
-	}
 	reg := loadRegistry(t, rd.dumps, extra, routesFrom)
 	loadTime := since(t0)
 	var per []string
@@ -231,7 +229,7 @@ func TestRealData(t *testing.T) {
 		t.Logf("routes from: every registry")
 	} else {
 		var names, dropped []string
-		for _, n := range registryOrder {
+		for _, n := range append(slices.Clone(registryOrder), "extra") {
 			if routesFrom[n] {
 				names = append(names, n)
 			}
@@ -322,7 +320,7 @@ func TestRealData(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		r := checkPair(t, reg, vrps, p, files[bgp.ASN(p.X)], timeout, resolve.Expander{MaxPrefixes: maxPrefixes}, out.trackSet(), sp, prof, i+1)
+		r := checkPair(t, reg, vrps, p, files[bgp.ASN(p.X)], timeout, resolve.Expander{MaxPrefixes: maxPrefixes}, out.trackSet(), out.internSets(), sp, prof, i+1)
 		markHeap(prof, t.Logf, fmt.Sprintf("pair-%d-end", i+1))
 		r.log(t, i+1, len(pairs))
 		if r.dupKeys > 0 {
@@ -356,9 +354,10 @@ type realOut struct {
 	status  []pairStatus    // every pair of the loop, in PAIRS order
 	track   []string        // TRACK's keys, in its order; nil without TRACK
 	trackIn map[string]bool // the same keys
-	got     map[string]string
-	checked map[string]bool // pairs that completed
-	cur     *pairSpool      // the spool of the pair being checked; abort removes it
+	got     map[string]trackedResult
+	intern  map[string]string // the comma-joined set lists of tracked lines, one string per distinct list
+	checked map[string]bool   // pairs that completed
+	cur     *pairSpool        // the spool of the pair being checked; abort removes it
 	closed  bool
 }
 
@@ -458,7 +457,7 @@ func readTrackKeys(file string) ([]string, error) {
 // openRealOut makes dir, opens rejected-missing.tsv in it and reads the keys
 // of trackFile ("" for none).
 func openRealOut(dir, trackFile string) (*realOut, error) {
-	o := &realOut{dir: dir, got: map[string]string{}, checked: map[string]bool{}}
+	o := &realOut{dir: dir, got: map[string]trackedResult{}, intern: map[string]string{}, checked: map[string]bool{}}
 	if trackFile != "" {
 		keys, err := readTrackKeys(trackFile)
 		if err != nil {
@@ -541,6 +540,27 @@ func (o *realOut) trackSet() map[string]bool {
 		return nil
 	}
 	return o.trackIn
+}
+
+// internSets is the intern map checkPair shares across the run's pairs: equal
+// set lists of tracked lines share one string. nil without OUT.
+func (o *realOut) internSets() map[string]string {
+	if o == nil {
+		return nil
+	}
+	return o.intern
+}
+
+// trackedResult is the kept part of a tracked route's rejected-missing.tsv line:
+// the outcome, the Undecided reason kinds and the comma-joined missing sets
+// (shared through the run's intern map).
+type trackedResult struct {
+	Outcome, Detail, Sets string
+}
+
+// line is the TSV line of the route with this key.
+func (t trackedResult) line(key string) string {
+	return key + "\t" + t.Outcome + "\t" + t.Detail + "\t" + t.Sets
 }
 
 // addPair records a pair's status. For a checked pair it appends the spooled
@@ -647,8 +667,11 @@ func (o *realOut) finish(tot *totals, errorf func(string, ...any)) error {
 	}
 	return writeFileChecked(filepath.Join(o.dir, "tracked.tsv"), func(w *bufio.Writer) error {
 		for _, k := range o.track {
-			line, ok := o.got[k]
-			if !ok {
+			tr, ok := o.got[k]
+			var line string
+			if ok {
+				line = tr.line(k)
+			} else {
 				pair, _, _ := strings.Cut(k, "|")
 				if o.checked[pair] {
 					errorf("tracked key %q: its pair was checked, but the run has no route with this key", k)
@@ -1482,7 +1505,8 @@ type pairResult struct {
 	// TSV line, for the tracked keys only. dupKeys counts routes whose key an
 	// earlier route of the pair had.
 	track   map[string]bool
-	lines   map[string]string
+	lines   map[string]trackedResult
+	intern  map[string]string // joined set list to its one shared string (nil: not shared)
 	dupKeys int
 
 	// spool takes, as report reads each route, its routes.tsv.gz line and,
@@ -1494,10 +1518,10 @@ type pairResult struct {
 // checkPair runs one collector-mode check and summarizes each report as
 // CheckEach hands it over, keeping none: its lines go to sp (nil: none). The
 // summarizing runs inside the pair's timeout.
-func checkPair(tb testing.TB, reg *irrRegistry, vrps *rpki.VRPs, p pair, file string, timeout time.Duration, exp resolve.Expander, track map[string]bool, sp *pairSpool, prof *memprof.Sampler, idx int) pairResult {
+func checkPair(tb testing.TB, reg *irrRegistry, vrps *rpki.VRPs, p pair, file string, timeout time.Duration, exp resolve.Expander, track map[string]bool, intern map[string]string, sp *pairSpool, prof *memprof.Sampler, idx int) pairResult {
 	tb.Helper()
 	r := pairResult{p: p, reasons: [2]tally{{}, {}}, tooExp: tally{}, unevaluable: tally{}, anySets: tally{},
-		missingSets: [2]tally{{}, {}}, routeObj: [2]tally{{}, {}}, track: track, spool: sp}
+		missingSets: [2]tally{{}, {}}, routeObj: [2]tally{{}, {}}, track: track, intern: intern, spool: sp}
 	counter := &countingSource{Source: reg.src}
 	src := policySourceFor(reg, prof, idx, p, tb.Logf)
 	c := &routecheck.Checker{Eval: peval.Evaluator{Src: src, Expander: exp}, Routes: counter}
@@ -1673,11 +1697,22 @@ func missingSetNames(v *verdict.Verdict) []string {
 	return slices.Compact(sets)
 }
 
-// routeLine is the TSV line of one route: key, outcome, the reason kinds of an
-// Undecided verdict (sorted, comma-joined; empty for any other outcome, whose
-// Reasons are not the cause of it) and sets, comma-joined.
-func routeLine(key string, v *verdict.Verdict, sets []string) string {
-	return key + "\t" + v.Outcome.String() + "\t" + undecidedKinds(v) + "\t" + strings.Join(sets, ",")
+// internSets joins sets with commas and returns the run's one string for that
+// list: the joined copy is garbage as soon as it is looked up, so no tracked
+// key holds a list of its own.
+func (r *pairResult) internSets(sets []string) string {
+	if len(sets) == 0 {
+		return ""
+	}
+	joined := strings.Join(sets, ",")
+	if r.intern == nil {
+		return joined
+	}
+	if s, ok := r.intern[joined]; ok {
+		return s
+	}
+	r.intern[joined] = joined
+	return joined
 }
 
 // undecidedKinds is the reason kinds of an Undecided verdict, sorted,
@@ -1736,15 +1771,16 @@ func (r *pairResult) report(rep *routecheck.Report, dir int, label string, rc re
 			sets = missingSetNames(&rv.Verdict)
 		}
 		if tracked || len(sets) > 0 {
-			line := routeLine(key, &rv.Verdict, sets)
+			joined := r.internSets(sets)
+			tr := trackedResult{Outcome: rv.Verdict.Outcome.String(), Detail: undecidedKinds(&rv.Verdict), Sets: joined}
 			if tracked {
 				if r.lines == nil {
-					r.lines = map[string]string{}
+					r.lines = map[string]trackedResult{}
 				}
-				r.lines[key] = line
+				r.lines[key] = tr
 			}
 			if len(sets) > 0 {
-				r.spool.writeRejected(line)
+				r.spool.writeRejected(tr.line(key))
 			}
 		}
 		if rv.Verdict.Outcome == verdict.Undecided {
