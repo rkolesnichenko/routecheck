@@ -304,6 +304,17 @@ Packages, imports strictly downward:
     - `TestMissingSetsClassify` (`_DIR`, `_TRACKED`, `_SUBSET`) is offline. `_SUBSET` takes pair ids
       (`AS<L>-AS<X>`); a malformed one fails, and each id's count of tracked routes is logged.
     - `.data/missing-sets-rounds.zsh` drives the rounds.
+  - The registry-provenance measurement (CHANGELOG, "Measured, registry provenance"):
+    - `ROUTECHECK_REALDATA_ROUTES_FROM` (registry names) keeps route and route6 objects only from those
+      registries. It cannot be combined with `_EXTRA`.
+    - Under OUT, the test also streams `routes.tsv.gz` (one line per route of every report with a
+      policy) and writes `pairs.tsv` (each pair's status).
+    - `TestProvenanceCompare` (`ROUTECHECK_PROVENANCE_A`, `_B`, `_LABEL`, `_EXCLUDE`) compares two runs
+      offline. It peaked at 2,582 MB (`.data/provenance-AV.log`).
+    - With fewer route objects, pair 2 (AS9086 from AS6762) goes over the 8 GB cap even alone, at
+      8,224 to 8,255 MB. Its AS-SEABONE expansions fit under 2,097,152 and are decided, so shard
+      it out (`ROUTECHECK_REALDATA_PAIRS=1,3-60`).
+    - `.data/provenance-runs.zsh` and `.data/provenance-shards.zsh` drive the runs.
   - The benchmarks (`BenchmarkDecide`, `BenchmarkCollector`; `ROUTECHECK_BENCH_LOCAL`, `_PEER`,
     `_AF` and `_ROUTES`) use the same data and load every pinned registry too. Their commands
     are in `bench_test.go`. Set `ROUTECHECK_REALDATA_REGISTRIES=ripe` to compare with 0.2.0's

@@ -16,6 +16,54 @@ a minor version may change the API.
 - `TestMissingSetsLookup` (opt-in, live, `ROUTECHECK_MISSINGSETS_LIVE=1`) classifies missing sets through
   whois.radb.net and RIPE's version history, cached and capped at 5,000 queries. `TestMissingSetsClassify`
   classifies the tracked routes. The command, the API and go.mod do not change.
+- The real-data test keeps route objects only from named registries (`ROUTECHECK_REALDATA_ROUTES_FROM`) and, under
+  `ROUTECHECK_REALDATA_OUT`, streams one line per route (`routes.tsv.gz`) and each pair's status (`pairs.tsv`).
+  `TestProvenanceCompare` (opt-in, offline) compares two runs route by route.
+
+### Measured, registry provenance
+
+The runs of 2026-10-19, on the pinned 2026-10-18 files, `ROUTECHECK_REALDATA_MAX_PREFIXES=2097152`, the default
+sample (60 pairs), under the memory guard (8 GB cap, normal priority, `GOMAXPROCS=4`, `GOMEMLIMIT=6GiB`, one run at
+a time). The design is `docs/superpowers/specs/2026-10-19-registry-provenance-design.md`. The logs are kept by the
+maintainer and are not committed. "Unverified" is RADB and its ten mirrors; "verified" is the five RIRs (an
+assumption: JPIRR is grouped with RADB).
+
+- Run A, every registry (`.data/provenance-A.log`): PASS, 60 of 60. Its TOTALS equal `.data/missing-sets-A.log`'s
+  but for timing. Peak RSS 7,148 MB.
+- Run R, route objects from the RIRs only (`ROUTECHECK_REALDATA_ROUTES_FROM=ripe,apnic,arin,afrinic,lacnic`):
+  - Dropped 1,785,072 route objects: radb 1,341,392, nttcom 291,428, tc 49,767, altdb 36,272, bell 29,362,
+    reach 18,021, jpirr 15,680, canarie 1,579, bboi 1,560, panix 9, nestegg 2. Of them, 23,655 were `member-of:`
+    claimants.
+  - The guard stopped the whole run on pair 2 (AS9086 from AS6762) at 8,224 MB (`.data/provenance-R-stopped.log`),
+    and pair 2 alone at 8,255 MB (`.data/provenance-R2.log`). The other 59 pairs passed (`.data/provenance-R1.log`,
+    peak 6,202 MB).
+- Run V, the RIRs only (`ROUTECHECK_REALDATA_REGISTRIES=ripe,apnic,arin,afrinic,lacnic`): the other 59 pairs passed
+  (`.data/provenance-V1.log`, peak 5,046 MB); pair 2 alone was stopped at 8,249 MB (`.data/provenance-V2.log`).
+- Pair 2's 2,607,757 routes are therefore "no verdict" in R and V, and are left out of every share below.
+- A against R (`.data/provenance-AR.log`), over the routes answered in both runs:
+
+  | route-object "yes" in A | resting on unverified route objects alone | share |
+  |---|---|---|
+  | import 2,102,844 | 764,122 | 36.34% |
+  | export 2,446,925 | 896,319 | 36.63% |
+  | total 4,549,769 | 1,660,441 | 36.50% |
+
+  - No answer went from "no" to "yes".
+  - The RPKI state of the 1,660,441: 1,055,319 valid (63.56%), 605,079 not found, 43 invalid.
+  - The totals-only shortcut does not apply: the runs' route-object denominators differ, because of pair 2.
+  - On the 50 pairs of the every-registry caveat, A reproduces 1,568,538 "yes" answers. Of these, 551,873 (35.18%)
+    rest on unverified route objects alone: 53.09% of the rise from 528,974.
+- Verdicts:
+  - A against R: 5,190 export routes go from accepted to rejected (RPKI 2,888 valid, 2,288 not found, 14 invalid),
+    which is 0.15% of the 3,369,730 export routes in both runs. None go from rejected to accepted.
+  - A against V (`.data/provenance-AV.log`): 5,399 go from accepted to rejected (3,092 valid, 2,293 not found,
+    14 invalid). 439 (432 accepted, 7 rejected) have no verdict, because their report loses its policy.
+  - Both comparisons: 3 routes unevaluable in A (2 import, 1 export) are accepted once their sets shrink, a limit
+    effect. No other import verdict moves.
+- Hand-checked: 44.31.178.0/24 from AS211776 and 81.208.192.0/19 from AS14544 are route objects only in
+  `radb.db.gz`. Their answer is "yes" in A and "no" in R, and AS44306's export of each to AS3491 is accepted in A and
+  rejected in R.
+- Not measured: pair 2; whether any unverified object is right; how JPIRR or another mirror verifies.
 
 ### Measured, missing sets
 
