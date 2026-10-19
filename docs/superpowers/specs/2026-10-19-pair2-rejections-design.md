@@ -31,7 +31,7 @@ The maintainer wants to know which, before the "What this means" paragraph leans
 
 Classify pair 2's 252,133 R rejections with the missing-sets measurement's method and classes (design
 `docs/superpowers/specs/2026-10-19-missing-sets-design.md`; docs/routecheck.md "The rejections against missing
-sets"). The classes are gap, real, real for any IRR filter and unknown, each with its reasons.
+sets"). The classes are gap, real, real for any IRR filter and unknown, each with its reasons, renamed for R (see "Settled after the builder check", 1).
 
 1. **Look up the sets never looked up,** live, with the existing `TestMissingSetsLookup`. Its cache answers every
    set already looked up without a query. AS-CONCERTAP's inconclusive answer is asked again, as the tool does
@@ -93,7 +93,7 @@ sets"). The classes are gap, real, real for any IRR filter and unknown, each wit
 
 1. **R only, not V.** The question is "without RADB's route objects", which is R.
 2. **AS-CONCERTAP stays inconclusive under the method,** so any rejection still naming it is "unknown".
-   - It is named by every rejection, so under the method no rejection can be "real for any IRR filter" while it
+   - It is named by every rejection, so under the method no rejection can be "real for an RIR-objects filter" while it
      stays inconclusive. The figures would then be "gap" and "unknown" only.
    - The docs therefore also give a labelled sensitivity line: the split if AS-CONCERTAP is taken as not found. The
      earlier hand check found no object of that name in RIPE (`.data/missing-sets/concertap-ripe-obj.txt`), nor in
