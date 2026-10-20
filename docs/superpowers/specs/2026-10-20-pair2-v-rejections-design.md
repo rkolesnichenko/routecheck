@@ -54,7 +54,7 @@ The maintainer confirmed that this comparison is the question to answer (2026-10
 - **The route objects are the same** in both runs: R keeps only the RIRs' route and route6 objects, and V loads
   only the RIRs.
 - **So R is V plus the objects only the non-RIR registries hold, other than route objects:**
-  - their sets of every class, which is most of it;
+  - their sets of every class;
   - their aut-nums, with their `member-of:` claims (a claim counts only for a set in its own registry);
   - their maintainers;
   - a registry-scoped reference such as `RADB::AS-X` resolves in R and is missing in V.

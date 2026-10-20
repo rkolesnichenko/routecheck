@@ -727,14 +727,14 @@ Both spellings of 0xFFFFFF03 are read, in any case:
             and both runs load the same route objects, the RIRs'. So R is V
             plus the objects only the non-RIR registries hold, other than
             route objects:
-            - their sets, which is most of it;
+            - their sets;
             - their aut-nums, with their `member-of:` claims;
             - their maintainers;
             - registry-scoped references such as `RADB::AS-X`, which resolve
               in R and are missing in V.
-            - AS6762's aut-num, whose export clauses decide these routes, is
-              RIPE's in both runs: no other dump holds one
-              (`.data/pair2-v-autnum.log`).
+          - AS6762's aut-num, whose export clauses decide these routes, is
+            RIPE's in both runs: no other dump holds one
+            (`.data/pair2-v-autnum.log`).
           - **Rescued:** a route rejected in V and accepted in R is rescued by
             the non-RIR registries' objects, as a whole. Which set rescues
             which route is not measured. These are not gaps: V leaves those
@@ -762,8 +762,11 @@ Both spellings of 0xFFFFFF03 are read, in any case:
               33,968 rejected in A is rescued.
             - Of the rescued, 11,148 are "yes" (9,642 + 1,506), 190 "no"
               (184 + 6) and 1 "unknown". The 190 have no route object for
-              exactly their prefix and origin in either run: what rescues
-              them is in the export filter's sets, not in their own answer.
+              exactly their prefix and origin in either run. As for all
+              11,339, their own route-object answer is the same in both runs,
+              so the rescue is not in it; for these 190, R's filter must
+              accept them through other route objects than one for exactly
+              their prefix and origin.
             - The rejected cells are those of R's A → R table (below) with
               its "yes → no" and "no → no" added, since neither V nor R holds
               the dropped route objects: 208,022 = 82,415 + 125,607,
@@ -867,9 +870,9 @@ Both spellings of 0xFFFFFF03 are read, in any case:
       those would be rejected (R), all against sets missing from every registry
       routecheck loads (R loads sets from all 16 registries; only its route
       objects are RIR-only). V, which loads the RIRs alone, rejects 224,299.
-      The non-RIR registries' objects other than route objects, mainly sets,
-      rescue 9,827 of those: R loads them and accepts the routes
-      (`.data/pair2-v-cross.txt`). The other 214,472 are R's.
+      The non-RIR registries' objects other than route objects (sets, aut-nums' `member-of:`
+      claims, maintainers, scoped references) rescue 9,827 of those: R loads
+      them and accepts the routes (`.data/pair2-v-cross.txt`). The other 214,472 are R's.
       - None of R's rejections is a gap: loading the sets found elsewhere
         rescues none.
       - Whether they stand turns on one set, AS-CONCERTAP: inconclusive under

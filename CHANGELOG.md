@@ -80,7 +80,7 @@ Pair 2's 252,133 export rejections in run R were classified with the missing-set
 Pair 2's 263,472 export rejections in run V, the RIRs alone, were joined route by route with run R
 (`.data/pair2-v-join.log`, table `.data/pair2-v-cross.txt`, keys `.data/pair2-v-rescued.tsv`). The RIRs come first
 in the registry order and both runs load the same route objects, so R is V plus the objects only the non-RIR
-registries hold, other than route objects: mainly sets, also their aut-nums' `member-of:` claims, their
+registries hold, other than route objects: their sets, their aut-nums' `member-of:` claims, their
 maintainers and registry-scoped references. AS6762's aut-num is RIPE's in both runs (`.data/pair2-v-autnum.log`).
 
 - **Rescued: 11,339.** R accepts them: they are rescued by the non-RIR registries' objects, as a whole. Not gaps: V
