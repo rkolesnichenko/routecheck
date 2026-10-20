@@ -365,7 +365,8 @@ Packages, imports strictly downward:
       for the same pair, a different code path. The controls (`-AR-control.log`, `-AV-control.log`)
       reproduce the published logs. Pair 2's 400,748 export routes that are unevaluable in A are decided
       in R and V (214,472 and 224,299 rejected). Of the sets those rejections name, the missing-sets
-      lookup covered 807 of R's 1,276 and 568 of V's 1,039; 469 and 471 were never looked up.
+      lookup covered 807 of R's 1,276 and 568 of V's 1,039; 469 and 471 were not. The pair-2 lookup since covered
+      R's 469 and 109 of V's 471; V's other 362 are all in the non-RIR dumps (`.data/pair2-wording-counts.txt`).
       Classified since (`.data/pair2-rejections-*.log`, driven by `.data/pair2-rejections-runs.zsh`: control, rounds, classify, cross; the lookup
       works on the copy `.data/pair2-rejections/lookup`, so `.data/missing-sets/lookup` keeps the published 842
       sets): no gap; all 252,133 unknown on AS-CONCERTAP alone; 88,475 of them "yes → no" on the route's own route-object answer, which does not tell a RADB effect.

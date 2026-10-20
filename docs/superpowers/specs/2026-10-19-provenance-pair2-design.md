@@ -101,6 +101,8 @@ The maintainer wants the figures to include it.
    - Their split into accepted and rejected is given. So is the fact that the rejected ones fail against missing
      sets that the missing-sets lookup never covered (it looked up A's 842 sets): 1,276 distinct in R2 and 1,039 in
      V2, from those runs' logs, recounted.
+     Corrected after the final review: "never covered" is false. The lookup covered 807 of R2's 1,276 sets and 568
+     of V2's 1,039; 469 and 471 were not.
    - The "What this means" paragraph is rewritten from the new figures, not kept by default.
 3. **The shards' versions are named:** R1 and V1 were made at 2d5e24a, and R2 and V2 at ae7d034 (v0.6.0's code
    commit).

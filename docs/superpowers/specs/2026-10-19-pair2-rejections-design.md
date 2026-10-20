@@ -120,6 +120,10 @@ sets"). The classes are gap, real, real for any IRR filter and unknown, each wit
      "no" in R, and 125,607 are "no" in both. That is preliminary and must be recounted. A route with "no" in both
      is not rejected because RADB was dropped; it is undecided in A only because of the limit.
      Corrected after the final review: the route-object answer is exact (prefix, origin) and says nothing about filter membership; 212 ipv6 'no → no' routes accepted in A are rejected in R.
+     That withdraws three sentences of this item: "This shows how much of each class is about the dropped objects
+     at all", "A route with 'no' in both is not rejected because RADB was dropped; it is undecided in A only
+     because of the limit" and "The 214,472 are not all a RADB effect". How much of the 214,472 is a RADB effect
+     was not measured.
    - The "What this means" paragraph must say this. The 214,472 are not all a RADB effect.
 3. **The split by A's outcome follows the address family.** The 214,472 are ipv4, and the 3,693 and the 33,968
    are ipv6. The docs say so.

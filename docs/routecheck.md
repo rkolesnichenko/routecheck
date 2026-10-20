@@ -706,7 +706,10 @@ Both spellings of 0xFFFFFF03 are read, in any case:
         the 842 looked up in `.data/missing-sets/lookup/sets.tsv`): 807 of R's
         1,276 sets and 568 of V's 1,039 were among the 842 looked up; 469 and
         471 were not. (Run A named 809 of the 842; the other 33 came from
-        later lookup rounds.)
+        later lookup rounds.) The lookup for R's rejections (below) has since
+        covered R's 469, and with them 109 of V's 471; V's other 362 were never
+        looked up, and every one of them is a set in the non-RIR dumps V does
+        not load (`.data/pair2-wording-counts.txt`).
         - In R, each of 739 sets is named by all 252,133 pair-2 rejections.
           All 739 were looked up: 367 deleted, 347 not found, 24 found
           elsewhere and 1 inconclusive, AS-CONCERTAP, the set that left A's
@@ -806,9 +809,12 @@ Both spellings of 0xFFFFFF03 are read, in any case:
         only in the dropped registries ("yes → no") and 125,607 have none in
         either run ("no → no"); those are the routes' own answers only.
         - Pair 2's ipv6 routes, which A decides, show it
-          (`.data/pair2-rejections-cross.txt`): all 212 "accepted (ipv6)" routes
-          with "no → no" and all 10 with "yes → yes" went from accepted in A to
-          rejected in R, and 2,589 "yes → no" are rejected in A too.
+          (`.data/pair2-rejections-cross.txt`): 212 "accepted (ipv6)" routes
+          with "no → no" and 10 with "yes → yes" went from accepted in A to
+          rejected in R, and 2,589 "yes → no" are rejected in A too. Of all of
+          pair 2's ipv6 routes accepted in A, those are 212 of the 12,790 with
+          "no → no" and 10 of the 15,560 with "yes → yes"
+          (`.data/pair2-wording-ipv6-accepted.txt`).
     - These shares are weighted by routes, and the sample is concentrated
       (`.data/provenance-AR2.log`, "concentration"):
       - pair 2 alone holds 1,851,021 of the 6,400,790 "yes" answers (28.92%);
@@ -827,8 +833,9 @@ Both spellings of 0xFFFFFF03 are read, in any case:
     - how JPIRR or any other mirror verifies;
     - whether AS-CONCERTAP exists anywhere: RIPE's history answer stays
       inconclusive, so pair 2's R rejections stay unknown under the method;
-    - V's rejections: 362 of its sets were never looked up, all in the
-      non-RIR dumps V does not load, and V was not classified;
+    - V's rejections, which were not classified: whether loading the 362 sets
+      never looked up (all in the non-RIR dumps V does not load) would flip any
+      of them;
     - what A's filter would decide for pair 2's ipv4 routes: AS-SEABONE is over
       the limit in A.
 - **The marking on the command run.** The command on AS9086 from AS6762, every

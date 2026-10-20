@@ -49,7 +49,9 @@ extended comparer reproduces the published logs exactly, apart from timing, peak
 - Pair 2 alone holds 1,851,021 of the 6,400,790 "yes" answers (28.92%).
 - Not measured here: whether the 469 (R) and 471 (V) never-looked-up sets exist anywhere, and whether loading the
   "found elsewhere" sets would flip any of these rejections. R's are answered below ("Measured, pair 2's rejections
-  without RADB"); V's 362 sets still never looked up (all in non-RIR dumps V does not load) are open.
+  without RADB"). That lookup also covered 109 of V's 471, all among R's 469; V's other 362 are all sets in the
+  non-RIR dumps V does not load (`.data/pair2-wording-counts.txt`). Whether loading them would flip any of V's
+  rejections is open.
 
 ### Measured, pair 2's rejections without RADB
 
@@ -65,8 +67,9 @@ Pair 2's 252,133 export rejections in run R were classified with the missing-set
   registries R drops), 155,541 "no → no", 8,080 "yes → yes" and 37 "unknown". Of the 214,472 undecided in A (all
   ipv4), 82,415 are "yes → no" and 125,607 are "no → no". That answer cannot tell how much is a RADB effect: it asks
   about exactly this prefix and origin, and A and R differ only in the dropped route objects and their member-of:
-  claims. Among pair 2's ipv6 routes, which A decides, all 212 "accepted, no → no" and all 10 "accepted, yes → yes"
-  went from accepted in A to rejected in R, and 2,589 "yes → no" are rejected in A too.
+  claims. Among pair 2's ipv6 routes, which A decides, 212 of the 12,790 "accepted, no → no" and 10 of the 15,560
+  "accepted, yes → yes" went from accepted in A to rejected in R (`.data/pair2-wording-ipv6-accepted.txt`), and
+  2,589 "yes → no" are rejected in A too.
 - **Controls:** pair 2 in R with nothing extra loaded reproduces R2 byte for byte, and the 33,968 rejected in A too
   are all "unknown, inconclusive set".
 
