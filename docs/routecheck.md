@@ -717,6 +717,79 @@ Both spellings of 0xFFFFFF03 are read, in any case:
         - In V, each of 712 sets is named by all 263,472 rejections; 476 of
           them were looked up: 315 deleted, 153 not found, 7 found elsewhere
           and 1 inconclusive (AS-CONCERTAP).
+          - **Against R** (2026-10-20, design
+            `docs/superpowers/specs/2026-10-20-pair2-v-rejections-design.md`).
+            V's 263,472 rejections, joined route by route with R and A
+            (`TestPair2VAgainstR`, `.data/pair2-v-join.log`; the table is
+            `.data/pair2-v-cross.txt`, the keys `.data/pair2-v-rescued.tsv`):
+            R accepts 11,339 of them and rejects 252,133.
+          - **What R adds to V.** The RIRs come first in the registry order,
+            and both runs load the same route objects, the RIRs'. So R is V
+            plus the objects only the non-RIR registries hold, other than
+            route objects:
+            - their sets, which is most of it;
+            - their aut-nums, with their `member-of:` claims;
+            - their maintainers;
+            - registry-scoped references such as `RADB::AS-X`, which resolve
+              in R and are missing in V.
+            - AS6762's aut-num, whose export clauses decide these routes, is
+              RIPE's in both runs: no other dump holds one
+              (`.data/pair2-v-autnum.log`).
+          - **Rescued:** a route rejected in V and accepted in R is rescued by
+            the non-RIR registries' objects, as a whole. Which set rescues
+            which route is not measured. These are not gaps: V leaves those
+            registries out by design, and for a filter built from the RIRs
+            alone these rejections are what it decides.
+          - **By family, A's outcome and route-object answer**
+            (`.data/pair2-v-cross.txt`). The route-object answer is the same
+            in V and R (a control), so it has no "yes → no" here:
+
+            | family | A's outcome | route-object answer | rescued | rejected in R |
+            |---|---|---|---|---|
+            | ipv4 | undecided | yes | 9,642 | 6,413 |
+            | ipv4 | undecided | no | 184 | 208,022 |
+            | ipv4 | undecided | unknown | 1 | 37 |
+            | ipv6 | accepted | yes | 1,506 | 10 |
+            | ipv6 | accepted | no | 6 | 3,683 |
+            | ipv6 | rejected | yes | 0 | 1,657 |
+            | ipv6 | rejected | no | 0 | 32,311 |
+            | sum | | | 11,339 | 252,133 |
+
+            - Rescued: 9,827 ipv4 routes, all undecided in A
+              (224,299 − 214,472), and 1,512 ipv6 routes, all accepted in A.
+              The 1,512 are the difference between pair 2's 5,205 (V) and
+              3,693 (R) moves from accepted to rejected, above. None of the
+              33,968 rejected in A is rescued.
+            - Of the rescued, 11,148 are "yes" (9,642 + 1,506), 190 "no"
+              (184 + 6) and 1 "unknown". The 190 have no route object for
+              exactly their prefix and origin in either run: what rescues
+              them is in the export filter's sets, not in their own answer.
+            - The rejected cells are those of R's A → R table (below) with
+              its "yes → no" and "no → no" added, since neither V nor R holds
+              the dropped route objects: 208,022 = 82,415 + 125,607,
+              3,683 = 3,471 + 212 and 32,311 = 2,589 + 29,722; 6,413, 10,
+              1,657 and 37 are the same.
+          - **The 252,133 still rejected** are exactly R's rejections, since
+            no route is accepted in V and rejected in R. Run B still rejects
+            all of them, so they carry R's classes (Classified, below): no
+            gap; all unknown on AS-CONCERTAP; taken as not found, all real
+            for an RIR-objects filter. The missing-sets method was not run
+            over V: every V rejection names AS-CONCERTAP
+            (`.data/stream/V2/missing-sets.tsv`, row
+            `export AS-CONCERTAP 263472`), so it would give all "unknown".
+          - **Controls**, all held (`.data/pair2-v-join.log`; peak RSS
+            1,053 MB): both runs list the same keys; each key has the same
+            route-object answer in V and R; import is 978,368 accepted in
+            both; no route is accepted in V and rejected in R; and the
+            margins: 9,827 and 1,512 rescued, the 33,968 rejected in A
+            rejected in both runs, 263,472 rejections in V and 252,133 in R.
+          - **Hand-checked** (`.data/pair2-v-handcheck.txt`):
+            2001:1398:2::/48 from AS27678, exported toward AS1299
+            (`mp-export: afi ipv6.unicast to AS1299 announce AS-SEABONE-V6`).
+            AS-SEABONE-V6 (RIPE) names AS-HIGHWINDS, which only ALTDB holds,
+            and two more ALTDB sets reach AS27678, whose route6 object is
+            LACNIC's. V lists AS-HIGHWINDS among the route's 720 missing
+            sets; it is one of V's 362 sets never looked up.
       - **Classified** (2026-10-19, design
         `docs/superpowers/specs/2026-10-19-pair2-rejections-design.md`), with
         the missing-sets method, over R's 252,133 rejections.
@@ -794,6 +867,9 @@ Both spellings of 0xFFFFFF03 are read, in any case:
       those would be rejected (R), all against sets missing from every registry
       routecheck loads (R loads sets from all 16 registries; only its route
       objects are RIR-only). V, which loads the RIRs alone, rejects 224,299.
+      The non-RIR registries' objects other than route objects, mainly sets,
+      rescue 9,827 of those: R loads them and accepts the routes
+      (`.data/pair2-v-cross.txt`). The other 214,472 are R's.
       - None of R's rejections is a gap: loading the sets found elsewhere
         rescues none.
       - Whether they stand turns on one set, AS-CONCERTAP: inconclusive under
@@ -833,9 +909,8 @@ Both spellings of 0xFFFFFF03 are read, in any case:
     - how JPIRR or any other mirror verifies;
     - whether AS-CONCERTAP exists anywhere: RIPE's history answer stays
       inconclusive, so pair 2's R rejections stay unknown under the method;
-    - V's rejections, which were not classified: whether loading the 362 sets
-      never looked up (all in the non-RIR dumps V does not load) would flip any
-      of them;
+    - which of the non-RIR objects rescues which of V's rejections: the 11,339
+      are rescued by them as a whole, and one route is hand-checked;
     - what A's filter would decide for pair 2's ipv4 routes: AS-SEABONE is over
       the limit in A.
 - **The marking on the command run.** The command on AS9086 from AS6762, every

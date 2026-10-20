@@ -370,6 +370,9 @@ Packages, imports strictly downward:
       Classified since (`.data/pair2-rejections-*.log`, driven by `.data/pair2-rejections-runs.zsh`: control, rounds, classify, cross; the lookup
       works on the copy `.data/pair2-rejections/lookup`, so `.data/missing-sets/lookup` keeps the published 842
       sets): no gap; all 252,133 unknown on AS-CONCERTAP alone; 88,475 of them "yes → no" on the route's own route-object answer, which does not tell a RADB effect.
+      V against R (`TestPair2VAgainstR`, `.data/pair2-v-join.log`): of V's 263,472 rejections, 11,339 (9,827 ipv4,
+      1,512 ipv6) are rescued by the non-RIR objects R adds (sets mainly; which set rescues which route is not
+      measured), and the other 252,133 are exactly R's rejections, with R's classes.
     - `.data/provenance-runs.zsh` and `.data/provenance-shards.zsh` drive the runs.
   - The benchmarks (`BenchmarkDecide`, `BenchmarkCollector`; `ROUTECHECK_BENCH_LOCAL`, `_PEER`,
     `_AF` and `_ROUTES`) use the same data and load every pinned registry too. Their commands

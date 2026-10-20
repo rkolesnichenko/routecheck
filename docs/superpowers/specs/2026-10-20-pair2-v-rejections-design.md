@@ -1,6 +1,30 @@
 # routecheck: which of pair 2's rejections in V do the non-RIR registries rescue? — design
 
-Status: draft, 2026-10-20. A measurement, not a feature: the command and the library do not change.
+Status: done, measured 2026-10-20 (Outcome, below). A measurement, not a feature: the command and the library do
+not change.
+
+## Outcome
+
+`TestPair2VAgainstR` (`pair2v_test.go`) joined V2's and R2's `routes.tsv.gz` with A's: PASS, every control held,
+peak RSS 1,053 MB (`.data/pair2-v-join.log`). The recount equals the preliminary table below cell for cell
+(`.data/pair2-v-cross.txt`; its ipv6 cells split by A's outcome: 1,667 = 10 + 1,657 and 35,994 = 3,683 + 32,311).
+
+- **Rescued by the non-RIR registries' objects: 11,339** of the 263,472 (`.data/pair2-v-rescued.tsv`):
+  - 9,827 ipv4, all undecided in A (224,299 − 214,472): 9,642 "yes", 184 "no", 1 "unknown";
+  - 1,512 ipv6, all accepted in A (5,205 − 3,693): 1,506 "yes", 6 "no";
+  - none of the 33,968 ipv6 routes rejected in A.
+- **Still rejected: 252,133,** exactly R's rejections (no route is accepted in V and rejected in R). They carry R's
+  classes (run B, `.data/pair2-rejections-round1-B.log`): no gap; all unknown on AS-CONCERTAP; real for an
+  RIR-objects filter if AS-CONCERTAP is taken as not found.
+- **Controls** (`.data/pair2-v-join.log`): the same keys in both runs; the same route-object answer per key; import
+  978,368 accepted in both; the margins above; the 33,968 rejected in both runs.
+- **AS6762's aut-num** is held only by `ripe.db.aut-num.gz` (`.data/pair2-v-autnum.log`), so its export clauses are
+  the same in both runs.
+- **Hand-checked** (`.data/pair2-v-handcheck.txt`): 2001:1398:2::/48 from AS27678, toward AS1299 against
+  AS-SEABONE-V6. AS-SEABONE-V6 (RIPE) names AS-HIGHWINDS, which only ALTDB holds; two more ALTDB sets
+  (AS-HWNG-CUSTOMERS, AS-HWNG-DOWNSTREAMS) reach AS27678, whose route6 object is LACNIC's. V lacks AS-HIGHWINDS
+  and rejects the route; R loads it and accepts it.
+- Which set rescues which route is not measured.
 
 ## Why
 
