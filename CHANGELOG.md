@@ -19,6 +19,8 @@ a minor version may change the API.
 - `TestMissingSetsClassify` streams its tracked file, and has `_RIR_ONLY` (class names for a run with route objects
   from the RIRs only), `_A_ROUTES`/`_R_ROUTES` (splits by A's outcome and by the route-object answer) and
   `_TAKE_NOT_FOUND` (a sensitivity table).
+- `TestPair2VAgainstR` (`ROUTECHECK_PAIR2V_V`, `_R`, `_A`, `_OUT`) joins pair 2's runs V and R with A route by route
+  and writes the cross table of V's export rejections and the keys R rescues.
 
 ### Measured, pair 2 in the registry provenance
 
@@ -50,8 +52,8 @@ extended comparer reproduces the published logs exactly, apart from timing, peak
 - Not measured here: whether the 469 (R) and 471 (V) never-looked-up sets exist anywhere, and whether loading the
   "found elsewhere" sets would flip any of these rejections. R's are answered below ("Measured, pair 2's rejections
   without RADB"). That lookup also covered 109 of V's 471, all among R's 469; V's other 362 are all sets in the
-  non-RIR dumps V does not load (`.data/pair2-wording-counts.txt`). Whether loading them would flip any of V's
-  rejections is open.
+  non-RIR dumps V does not load (`.data/pair2-wording-counts.txt`). V's are answered below ("Measured, pair 2's
+  rejections in V"): R loads those sets, with the rest of the non-RIR objects.
 
 ### Measured, pair 2's rejections without RADB
 
@@ -72,6 +74,27 @@ Pair 2's 252,133 export rejections in run R were classified with the missing-set
   2,589 "yes → no" are rejected in A too.
 - **Controls:** pair 2 in R with nothing extra loaded reproduces R2 byte for byte, and the 33,968 rejected in A too
   are all "unknown, inconclusive set".
+
+### Measured, pair 2's rejections in V
+
+Pair 2's 263,472 export rejections in run V, the RIRs alone, were joined route by route with run R
+(`.data/pair2-v-join.log`, table `.data/pair2-v-cross.txt`, keys `.data/pair2-v-rescued.tsv`). The RIRs come first
+in the registry order and both runs load the same route objects, so R is V plus the objects only the non-RIR
+registries hold, other than route objects: their sets, their aut-nums' `member-of:` claims, their
+maintainers and registry-scoped references. AS6762's aut-num is RIPE's in both runs (`.data/pair2-v-autnum.log`).
+
+- **Rescued: 11,339.** R accepts them: they are rescued by the non-RIR registries' objects, as a whole. Not gaps: V
+  leaves those registries out by design. 9,827 are ipv4, all undecided in A (224,299 − 214,472), and 1,512 ipv6,
+  all accepted in A (5,205 − 3,693). Which set rescues which route is not measured.
+- **By route-object answer** (the same in V and R): of the rescued, 11,148 "yes", 190 "no" and 1 "unknown".
+- **Still rejected: 252,133,** exactly R's rejections: no route is accepted in V and rejected in R. Run B still
+  rejects all of them, so they carry R's classes: no gap; all unknown on AS-CONCERTAP; taken as not found, all real
+  for an RIR-objects filter. The missing-sets method was not run over V: every V rejection names AS-CONCERTAP
+  (`.data/stream/V2/missing-sets.tsv`), so it would give all "unknown".
+- **Hand-checked** (`.data/pair2-v-handcheck.txt`): 2001:1398:2::/48 from AS27678, exported toward AS1299 against
+  AS-SEABONE-V6 (RIPE), which names AS-HIGHWINDS, held only by ALTDB; two more ALTDB sets reach AS27678.
+- **Controls,** all held: the same keys and the same route-object answer per key in both runs; import 978,368
+  accepted in both; the 33,968 rejected in A rejected in both runs. Peak RSS 1,053 MB.
 
 ## [0.6.0] - 2026-10-19
 
