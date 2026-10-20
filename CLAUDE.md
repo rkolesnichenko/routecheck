@@ -333,10 +333,14 @@ Packages, imports strictly downward:
       at most 5,000 queries in all. Never run it without the user's go-ahead.
     - `TestMissingSetsClassify` (`_DIR`, `_TRACKED`, `_SUBSET`) is offline. `_SUBSET` takes pair ids
       (`AS<L>-AS<X>`); a malformed one fails, and each id's count of tracked routes is logged.
+      It streams `tracked.tsv` (equal set lists share one slice). `_RIR_ONLY=1` renames the two "real"
+      classes for run R; `_A_ROUTES` and `_R_ROUTES` (`routes.tsv.gz`, both or neither) add splits by A's
+      outcome and by the route-object answer A to R; `_TAKE_NOT_FOUND` (set names) adds a sensitivity table.
     - `.data/missing-sets-rounds.zsh` drives the rounds.
   - The registry-provenance measurement (CHANGELOG, "Measured, registry provenance"):
     - `ROUTECHECK_REALDATA_ROUTES_FROM` (registry names) keeps route and route6 objects only from those
-      registries. It cannot be combined with `_EXTRA`.
+      registries. With `_EXTRA` the extra dump's routes are dropped too (its registry, "extra", is never in
+      the list); its sets and other objects load.
     - Under OUT, the test also streams `routes.tsv.gz` (one line per route of every report with a
       policy) and writes `pairs.tsv` (each pair's status).
     - `TestProvenanceCompare` (`ROUTECHECK_PROVENANCE_A`, `_B`, `_LABEL`, `_EXCLUDE`) compares two runs
@@ -362,6 +366,9 @@ Packages, imports strictly downward:
       reproduce the published logs. Pair 2's 400,748 export routes that are unevaluable in A are decided
       in R and V (214,472 and 224,299 rejected). Of the sets those rejections name, the missing-sets
       lookup covered 807 of R's 1,276 and 568 of V's 1,039; 469 and 471 were never looked up.
+      Classified since (`.data/pair2-rejections-*.log`, driven by `.data/pair2-rejections-runs.zsh`: control, rounds, classify, cross; the lookup
+      works on the copy `.data/pair2-rejections/lookup`, so `.data/missing-sets/lookup` keeps the published 842
+      sets): no gap; all 252,133 unknown on AS-CONCERTAP alone; 88,475 of them "yes → no" on the route's own route-object answer, which does not tell a RADB effect.
     - `.data/provenance-runs.zsh` and `.data/provenance-shards.zsh` drive the runs.
   - The benchmarks (`BenchmarkDecide`, `BenchmarkCollector`; `ROUTECHECK_BENCH_LOCAL`, `_PEER`,
     `_AF` and `_ROUTES`) use the same data and load every pinned registry too. Their commands

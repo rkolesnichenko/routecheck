@@ -660,8 +660,8 @@ Both spellings of 0xFFFFFF03 are read, in any case:
         This is the independent cross-check of the RIR-only path: a different
         code path gives the same numbers.
       - Run first without pair 2, the extended comparer reproduces the
-        published logs exactly (`.data/provenance-AR-control.log`,
-        `-AV-control.log`).
+        published logs exactly, apart from timing, peak memory and source line
+        numbers (`.data/provenance-AR-control.log`, `-AV-control.log`).
   - **Route-object answers**, with pair 2 (`.data/provenance-AR2.log`):
     - Over the routes answered in both runs, 2,308,425 of the 6,400,790 "yes"
       answers (36.06%) rest on the unverified route objects alone. That is
@@ -714,6 +714,62 @@ Both spellings of 0xFFFFFF03 are read, in any case:
         - In V, each of 712 sets is named by all 263,472 rejections; 476 of
           them were looked up: 315 deleted, 153 not found, 7 found elsewhere
           and 1 inconclusive (AS-CONCERTAP).
+      - **Classified** (2026-10-19, design
+        `docs/superpowers/specs/2026-10-19-pair2-rejections-design.md`), with
+        the missing-sets method, over R's 252,133 rejections.
+        - The control first. Pair 2 in R with nothing extra loaded reproduces
+          R2: its four output files are byte-identical and all 252,133 tracked
+          routes are rejected (`.data/pair2-rejections-control.log`).
+        - **The lookup** looked up the 469 sets never looked up
+          (`.data/pair2-rejections-round1-lookup.log`): 75 deleted, 392 not
+          found and 2 found elsewhere (AS-AKMLINK-ISP and AS45723:AS-OMADATA,
+          both in IDNIC, which routecheck does not load).
+          - It sent 938 queries, 469 to whois.radb.net and 469 to
+            whois.ripe.net, one at a time, with no transport error. That makes
+            2,579 of the cap of 5,000 over both measurements
+            (`.data/pair2-rejections/lookup/queries.log`).
+          - AS-CONCERTAP was asked again (twice, RIPE's history) and stayed
+            inconclusive.
+          - The 1,311 sets now classed are 482 deleted, 772 not found, 56 found
+            elsewhere and 1 inconclusive.
+        - **Run B** (pair 2 in R, with the 56 found copies loaded) still
+          rejects all 252,133. It needed one round: it named no set not yet
+          looked up (`.data/pair2-rejections-rounds.log`,
+          `.data/pair2-rejections-round1-B.log`; peak RSS 5,625 MB). Missing
+          sets left fell from 1,276 to 1,253: 26 found sets are no longer
+          missing, and 3 sets nested in loaded copies are newly missing
+          (AS-GOLIGHTSPEED, AS150470:AS-ID and AS151544:AS-PANDAWANETWORK, all
+          not found).
+        - **Classes** (`.data/pair2-rejections-classify.log`; in R they mean
+          "for a filter built from RIR route objects only"):
+          - no gap: no rejection is accepted with the found sets loaded;
+          - all 252,133 are unknown, for one reason: every one names
+            AS-CONCERTAP, which is inconclusive;
+          - taking AS-CONCERTAP as not found (a labelled sensitivity, from the
+            hand check above in "The rejections against missing sets"), all
+            252,133 are "real for an RIR-objects filter": every set they still
+            miss is deleted or not found.
+          - The second control holds: the 33,968 rejected in A too are all
+            "unknown, inconclusive set", as in the missing-sets measurement.
+        - **By A's outcome, family and route-object answer**, A → R
+          (`.data/pair2-rejections-cross.txt`, from `.data/provenance/A/routes.tsv.gz`
+          and `.data/stream/R2/routes.tsv.gz`):
+
+          | A's outcome (family) | yes → no | no → no | yes → yes | unknown | sum |
+          |---|---|---|---|---|---|
+          | undecided (ipv4) | 82,415 | 125,607 | 6,413 | 37 | 214,472 |
+          | accepted (ipv6) | 3,471 | 212 | 10 | 0 | 3,693 |
+          | rejected (ipv6) | 2,589 | 29,722 | 1,657 | 0 | 33,968 |
+          | sum | 88,475 | 155,541 | 8,080 | 37 | 252,133 |
+
+          - "yes → no": the route has a route object for exactly this prefix
+            and origin only in the registries R drops. Only its route-object
+            answer rests on them.
+          - "no → no": the route has no route object for exactly this prefix
+            and origin in either run. Its own answer did not change, but the
+            route can still have been inside AS-SEABONE's filter in A through
+            another origin's route object, which A could not show (unevaluable).
+          - "yes → yes": a route object in the RIRs too; rejected anyway.
     - The only other moves are limit effects: 3 routes unevaluable at 2,097,152
       in A (2 import, 1 export) are accepted once their sets shrink. Apart from
       those 2, no import verdict moves.
@@ -735,6 +791,24 @@ Both spellings of 0xFFFFFF03 are read, in any case:
       those would be rejected (R), all against sets missing from every registry
       routecheck loads (R loads sets from all 16 registries; only its route
       objects are RIR-only). V, which loads the RIRs alone, rejects 224,299.
+      - None of R's rejections is a gap: loading the sets found elsewhere
+        rescues none.
+      - Whether they stand turns on one set, AS-CONCERTAP: inconclusive under
+        the method, so all are unknown; taken as not found, all are real for a
+        filter built from RIR route objects.
+      - The route-object answer cannot tell how much of the 214,472 is a RADB
+        effect. It asks whether a route object exists for exactly the route's
+        prefix and origin; AS-SEABONE's filter is made of the route objects of
+        all its members, by prefix. A and R differ only in the dropped route
+        objects and their member-of: claims, so any route accepted in A and
+        rejected in R moves because of them, whatever its own answer. Of the
+        214,472, 82,415 have a route object for exactly their prefix and origin
+        only in the dropped registries ("yes → no") and 125,607 have none in
+        either run ("no → no"); those are the routes' own answers only.
+        - Pair 2's ipv6 routes, which A decides, show it
+          (`.data/pair2-rejections-cross.txt`): all 212 "accepted (ipv6)" routes
+          with "no → no" and all 10 with "yes → yes" went from accepted in A to
+          rejected in R, and 2,589 "yes → no" are rejected in A too.
     - These shares are weighted by routes, and the sample is concentrated
       (`.data/provenance-AR2.log`, "concentration"):
       - pair 2 alone holds 1,851,021 of the 6,400,790 "yes" answers (28.92%);
@@ -751,9 +825,12 @@ Both spellings of 0xFFFFFF03 are read, in any case:
   - **Not measured:**
     - whether any unverified object is right;
     - how JPIRR or any other mirror verifies;
-    - whether the 469 (R) and 471 (V) sets pair 2 fails against that were
-      never looked up exist anywhere, and whether loading the "found
-      elsewhere" sets would flip any of these rejections.
+    - whether AS-CONCERTAP exists anywhere: RIPE's history answer stays
+      inconclusive, so pair 2's R rejections stay unknown under the method;
+    - V's rejections: 362 of its sets were never looked up, all in the
+      non-RIR dumps V does not load, and V was not classified;
+    - what A's filter would decide for pair 2's ipv4 routes: AS-SEABONE is over
+      the limit in A.
 - **The marking on the command run.** The command on AS9086 from AS6762, every
   registry, `-max-prefixes 2097152`, with the marking (2026-10-19,
   `.data/verified-counts-2097152.log`; the stderr note named all five RIRs as
@@ -764,8 +841,9 @@ Both spellings of 0xFFFFFF03 are read, in any case:
     (35.27%), and 260,560 "no" (179 routes have no origin to ask about).
   - AS6762's export, over its 55 reports with routes: 1,133,392 "yes", of them
     394,877 unverified only (34.84%), and 495,720 "no".
-  - This is pair 2, which the provenance measurement above could not include,
-    so the two shares are not of the same routes.
+  - This is pair 2, which the provenance measurement above first left out (it
+    now includes it), so these shares and the first-published ones are not of
+    the same routes.
   - Peak RSS 6,421 MB; the same command without the counts in the text
     (`.data/verified-cli-2097152.log`) peaked at 6,322 MB, and v0.4.0 at
     6,511 MB (`.data/max-prefixes-cli-2097152.log`). The marking's second view
