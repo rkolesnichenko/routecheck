@@ -2,6 +2,17 @@
 
 Status: draft, 2026-10-20. A measurement, not a feature: the command and the library do not change.
 
+**Outcome (2026-10-20): stopped at step 2, no dated deletion.** The probe asked twice (`.data/concertap-probe.log`,
+answers in `.data/concertap/probe/`):
+
+- `/ripe/as-set/AS-CONCERTAP/versions`: HTTP 404, with an empty error list. RIPE's REST service has no version
+  history for it.
+- `/ripe-nonauth/as-set/AS-CONCERTAP/versions`: HTTP 400, "Invalid source" (ripe-nonauth). The versions service
+  does not take that source.
+
+Under the maintainer's bar, AS-CONCERTAP stays inconclusive. No code was written, the docs' figures and classes are
+unchanged, and steps 3 to 6 did not run.
+
 ## Why
 
 One set keeps two published results "unknown": AS-CONCERTAP.
