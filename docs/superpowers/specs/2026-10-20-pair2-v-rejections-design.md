@@ -69,18 +69,19 @@ No route goes from accepted in V to rejected in R, and both runs list the same k
 
 ## Method
 
-1. **Count with the existing comparer, if it fits.** `TestProvenanceCompare` compares two run directories with the
-   same `pairs.tsv`; R2's and V2's are identical. Run it with `ROUTECHECK_PROVENANCE_A=.data/stream/R2`,
-   `_B=.data/stream/V2`, `_LABEL=V`. R holds everything V holds, which is the direction its self-checks assume
-   (dropping objects cannot add a "yes"). Its "accepted → rejected" cell, R to V, is the rescued set. The log says
-   "A" for R; the docs say R.
-   - If its wording or its self-checks misfit, a small `_test.go` addition does the join instead. Only test code
-     changes.
-2. **Write the cross table and the key list,** as `.data/pair2-v-cross.txt` and `.data/pair2-v-rescued.tsv` (the
-   rescued keys, sorted). The join reads only the two `routes.tsv.gz` files (about 15 MB each), and A's
-   `.data/provenance/A/routes.tsv.gz` for the controls; never the 3.7 GB and 5.1 GB `rejected-missing.tsv`.
-3. **Hand-check one rescued route,** an ipv6 one: find in the dumps the non-RIR set that puts its origin or prefix
-   in AS6762's export filter for AS9086, and show that V does not hold it.
+1. **Count with a small join in test code.** A `_test.go` test, opt-in by environment variable like the other
+   measurements, reads V2's and R2's `routes.tsv.gz` (about 15 MB each) and A's `.data/provenance/A/routes.tsv.gz`
+   for the controls, joins them on the route key and writes:
+   - the cross table, `.data/pair2-v-cross.txt`: pair 2's export routes rejected in V, by R's outcome, address
+     family, route-object answer and A's outcome;
+   - the rescued keys, sorted, `.data/pair2-v-rescued.tsv`.
+
+   It never reads the 3.7 GB and 5.1 GB `rejected-missing.tsv` files. A unit test pins the join on a small fixture.
+2. **Hand-check one rescued route,** an ipv6 one. The export check for a key reads AS6762's export clause toward
+   the neighbour named in the key's 4th field (`announce AS-SEABONE`, or `mp-export … announce AS-SEABONE-V6`),
+   not its export to AS9086 (`announce ANY`). Trace, in the dumps, the chain from AS-SEABONE-V6 to the route, and
+   show that a link of it is held only by a non-RIR registry, so V lacks it. Any link counts: a set, a nested set
+   under one, or a registry-scoped reference.
 
 ## Controls (each must hold; a failure stops the work and goes to the maintainer)
 
@@ -94,8 +95,9 @@ No route goes from accepted in V to rejected in R, and both runs list the same k
   - ipv4: 224,299 − 214,472 = 9,827 (the routes undecided in A);
   - ipv6: 5,205 − 3,693 = 1,512 (pair 2's routes accepted in A and rejected in V, less those rejected in R);
   - the 33,968 ipv6 routes rejected in A are rejected in both V and R.
-- AS9086's and AS6762's aut-nums are held by an RIR, so the pair's policy is the same object in both runs. If
-  either is not, the rescue may partly be another aut-num, and the docs say so.
+- AS6762's aut-num, whose export clauses decide these routes, is RIPE's in both runs: no non-RIR dump holds an
+  aut-num of that name, or, if one does, RIPE's precedes it. If not, the rescue may partly be another aut-num, and
+  the docs say so.
 
 ## Constraints
 
@@ -104,7 +106,7 @@ No route goes from accepted in V to rejected in R, and both runs list the same k
   by convention: `MEMGUARD_NORMAL_PRIORITY=1 ../rpsl/.superpowers/sdd/tools/memguard.sh 8 TIMEOUT env GOWORK=off
   GOMAXPROCS=4 GOMEMLIMIT=6GiB …`, never beside check.sh.
 - **The dumps stay the 2026-10-18 files,** and the run files the published ones (V2 and R2 made at ae7d034).
-- **Code:** only `_test.go` files if any, docs, the CHANGELOG and CLAUDE.md.
+- **Code:** only `_test.go` files, docs, the CHANGELOG and CLAUDE.md.
 - **Figures:** every figure comes from a command run and names its log. No local home-directory paths in anything
   pushed.
 
@@ -135,9 +137,20 @@ No route goes from accepted in V to rejected in R, and both runs list the same k
 - CHANGELOG `[Unreleased]`, beside the pair-2 entries.
 - CLAUDE.md, the pair-2 line.
 
+## Settled after the builder check *(my calls)*
+
+1. **A new join, not `TestProvenanceCompare`.** The comparer cannot do this as it stands:
+   - it requires exactly 10 excluded pairs, and its self-check expects 1,568,538 import "yes" answers over the 50
+     kept pairs, which R2 and V2 (pair 2 only) cannot give, so it always fails;
+   - it splits neither by family nor crosses outcome with route-object answer, and writes no key list;
+   - its log says "A" for what would be R.
+2. **The hand-check reads AS6762's export to the key's named neighbour,** through AS-SEABONE or AS-SEABONE-V6 (the
+   design first named the export to AS9086, which announces ANY and rejects nothing).
+3. **The aut-num control is AS6762's alone.** AS9086's aut-num does not decide the export routes.
+
 ## Left to the builder
 
-- Whether the comparer is used as is or a small join is added.
 - The run script, `.data/pair2-v-runs.zsh`, modelled on `.data/provenance-pair2-runs.zsh`.
+- The test's name and file, and its environment variables.
 - Which rescued route is hand-checked.
 - The wording of the docs, in the plain style of the provenance section.
