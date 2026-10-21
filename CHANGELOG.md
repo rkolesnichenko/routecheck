@@ -8,6 +8,18 @@ a minor version may change the API.
 
 ## [Unreleased]
 
+### Changed
+
+- routecheck requires mrt v0.3.2 (was v0.1.0). mrt v0.2.0 turned several `bgp.Path` fields into methods; `observe`
+  now calls `NextHop()` and `MPUnreach()`, and the mrtgen test `ReceivedASPath()` and `AS4Path()`. Nothing else in
+  routecheck reads the fields that moved, and its own API (`api/`) is unchanged.
+- mrt's diagnostics keep v0.1.0's codes and severities (v0.2.0 only named them as constants), and an empty AS_PATH
+  segment is still a malformed AS_PATH, so the RFC 7606 dispositions (R9, R10) do not change. The replay tests that
+  decode real bytes (a truncated attribute, a malformed AS_PATH) pass unchanged, and so do the goldens. A new row
+  of `TestSessionMalformed` holds the empty segment from bytes.
+- `internal/mrtgen` stays mrt v0.1.0's encoder (R3). Since then mrt has only added `TableDump`, which no test here
+  needs.
+
 ### Added (tests only)
 
 - `TestProvenanceCompare` reads a run whose shards interleave (each pair from the shard that checked it).
