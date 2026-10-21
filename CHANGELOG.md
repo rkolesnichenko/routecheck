@@ -8,6 +8,8 @@ a minor version may change the API.
 
 ## [Unreleased]
 
+## [0.7.1] - 2026-10-21
+
 ### Changed
 
 - Compressed inputs are read through `mrt.DecompressWith`: MRT (`-session`, `-collector`) and VRP (`-vrps`) files with
@@ -1036,7 +1038,8 @@ route can be higher.
 - **Out of scope:** ASPA, BMP and RIS Live, transparent route servers,
   `import-via:`/`export-via:`/`default:`, L's own export, and clause actions.
 
-[Unreleased]: https://github.com/rkolesnichenko/routecheck/compare/v0.7.0...HEAD
+[Unreleased]: https://github.com/rkolesnichenko/routecheck/compare/v0.7.1...HEAD
+[0.7.1]: https://github.com/rkolesnichenko/routecheck/compare/v0.7.0...v0.7.1
 [0.7.0]: https://github.com/rkolesnichenko/routecheck/compare/v0.6.0...v0.7.0
 [0.6.0]: https://github.com/rkolesnichenko/routecheck/compare/v0.5.0...v0.6.0
 [0.5.0]: https://github.com/rkolesnichenko/routecheck/compare/v0.4.0...v0.5.0
