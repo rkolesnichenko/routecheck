@@ -135,7 +135,7 @@ func Run(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 		return fail(err)
 	}
 	if cfg.vrps != "" {
-		if cfg.opts.VRPs, err = readVRPs(cfg.vrps); err != nil {
+		if cfg.opts.VRPs, err = readVRPs(ctx, cfg.vrps); err != nil {
 			return fail(err)
 		}
 	}
@@ -146,7 +146,7 @@ func Run(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 	defer reg.close()
 
 	out := newOutput(cfg)
-	results, err := newChecker(cfg, reg).CheckEach(ctx, cfg.mode, records(cfg.inputs), cfg.opts, out.add)
+	results, err := newChecker(cfg, reg).CheckEach(ctx, cfg.mode, records(ctx, cfg.inputs), cfg.opts, out.add)
 	if errors.Is(err, routecheck.ErrOptions) {
 		hint := ""
 		if !cfg.localGiven {

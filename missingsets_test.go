@@ -23,7 +23,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/rkolesnichenko/mrt"
 	"github.com/rkolesnichenko/rpsl/types"
 )
 
@@ -776,10 +775,11 @@ func (h heldIndex) scan(file string, want map[string]bool) error {
 		return err
 	}
 	defer f.Close()
-	r, err := mrt.Decompress(bufio.NewReaderSize(f, 1<<20))
+	r, cancel, err := decompressFile(bufio.NewReaderSize(f, 1<<20), true)
 	if err != nil {
 		return err
 	}
+	defer cancel()
 	sc := bufio.NewScanner(r)
 	sc.Buffer(make([]byte, 64<<10), 64<<20)
 	name, first := "", true

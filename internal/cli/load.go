@@ -35,15 +35,20 @@ func checkInputs(names []string) error {
 var openInput = func(name string) (io.ReadCloser, error) { return os.Open(name) }
 
 // records reads the inputs one after another, in the order given, each
-// through gzip or bzip2 when it is compressed (mrt.Decompress). A file is
-// opened when its turn comes and closed before the next one is opened, so
-// any number of inputs needs one descriptor. Every error is wrapped with its
-// file's name; the wrapping keeps *mrt.RecordError and mrt.ErrTruncated
-// visible to errors.As and errors.Is, which observe reads.
-func records(names []string) iter.Seq2[mrt.Record, error] {
+// through gzip or bzip2 when it is compressed (mrt.DecompressWith, with
+// workersFor's workers). A file is opened when its turn comes and closed
+// before the next one is opened, so any number of inputs needs one
+// descriptor. Each file is read under its own context, derived from ctx and
+// cancelled when its reading returns (at its end, on an error or when the
+// caller stops), so that no decompressing goroutine outlives it; a cancel of
+// ctx ends the reading of a compressed file with context.Canceled. Every
+// error is wrapped with its file's name; the wrapping keeps
+// *mrt.RecordError, mrt.ErrTruncated and a context's error visible to
+// errors.As and errors.Is, which observe reads.
+func records(ctx context.Context, names []string) iter.Seq2[mrt.Record, error] {
 	return func(yield func(mrt.Record, error) bool) {
 		for _, name := range names {
-			if !readInput(name, yield) {
+			if !readInput(ctx, name, yield) {
 				return
 			}
 		}
@@ -51,14 +56,18 @@ func records(names []string) iter.Seq2[mrt.Record, error] {
 }
 
 // readInput yields one input's records and reports whether to go on.
-func readInput(name string, yield func(mrt.Record, error) bool) bool {
+func readInput(ctx context.Context, name string, yield func(mrt.Record, error) bool) bool {
 	f, err := openInput(name)
 	if err != nil {
 		yield(nil, err)
 		return false
 	}
 	defer f.Close()
-	r, err := mrt.Decompress(f)
+	// Deferred after Close, so it runs first: a gzip input's goroutine
+	// reads f, and is told to stop before f is closed.
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	r, err := decompress(ctx, f, kindMRT)
 	if err != nil {
 		yield(nil, fmt.Errorf("%s: %w", name, err))
 		return false
@@ -74,14 +83,19 @@ func readInput(name string, yield func(mrt.Record, error) bool) bool {
 	return true
 }
 
-// readVRPs reads a VRP JSON file (rpki.ReadJSON), compressed or not.
-func readVRPs(name string) (*rpki.VRPs, error) {
-	f, err := os.Open(name)
+// readVRPs reads a VRP JSON file (rpki.ReadJSON), compressed or not
+// (decompress), opened through openInput and read under its own context, as
+// readInput reads an input.
+func readVRPs(ctx context.Context, name string) (*rpki.VRPs, error) {
+	f, err := openInput(name)
 	if err != nil {
 		return nil, err
 	}
 	defer f.Close()
-	r, err := mrt.Decompress(f)
+	// Deferred after Close, so it runs first (readInput).
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	r, err := decompress(ctx, f, kindVRPs)
 	if err != nil {
 		return nil, fmt.Errorf("%s: %w", name, err)
 	}
@@ -144,7 +158,7 @@ func loadPolicy(ctx context.Context, cfg *config, stderr io.Writer) (*loaded, er
 	var d *draft
 	if cfg.policyFile != "" {
 		var err error
-		if d, err = readDraft(cfg.policyFile, stderr); err != nil {
+		if d, err = readDraft(ctx, cfg.policyFile, stderr); err != nil {
 			return nil, err
 		}
 		cfg.draftSupplies = d.supplies
@@ -158,7 +172,7 @@ func loadPolicy(ctx context.Context, cfg *config, stderr io.Writer) (*loaded, er
 		c := &resolve.Corpus{KeepPolicy: true}
 		var order []string
 		for _, name := range cfg.dumps {
-			err := readRPSL(name, func(o rpsl.Object, _, _, source string, _ []rpsl.Diagnostic) {
+			err := readRPSL(ctx, name, func(o rpsl.Object, _, _, source string, _ []rpsl.Diagnostic) {
 				if source != "" && !slices.Contains(order, source) {
 					order = append(order, source)
 				}
@@ -284,10 +298,10 @@ var setClasses = map[string]bool{"as-set": true, "route-set": true, "filter-set"
 // a set or a route or route6 (they come from the registry: a draft's would
 // change set expansions and route-object answers) and a class routecheck
 // does not use (mntner, person, …).
-func readDraft(name string, stderr io.Writer) (*draft, error) {
+func readDraft(ctx context.Context, name string, stderr io.Writer) (*draft, error) {
 	d := &draft{corpus: &resolve.Corpus{KeepPolicy: true}}
 	var bad error
-	err := readRPSL(name, func(o rpsl.Object, class, key, source string, diags []rpsl.Diagnostic) {
+	err := readRPSL(ctx, name, func(o rpsl.Object, class, key, source string, diags []rpsl.Diagnostic) {
 		failed := false
 		for _, dg := range diags {
 			fmt.Fprintf(stderr, "routecheck: %s:%s\n", name, dg)
@@ -373,14 +387,23 @@ func (d *draftFirst) InetRtr(ctx context.Context, name, source string) (*object.
 // calls fn with each object, decoded, its class and primary key as written,
 // its source: in upper case ("" when it has none) and its parse and decode
 // diagnostics. A failure to read the file is an error naming it, so that a
-// truncated dump is never taken for a short one.
-func readRPSL(name string, fn func(o rpsl.Object, class, key, source string, diags []rpsl.Diagnostic)) error {
-	f, err := os.Open(name)
+// truncated dump is never taken for a short one. The file is opened through
+// openInput and read under its own context, as readInput reads an input. An
+// RPSL file is decompressed with no workers (serialKinds), which ignore the
+// context, so a cancel of ctx is noticed only when the caller next checks it;
+// were kindRPSL read in parallel, a cancel would end the reading of a
+// compressed file with a failure whose text names the context's error (rpsl
+// reports a read error as a diagnostic's message, not an error to wrap).
+func readRPSL(ctx context.Context, name string, fn func(o rpsl.Object, class, key, source string, diags []rpsl.Diagnostic)) error {
+	f, err := openInput(name)
 	if err != nil {
 		return err
 	}
 	defer f.Close()
-	r, err := mrt.Decompress(f)
+	// Deferred after Close, so it runs first (readInput).
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	r, err := decompress(ctx, f, kindRPSL)
 	if err != nil {
 		return fmt.Errorf("%s: %w", name, err)
 	}

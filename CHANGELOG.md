@@ -8,6 +8,44 @@ a minor version may change the API.
 
 ## [Unreleased]
 
+### Changed
+
+- Compressed inputs are read through `mrt.DecompressWith`: MRT (`-session`, `-collector`) and VRP (`-vrps`) files with
+  min(4, GOMAXPROCS) workers (none when GOMAXPROCS is 1), RPSL files (`-dump`, `-policy`) serially, exactly as
+  `mrt.Decompress` reads (decision 7 of docs/superpowers/specs/2026-10-21-parallel-decompress-design.md). One input is
+  read at a time; mrt documents about 216.7 MB held live at 4 workers for a hostile bzip2 input (mrt 0.3.1/0.3.2).
+- Measured on 2026-10-21 (Apple M3 Max, GOMAXPROCS=4, GOMEMLIMIT=6GiB, 8 GB memory guard), run A (60 pairs, every
+  registry, `-max-prefixes` 2097152, with OUT), before (main, serial `mrt.Decompress`, `.data/mrt-v032-A.log`) ->
+  after (this branch with MRT and RPSL both parallel, `.data/pd-A.log`); each is one run:
+  - pass 1 (route-views2 bzip2 RIB and RIS rrc00 gzip bview): 41.637 s -> 17.968 s;
+  - pass 2 (filter to 55 files): 1m32.456s -> 1m5.449s;
+  - whole run: 4m41s -> 3m49s (the checks, 1m35s and 1m34s, read uncompressed filtered files);
+  - registry load (32 gzip dumps of 16 registries): 36.576 s -> 36.567 s;
+  - peak RSS 6,139 MB -> 6,311 MB;
+  - the four output files are byte-identical to `.data/stream/A`, and the summary lines are identical once timings
+    are stripped (`.data/pd-compare.log`).
+- Decisions. MRT: parallel. VRPs: parallel, a small gain of about 3% (1.77 against 1.72 s/op), so the decision rests
+  on parallel being no slower; BenchmarkReadVRPs on a gzipped copy of NTT's 107,654,081-byte VRP JSON,
+  3 runs of 3 iterations: workers=0 1.765, 1.785, 1.763 s/op, default workers 1.711, 1.727, 1.733 s/op, peak 336 MB
+  (`.data/pd-vrps.log`). RPSL: serial, because neither the command's wall time nor the registry load was lower.
+  The command on pair 2 (`-local AS9086 -peer AS6762`, every `-dump`, uncompressed filtered `-collector`),
+  alternating, wall time with 1 s resolution: before 67 s, 66 s; after (parallel RPSL) 68 s, 67 s
+  (`.data/pd-cmd-{before,after}-{1,2}.log`); after RPSL went serial 66 s, peak 5,902 MB
+  (`.data/pd-cmd-after-serial.log`). Stdout was identical in each comparison; exit 1 throughout (routes rejected), as
+  before.
+- Cancellation (decision 5 of docs/superpowers/specs/2026-10-21-parallel-decompress-design.md). A cancel (SIGINT)
+  while a compressed MRT input is read stops it at the decompressor's next read. The exit status (3) and the "context
+  canceled" text are unchanged, but the stderr line may now name the file and offset (`routecheck: FILE: mrt: reading
+  record at offset N: context canceled`), depending on whether the decompressor's read or Check's every-4096-records
+  check sees the cancel first. With GOMAXPROCS=1 MRT is read serially and a cancel is noticed only at that check, as
+  before. A cancel during a compressed `-vrps` read now stops it (new). RPSL files are read serially, so a cancel
+  during the registry load is still noticed only when the check starts, as before.
+- Not measured: the final branch's run A with serial RPSL (its MRT path is the one measured); RSS apart from the
+  guard's peak; GOMAXPROCS other than 4; other machines; session-mode inputs; a gzipped `-vrps` through the command
+  (only the benchmark).
+- `FUZZTIME=15s scripts/check.sh` on 47b2fa8 ends `check: ok` (`.data/check-parallel-decompress.log`, peak
+  1,113 MB).
+
 ## [0.7.0] - 2026-10-21
 
 ### Changed

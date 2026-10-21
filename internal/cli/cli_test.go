@@ -326,7 +326,7 @@ source: TEST
 	}
 	defer reg.close()
 	var handed []routecheck.Direction
-	_, err = newChecker(cfg, reg).CheckEach(context.Background(), cfg.mode, records(cfg.inputs), cfg.opts,
+	_, err = newChecker(cfg, reg).CheckEach(context.Background(), cfg.mode, records(context.Background(), cfg.inputs), cfg.opts,
 		func(_ *routecheck.Result, dir routecheck.Direction, _ *routecheck.Report) error {
 			handed = append(handed, dir)
 			return nil
@@ -375,7 +375,7 @@ func TestJSONMatchesWholeView(t *testing.T) {
 				t.Fatal(err)
 			}
 			if cfg.vrps != "" {
-				if cfg.opts.VRPs, err = readVRPs(cfg.vrps); err != nil {
+				if cfg.opts.VRPs, err = readVRPs(context.Background(), cfg.vrps); err != nil {
 					t.Fatal(err)
 				}
 			}
@@ -384,7 +384,7 @@ func TestJSONMatchesWholeView(t *testing.T) {
 				t.Fatal(err)
 			}
 			defer reg.close()
-			results, err := newChecker(cfg, reg).Check(context.Background(), cfg.mode, records(cfg.inputs), cfg.opts)
+			results, err := newChecker(cfg, reg).Check(context.Background(), cfg.mode, records(context.Background(), cfg.inputs), cfg.opts)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -444,7 +444,7 @@ func TestOutputKeepsNoReport(t *testing.T) {
 			out := newOutput(cfg)
 			var ran atomic.Int64
 			set, checked := 0, 0
-			_, err = newChecker(cfg, reg).CheckEach(context.Background(), cfg.mode, records(cfg.inputs), cfg.opts,
+			_, err = newChecker(cfg, reg).CheckEach(context.Background(), cfg.mode, records(context.Background(), cfg.inputs), cfg.opts,
 				func(res *routecheck.Result, dir routecheck.Direction, rep *routecheck.Report) error {
 					if set > 0 {
 						if !finalized(&ran, int64(set)) {
@@ -1422,15 +1422,16 @@ func TestRejectedHeaderNamesClause(t *testing.T) {
 }
 
 // TestInputsOpenedOneAtATime: the inputs are opened lazily, each closed
-// before the next is opened, so that many files need one descriptor.
+// before the next is opened, so that many files need one descriptor. Only
+// the -session inputs are counted: the -dump is opened through openInput too.
 func TestInputsOpenedOneAtATime(t *testing.T) {
 	open, most := 0, 0
 	orig := openInput
 	t.Cleanup(func() { openInput = orig })
 	openInput = func(name string) (io.ReadCloser, error) {
 		f, err := orig(name)
-		if err != nil {
-			return nil, err
+		if err != nil || name != capture {
+			return f, err
 		}
 		open++
 		most = max(most, open)

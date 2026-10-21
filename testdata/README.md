@@ -25,7 +25,7 @@
 - `golden/`: the command's text and JSON output for each golden
   (`TestGoldens`, `TestStreamingMatchesGoldens`;
   `ROUTECHECK_GOLDEN_UPDATE=1` rewrites them).
-- `mrt/`: a slice of a real RouteViews RIB, below.
+- `mrt/`: a slice of a real RouteViews RIB, gzip and bzip2, below.
 
 ## RouteViews
 
@@ -42,10 +42,20 @@
   TABLE_DUMP_V2: PEER_INDEX_TABLE and 1999 RIB_IPV4_UNICAST records (31782
   entries).
 
-Attribution: this file utilizes data provided by RouteViews
+`mrt/rv2-rib.20261015.1200.bz2` is the gzip fixture's bytes recompressed
+with bzip2, so that the command's bzip2 reading is tested on real MRT
+(`internal/cli/decompress_test.go`):
+
+    gunzip -c testdata/mrt/rv2-rib.20261015.1200.gz | bzip2 -9 > testdata/mrt/rv2-rib.20261015.1200.bz2
+
+Its decompressed bytes have the slice's sha256 above,
+ba1423bf55b5f05a1fcb4d99312e021b178df9621e1d3b24b9550c2de3e6ec0f.
+
+Attribution: these files utilize data provided by RouteViews
 (www.routeviews.org), University of Oregon; use of this data is subject to
 the CC BY 4.0 license (https://creativecommons.org/licenses/by/4.0/).
-RouteViews' DOI is 10.7264/1y7v-2d90. Changes made: the file is a contiguous
+RouteViews' DOI is 10.7264/1y7v-2d90. Changes made: each file is a contiguous
 run of whole records from the RouteViews file named above, decompressed from
-bzip2 and recompressed with gzip; no record is altered. The goldens derived
-from it (`golden/collector.*`) carry the same attribution.
+bzip2 and recompressed with gzip (the `.bz2` copy is that gzip file
+decompressed and recompressed with bzip2); no record is altered. The
+goldens derived from it (`golden/collector.*`) carry the same attribution.
