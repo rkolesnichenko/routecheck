@@ -12,7 +12,7 @@ time:
 | phase | wall | what it does |
 |---|---|---|
 | registry load | 36.567 s | parses 32 gzip RPSL dumps of 16 registries into a `resolve.Corpus` (serial gzip) |
-| VRPs | about 1.7 s (the log's `VRPs:` line) | reads NTT's VRP JSON |
+| VRPs | 1.713 s | reads NTT's VRP JSON |
 | pass 1 | 17.968 s | counts the ASes on every path of both RIBs |
 | pass 2 | 1m5.449s | filters both RIBs into 55 per-neighbour MRT files |
 | checks | 1m34s | 60 pairs; pair 2 alone takes 31.016 s |
