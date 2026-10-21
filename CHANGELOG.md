@@ -21,6 +21,10 @@ a minor version may change the API.
   of `TestSessionMalformed` holds the empty segment from bytes.
 - `internal/mrtgen` stays mrt v0.1.0's encoder (R3). Since then mrt's `mrtgen.go` has only added `TableDump`, and
   its new `files.go` builds mrt's own synthetic fixtures; no test here needs either.
+- Real data: the 60-pair run A (every registry, `-max-prefixes` 2097152) with mrt v0.3.2 writes `routes.tsv.gz`,
+  `pairs.tsv`, `missing-sets.tsv` and `rejected-missing.tsv` byte-identical to v0.6.0's run with mrt v0.1.0
+  (`.data/stream/A`), and its log differs only in timings: same totals, 0 entry and 0 record errors in both
+  (`.data/mrt-v032-A.log`, `.data/mrt-v032-compare.log`). Peak RSS 6,139 MB, 4m41s.
 
 ### Added (tests only)
 
