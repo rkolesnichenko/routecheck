@@ -954,7 +954,7 @@ func loadRegistry(tb testing.TB, dumps []string, extra string, routesFrom map[st
 		if err != nil {
 			tb.Fatal(err)
 		}
-		r, err := mrt.Decompress(f)
+		r, cancel, err := decompressFile(f)
 		if err != nil {
 			tb.Fatalf("%s: %v", name, err)
 		}
@@ -1037,6 +1037,7 @@ func loadRegistry(tb testing.TB, dumps []string, extra string, routesFrom map[st
 				reg.reImports[an.AS] = slices.Compact(rePeers)
 			}
 		}
+		cancel()
 		f.Close()
 	}
 	reg.sources = order
@@ -1092,7 +1093,7 @@ func readMRT(names ...string) iter.Seq2[mrt.Record, error] {
 				yield(nil, err)
 				return
 			}
-			r, err := mrt.Decompress(bufio.NewReaderSize(f, 1<<20))
+			r, cancel, err := decompressFile(bufio.NewReaderSize(f, 1<<20))
 			if err != nil {
 				f.Close()
 				yield(nil, fmt.Errorf("%s: %w", name, err))
@@ -1103,10 +1104,12 @@ func readMRT(names ...string) iter.Seq2[mrt.Record, error] {
 					err = fmt.Errorf("%s: %w", name, err)
 				}
 				if !yield(rec, err) {
+					cancel()
 					f.Close()
 					return
 				}
 			}
+			cancel()
 			f.Close()
 		}
 	}
