@@ -137,7 +137,7 @@ type facts struct {
 // entry has attrs only.
 //
 // mrt's severities do not draw RFC 7606's line: a known attribute of the
-// wrong length is a Warning and goes to Path.Unknown, so a route whose
+// wrong length is a Warning and goes to Path.Unknown(), so a route whose
 // COMMUNITIES did not decode would otherwise look like a route with none
 // (rulings R9, R10). The rule, strongest first (RFC 7606 §3.h):
 //   - reset: any Error from ParseUpdate (the message's framing or its NLRI
