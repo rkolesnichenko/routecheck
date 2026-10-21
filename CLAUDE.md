@@ -15,7 +15,7 @@ truth, and the rulings below amend it where they say so. The plan it was built f
   not permit.
 - **Per-route hygiene.** Each route's RPKI state, and whether a route object exists.
 - **Dependencies.** It requires the published rpsl v0.30.0 (`rpsl`, `rpsl/types`, `rpsl/resolve`)
-  and mrt v0.1.0.
+  and mrt v0.3.2.
 - **What is new here.** `pathre` (an AS-path regexp matcher over real paths) and `verdict`.
 - **The "separate consumer".** rpsl's own rule ("never match an AS-path regexp against a live
   path") stays intact there. This repository is the separate consumer that rule names.
@@ -50,7 +50,7 @@ Packages, imports strictly downward:
 5. **Go 1.23 floor, conventions C1–C3, API golden** (D9). Options are `X(in)` / `XWith(in,
    XOptions)`. Sentinels use `errors.New`. `api/*.txt` is every exported signature, held by
    `go run ./internal/apisurface -check`.
-6. **go.mod.** It requires exactly rpsl, rpsl/types, rpsl/resolve at v0.30.0 and mrt at v0.1.0
+6. **go.mod.** It requires exactly rpsl, rpsl/types, rpsl/resolve at v0.30.0 and mrt at v0.3.2
    (plus rpsl/ast and rpsl/lexer, indirect). No `replace`, no `go.work`. A bump of rpsl or mrt is
    a decision: update check.sh's list in the same change.
 7. **Never commit or push a local home-directory path.** No absolute path under a home directory

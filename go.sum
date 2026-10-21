@@ -1,5 +1,7 @@
 github.com/rkolesnichenko/mrt v0.1.0 h1:APiue1FewFkmJtqIevzxOVDELwp0wVXDnV8MuYDtZsU=
 github.com/rkolesnichenko/mrt v0.1.0/go.mod h1:lz7+5rh2gYMLhdH36jnl/hWQA6GXKTaFjiLYr6mNkLs=
+github.com/rkolesnichenko/mrt v0.3.2 h1:VZPwwcc2Sd8c68990NfbTtUp6FkVGIzJodKAwMxumpo=
+github.com/rkolesnichenko/mrt v0.3.2/go.mod h1:lz7+5rh2gYMLhdH36jnl/hWQA6GXKTaFjiLYr6mNkLs=
 github.com/rkolesnichenko/rpsl v0.30.0 h1:gPDoTOCXHtGNtbv0/WRI/zpd+MgvCc9ZSjBseNeB/AA=
 github.com/rkolesnichenko/rpsl v0.30.0/go.mod h1:PPIA2TcTI3OmF+n4u+BzWqx8H2WL4Q/G2YnzoPuE59o=
 github.com/rkolesnichenko/rpsl/ast v0.30.0 h1:JQ6hGJSBXm4TF9dQRKSxr/VA/xN6xOihJUFDFXtbRiI=

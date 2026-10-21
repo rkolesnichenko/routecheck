@@ -356,7 +356,7 @@ func (r *replay) message(m mrt.BGP4MPMessage) {
 		}
 	}
 	f.missingOrigin = f.reachable && !p.HasOrigin
-	f.badNextHop = len(u.Announced) > 0 && !hostAddr(p.NextHop)
+	f.badNextHop = len(u.Announced) > 0 && !hostAddr(p.NextHop())
 	disp := classify(d1, d2, f)
 	if disp == dispReset {
 		r.reset(s)
@@ -370,7 +370,7 @@ func (r *replay) message(m mrt.BGP4MPMessage) {
 	for _, n := range u.Withdrawn {
 		delete(s.routes, key{v4, n.Prefix, n.PathID})
 	}
-	if mp := p.MPUnreach; mp != nil && mp.Family.HasPrefixes() {
+	if mp := p.MPUnreach(); mp != nil && mp.Family.HasPrefixes() {
 		for _, n := range mp.Withdrawn {
 			delete(s.routes, key{mp.Family, n.Prefix, n.PathID})
 		}

@@ -137,7 +137,7 @@ type facts struct {
 // entry has attrs only.
 //
 // mrt's severities do not draw RFC 7606's line: a known attribute of the
-// wrong length is a Warning and goes to Path.Unknown, so a route whose
+// wrong length is a Warning and goes to Path.Unknown(), so a route whose
 // COMMUNITIES did not decode would otherwise look like a route with none
 // (rulings R9, R10). The rule, strongest first (RFC 7606 §3.h):
 //   - reset: any Error from ParseUpdate (the message's framing or its NLRI
@@ -145,7 +145,7 @@ type facts struct {
 //     MP_REACH_NLRI or MP_UNREACH_NLRI (undecodable or cut, so its NLRI
 //     cannot be located, §3.j; a next hop of the wrong length, §7.11; a
 //     duplicate, §3.g); any other Error from Decode that is not
-//     bgp/attr-truncated (none exists in mrt v0.1.0; an unknown one is taken
+//     bgp/attr-truncated (none exists in mrt v0.3.2; an unknown one is taken
 //     at its worst); and §5.2: an UPDATE that would be treat-as-withdraw but
 //     announces no NLRI while carrying an attribute other than
 //     MP_UNREACH_NLRI.

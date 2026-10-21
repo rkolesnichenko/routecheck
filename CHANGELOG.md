@@ -8,6 +8,24 @@ a minor version may change the API.
 
 ## [Unreleased]
 
+### Changed
+
+- routecheck requires mrt v0.3.2 (was v0.1.0). mrt v0.2.0 turned several `bgp.Path` fields into methods; `observe`
+  now calls `NextHop()` and `MPUnreach()`, and the mrtgen test `ReceivedASPath()`, `NextHop()` and `AS4Path()`.
+  Nothing else in routecheck reads the fields that moved, and the text of its API (`api/`) is unchanged. That API
+  exposes mrt's types (`observe.Route` takes a `*bgp.Path`), so a module that requires routecheck now gets mrt v0.3.2
+  as well, and its own code that reads the moved fields has to call the methods.
+- mrt's diagnostics keep v0.1.0's codes and severities (v0.2.0 only named them as constants), and an empty AS_PATH
+  segment is still a malformed AS_PATH, so the RFC 7606 dispositions (R9, R10) do not change. The replay tests that
+  decode real bytes (a truncated attribute, a malformed AS_PATH) pass unchanged, and so do the goldens. A new row
+  of `TestSessionMalformed` holds the empty segment from bytes.
+- `internal/mrtgen` stays mrt v0.1.0's encoder (R3). Since then mrt's `mrtgen.go` has only added `TableDump`, and
+  its new `files.go` builds mrt's own synthetic fixtures; no test here needs either.
+- Real data: the 60-pair run A (every registry, `-max-prefixes` 2097152) with mrt v0.3.2 writes `routes.tsv.gz`,
+  `pairs.tsv`, `missing-sets.tsv` and `rejected-missing.tsv` byte-identical to v0.6.0's run with mrt v0.1.0
+  (`.data/stream/A`), and its log differs only in timings: same totals, 0 entry and 0 record errors in both
+  (`.data/mrt-v032-A.log`, `.data/mrt-v032-compare.log`). Peak RSS 6,139 MB, 4m41s.
+
 ### Added (tests only)
 
 - `TestProvenanceCompare` reads a run whose shards interleave (each pair from the shard that checked it).

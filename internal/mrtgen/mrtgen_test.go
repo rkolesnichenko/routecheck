@@ -98,12 +98,12 @@ func TestGenDecodes(t *testing.T) {
 		t.Fatalf("%d routes", len(got))
 	}
 	p := got[0].Path
-	if got[0].Peer != peers[0] || p.ReceivedASPath.String() != "64500 64501 {64510,64511} (65001)" ||
-		p.NextHop != a4 || p.Origin != bgp.OriginEGP ||
+	if got[0].Peer != peers[0] || p.ReceivedASPath().String() != "64500 64501 {64510,64511} (65001)" ||
+		p.NextHop() != a4 || p.Origin != bgp.OriginEGP ||
 		!slices.Equal(p.Communities, []bgp.Community{64500<<16 | 100, 64500<<16 | 200}) {
-		t.Errorf("route 0 = %+v (path %q)", got[0], p.ReceivedASPath.String())
+		t.Errorf("route 0 = %+v (path %q)", got[0], p.ReceivedASPath().String())
 	}
-	if segs := p.ReceivedASPath.Segments; len(segs) != 3 || segs[0].Type != bgp.ASSequence ||
+	if segs := p.ReceivedASPath().Segments; len(segs) != 3 || segs[0].Type != bgp.ASSequence ||
 		segs[1].Type != bgp.ASSet || segs[2].Type != bgp.ASConfedSequence {
 		t.Errorf("segments = %+v", segs)
 	}
@@ -196,8 +196,8 @@ func TestGenMPAndAS4(t *testing.T) {
 	if mp == nil || mp.NextHop != a6 || mp.LinkLocal != ll || mp.Abbreviated {
 		t.Errorf("mp = %+v", mp)
 	}
-	if r.Path.AS4Path.String() != "4200000001 64500" || r.Path.ReceivedASPath.String() != "23456 64500" || r.Path.ASPath.String() != "4200000001 64500" {
-		t.Errorf("as paths = %q %q %q", r.Path.ReceivedASPath, r.Path.AS4Path, r.Path.ASPath)
+	if r.Path.AS4Path().String() != "4200000001 64500" || r.Path.ReceivedASPath().String() != "23456 64500" || r.Path.ASPath.String() != "4200000001 64500" {
+		t.Errorf("as paths = %q %q %q", r.Path.ReceivedASPath(), r.Path.AS4Path(), r.Path.ASPath)
 	}
 
 	// A value over 255 bytes gets the extended-length flag and still frames.
