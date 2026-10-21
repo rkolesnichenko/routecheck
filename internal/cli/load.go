@@ -64,7 +64,7 @@ func readInput(ctx context.Context, name string, yield func(mrt.Record, error) b
 	}
 	defer f.Close()
 	// Deferred after Close, so it runs first: a gzip input's goroutine
-	// reads f, and is stopped before f is closed.
+	// reads f, and is told to stop before f is closed.
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 	r, err := decompress(ctx, f, kindMRT)
@@ -387,10 +387,12 @@ func (d *draftFirst) InetRtr(ctx context.Context, name, source string) (*object.
 // its source: in upper case ("" when it has none) and its parse and decode
 // diagnostics. A failure to read the file is an error naming it, so that a
 // truncated dump is never taken for a short one. The file is opened through
-// openInput and read under its own context, as readInput reads an input; a
-// cancel of ctx ends the reading of a compressed file with that failure,
-// whose text names the context's error (rpsl reports a read error as a
-// diagnostic's message, not an error to wrap).
+// openInput and read under its own context, as readInput reads an input. An
+// RPSL file is decompressed with no workers (serialKinds), which ignore the
+// context, so a cancel of ctx is noticed only when the caller next checks it;
+// were kindRPSL read in parallel, a cancel would end the reading of a
+// compressed file with a failure whose text names the context's error (rpsl
+// reports a read error as a diagnostic's message, not an error to wrap).
 func readRPSL(ctx context.Context, name string, fn func(o rpsl.Object, class, key, source string, diags []rpsl.Diagnostic)) error {
 	f, err := openInput(name)
 	if err != nil {

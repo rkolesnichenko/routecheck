@@ -954,10 +954,11 @@ func loadRegistry(tb testing.TB, dumps []string, extra string, routesFrom map[st
 		if err != nil {
 			tb.Fatal(err)
 		}
-		r, cancel, err := decompressFile(f)
+		r, cancel, err := decompressFile(f, true)
 		if err != nil {
 			tb.Fatalf("%s: %v", name, err)
 		}
+		tb.Cleanup(cancel)
 		for o, ds := range rpsl.Parse(r) {
 			for _, d := range ds {
 				if d.Rule == "rpsl/read-error" {
@@ -1093,7 +1094,7 @@ func readMRT(names ...string) iter.Seq2[mrt.Record, error] {
 				yield(nil, err)
 				return
 			}
-			r, cancel, err := decompressFile(bufio.NewReaderSize(f, 1<<20))
+			r, cancel, err := decompressFile(bufio.NewReaderSize(f, 1<<20), false)
 			if err != nil {
 				f.Close()
 				yield(nil, fmt.Errorf("%s: %w", name, err))

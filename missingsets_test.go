@@ -775,7 +775,7 @@ func (h heldIndex) scan(file string, want map[string]bool) error {
 		return err
 	}
 	defer f.Close()
-	r, cancel, err := decompressFile(bufio.NewReaderSize(f, 1<<20))
+	r, cancel, err := decompressFile(bufio.NewReaderSize(f, 1<<20), true)
 	if err != nil {
 		return err
 	}

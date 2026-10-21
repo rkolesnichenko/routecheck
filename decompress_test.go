@@ -35,7 +35,7 @@ func TestDecompressFileMatches(t *testing.T) {
 			}
 			want := read(mrt.Decompress)
 			got := read(func(r io.Reader) (io.Reader, error) {
-				d, cancel, err := decompressFile(r)
+				d, cancel, err := decompressFile(r, false)
 				if err != nil {
 					return nil, err
 				}
@@ -53,10 +53,12 @@ func TestDecompressFileMatches(t *testing.T) {
 // parallel as the command does: it mirrors internal/cli's workersFor, which
 // is unexported (min(4, GOMAXPROCS) workers, none when GOMAXPROCS is 1). The
 // caller defers the returned cancel, which ends the goroutines DecompressWith
-// started when it stops reading before io.EOF or an error.
-func decompressFile(r io.Reader) (io.Reader, context.CancelFunc, error) {
+// started when it stops reading before io.EOF or an error. serial reads with
+// no workers, as the command reads RPSL files (serialKinds); MRT and VRP
+// files are read in parallel.
+func decompressFile(r io.Reader, serial bool) (io.Reader, context.CancelFunc, error) {
 	workers := 0
-	if n := min(4, runtime.GOMAXPROCS(0)); n > 1 {
+	if n := min(4, runtime.GOMAXPROCS(0)); n > 1 && !serial {
 		workers = n
 	}
 	ctx, cancel := context.WithCancel(context.Background())

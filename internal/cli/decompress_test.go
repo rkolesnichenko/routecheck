@@ -35,6 +35,23 @@ func parallelWorkers(t *testing.T) {
 	workersFor = func(inputKind) int { return 4 }
 }
 
+// TestSerialKinds: by default RPSL files are read with no workers, and MRT
+// and VRP files with min(4, GOMAXPROCS), none when GOMAXPROCS is 1.
+func TestSerialKinds(t *testing.T) {
+	if n := workersFor(kindRPSL); n != 0 {
+		t.Errorf("workersFor(kindRPSL) = %d, want 0", n)
+	}
+	want := 0
+	if n := min(4, runtime.GOMAXPROCS(0)); n > 1 {
+		want = n
+	}
+	for k, name := range map[inputKind]string{kindMRT: "kindMRT", kindVRPs: "kindVRPs"} {
+		if n := workersFor(k); n != want {
+			t.Errorf("workersFor(%s) = %d, want %d", name, n, want)
+		}
+	}
+}
+
 // yielded is one (record, error) pair of a sequence: the record's bytes and
 // the error's text.
 type yielded struct {
@@ -236,6 +253,10 @@ func TestRunCancelMidRead(t *testing.T) {
 	parallelWorkers(t)
 	for _, file := range []string{ribBz2, ribGz} {
 		t.Run(file, func(t *testing.T) {
+			// The bz2 subcase cancels before the first record: mrt's parallel
+			// bzip2 reader reads past half the small fixture before returning
+			// output. The bz2 mid-stream cancel is covered by
+			// TestRecordsCancelMidRead.
 			ctx, cancel := context.WithCancel(context.Background())
 			defer cancel()
 			cancelHalfway(t, file, cancel)
@@ -382,7 +403,7 @@ func TestReadRPSLMatchesDecompress(t *testing.T) {
 // half-way through, ends as an interrupted run does: exit 3, nothing on
 // stdout, the cause on stderr.
 func TestRunCancelDuringDump(t *testing.T) {
-	parallelWorkers(t)
+	parallelWorkers(t) // the default for RPSL is serial, which ignores the cancel
 	dump := write(t, "registry.txt.gz", gzipped(t, bigRegistry(t)))
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
