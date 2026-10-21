@@ -10,10 +10,10 @@ a minor version may change the API.
 
 ### Changed
 
-- Compressed inputs are read through `mrt.DecompressWith`: MRT (`-session`, `-collector`) and VRP (`-vrps`) files
-  with min(4, GOMAXPROCS) workers (none when GOMAXPROCS is 1), RPSL files (`-dump`, `-policy`) serially, exactly as
-  `mrt.Decompress` reads (design decision 7). One input is read at a time; mrt documents about 216.7 MB held live at
-  4 workers for a hostile bzip2 input (mrt 0.3.1/0.3.2).
+- Compressed inputs are read through `mrt.DecompressWith`: MRT (`-session`, `-collector`) and VRP (`-vrps`) files with
+  min(4, GOMAXPROCS) workers (none when GOMAXPROCS is 1), RPSL files (`-dump`, `-policy`) serially, exactly as
+  `mrt.Decompress` reads (decision 7 of docs/superpowers/specs/2026-10-21-parallel-decompress-design.md). One input is
+  read at a time; mrt documents about 216.7 MB held live at 4 workers for a hostile bzip2 input (mrt 0.3.1/0.3.2).
 - Measured on 2026-10-21 (Apple M3 Max, GOMAXPROCS=4, GOMEMLIMIT=6GiB, 8 GB memory guard), run A (60 pairs, every
   registry, `-max-prefixes` 2097152, with OUT), before (main, serial `mrt.Decompress`, `.data/mrt-v032-A.log`) ->
   after (this branch with MRT and RPSL both parallel, `.data/pd-A.log`); each is one run:
@@ -33,8 +33,12 @@ a minor version may change the API.
   (`.data/pd-cmd-{before,after}-{1,2}.log`); after RPSL went serial 66 s, peak 5,902 MB
   (`.data/pd-cmd-after-serial.log`). Stdout was identical in each comparison; exit 1 throughout (routes rejected), as
   before.
-- Cancellation (design decision 5). A cancel (SIGINT) while a compressed MRT input is read stops it at the
-  decompressor's next read, with exit 3 and "context canceled" as before. RPSL files are read serially, so a cancel
+- Cancellation (decision 5 of docs/superpowers/specs/2026-10-21-parallel-decompress-design.md). A cancel (SIGINT)
+  while a compressed MRT input is read stops it at the decompressor's next read. The exit status (3) and the "context
+  canceled" text are unchanged, but the stderr line may now name the file and offset (`routecheck: FILE: mrt: reading
+  record at offset N: context canceled`), depending on whether the decompressor's read or Check's every-4096-records
+  check sees the cancel first. With GOMAXPROCS=1 MRT is read serially and a cancel is noticed only at that check, as
+  before. A cancel during a compressed `-vrps` read now stops it (new). RPSL files are read serially, so a cancel
   during the registry load is still noticed only when the check starts, as before.
 - Not measured: the final branch's run A with serial RPSL (its MRT path is the one measured); RSS apart from the
   guard's peak; GOMAXPROCS other than 4; other machines; session-mode inputs; a gzipped `-vrps` through the command
