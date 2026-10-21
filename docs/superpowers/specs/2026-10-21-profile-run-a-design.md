@@ -89,7 +89,10 @@ Each decision below is marked either as one the user made or as my call.
    same settings as `.data/parallel-decompress-runs.zsh A`. No new flag or profiler code is needed.
 3. **Phase labels** (my call). The test wraps each phase in
    `pprof.Do(ctx, pprof.Labels("phase", NAME), …)`.
-   - **The names:** `load`, `vrps`, `pass1`, `pass2`, `check`, `recount`, `output` and `totals`.
+   - **The names:** `load`, `vrps`, `pass1`, `pass2`, `pairs`, `check`, `recount`, `output` and
+     `totals`. `pairs` covers the whole loop; the loop's own work between the three spans below
+     (opening the spool, the heap marks, logging, adding to the totals) keeps it, so the test's
+     goroutine is never unlabelled during a phase.
    - **Inside the pairs loop:** `check` covers only `CheckEach` (what `r.elapsed` times),
      `recount` covers the observe re-count (what `countDur` times), and `output` covers `addPair` and
      its spool appends. Each pair also gets a `pair=N` label, so pair 2 can be split out.
