@@ -8,7 +8,7 @@ import (
 	"io"
 	"os"
 	"runtime"
-	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -157,10 +157,47 @@ func TestRecordsEarlyStopReleases(t *testing.T) {
 	}
 }
 
-// cancelOnRead replaces openInput so that the file named target, and only
-// it, calls cancel once its first Read has returned.
-func cancelOnRead(t *testing.T, target string, cancel context.CancelFunc) {
+// TestRecordsCancelMidRead: a cancel while a compressed file is read, after
+// some of its records, ends records with context.Canceled before the file's
+// last record.
+func TestRecordsCancelMidRead(t *testing.T) {
+	parallelWorkers(t)
+	for _, file := range []string{ribGz, ribBz2} {
+		t.Run(file, func(t *testing.T) {
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			var (
+				n    int
+				last error
+			)
+			for rec, err := range records(ctx, []string{file}) {
+				if rec != nil {
+					if n++; n == 10 {
+						cancel()
+					}
+				}
+				last = err
+			}
+			if !errors.Is(last, context.Canceled) {
+				t.Errorf("last error %v, want context.Canceled", last)
+			}
+			if all := len(serialRecords(t, file)); n < 10 || n >= all {
+				t.Errorf("%d records, want at least 10 and fewer than the file's %d", n, all)
+			}
+		})
+	}
+}
+
+// cancelHalfway replaces openInput so that the file named target, and only
+// it, calls cancel once it has returned at least half its size in bytes.
+// The decompressed output cannot have ended by then, so the next Read of it
+// returns the context's error.
+func cancelHalfway(t *testing.T, target string, cancel context.CancelFunc) {
 	t.Helper()
+	fi, err := os.Stat(target)
+	if err != nil {
+		t.Fatal(err)
+	}
 	orig := openInput
 	t.Cleanup(func() { openInput = orig })
 	openInput = func(name string) (io.ReadCloser, error) {
@@ -168,61 +205,44 @@ func cancelOnRead(t *testing.T, target string, cancel context.CancelFunc) {
 		if err != nil || name != target {
 			return f, err
 		}
-		return &cancelReader{ReadCloser: f, cancel: cancel}, nil
+		return &cancelReader{ReadCloser: f, half: fi.Size() / 2, cancel: cancel}, nil
 	}
 }
 
 type cancelReader struct {
 	io.ReadCloser
-	once   sync.Once
+	half   int64        // cancel once this many bytes are read
+	read   atomic.Int64 // bytes read so far
 	cancel context.CancelFunc
 }
 
 func (c *cancelReader) Read(p []byte) (int, error) {
 	n, err := c.ReadCloser.Read(p)
-	c.once.Do(c.cancel)
+	if c.read.Add(int64(n)) >= c.half {
+		c.cancel()
+	}
 	return n, err
 }
 
-// TestRecordsCancelMidRead: a cancel while a compressed file is read ends
-// records with context.Canceled, before the file's last record.
-func TestRecordsCancelMidRead(t *testing.T) {
-	parallelWorkers(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	cancelOnRead(t, ribBz2, cancel)
-	var (
-		n    int
-		last error
-	)
-	for rec, err := range records(ctx, []string{ribBz2}) {
-		if rec != nil {
-			n++
-		}
-		last = err
-	}
-	if !errors.Is(last, context.Canceled) {
-		t.Errorf("last error %v, want context.Canceled", last)
-	}
-	if all := len(serialRecords(t, ribBz2)); n >= all {
-		t.Errorf("%d records, want fewer than the file's %d", n, all)
-	}
-}
-
-// TestRunCancelMidRead: a run cancelled while its compressed input is read
-// ends as an interrupted run does: exit 3, nothing on stdout.
+// TestRunCancelMidRead: a run cancelled while its compressed input is read,
+// half-way through, ends as an interrupted run does: exit 3, nothing on
+// stdout.
 func TestRunCancelMidRead(t *testing.T) {
 	parallelWorkers(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	cancelOnRead(t, ribBz2, cancel)
-	code, stdout, stderr := runCtx(t, ctx, "-local", "AS64496", "-peer", "AS4766", "-collector", ribBz2,
-		"-dump", registry, "-direction", "import")
-	if code != exitFailed {
-		t.Errorf("exit %d, want %d; stderr %s", code, exitFailed, stderr)
+	for _, file := range []string{ribBz2, ribGz} {
+		t.Run(file, func(t *testing.T) {
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			cancelHalfway(t, file, cancel)
+			code, stdout, stderr := runCtx(t, ctx, "-local", "AS64496", "-peer", "AS4766", "-collector", file,
+				"-dump", registry, "-direction", "import")
+			if code != exitFailed {
+				t.Errorf("exit %d, want %d; stderr %s", code, exitFailed, stderr)
+			}
+			if stdout != "" {
+				t.Errorf("stdout %q, want nothing", stdout)
+			}
+			wantContains(t, "stderr", stderr, "context canceled")
+		})
 	}
-	if stdout != "" {
-		t.Errorf("stdout %q, want nothing", stdout)
-	}
-	wantContains(t, "stderr", stderr, "context canceled")
 }
