@@ -83,14 +83,18 @@ func readInput(ctx context.Context, name string, yield func(mrt.Record, error) b
 	return true
 }
 
-// readVRPs reads a VRP JSON file (rpki.ReadJSON), compressed or not.
-func readVRPs(name string) (*rpki.VRPs, error) {
+// readVRPs reads a VRP JSON file (rpki.ReadJSON), compressed or not
+// (decompress), under its own context, as readInput reads an input.
+func readVRPs(ctx context.Context, name string) (*rpki.VRPs, error) {
 	f, err := os.Open(name)
 	if err != nil {
 		return nil, err
 	}
 	defer f.Close()
-	r, err := mrt.Decompress(f)
+	// Deferred after Close, so it runs first (readInput).
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	r, err := decompress(ctx, f, kindVRPs)
 	if err != nil {
 		return nil, fmt.Errorf("%s: %w", name, err)
 	}
@@ -153,7 +157,7 @@ func loadPolicy(ctx context.Context, cfg *config, stderr io.Writer) (*loaded, er
 	var d *draft
 	if cfg.policyFile != "" {
 		var err error
-		if d, err = readDraft(cfg.policyFile, stderr); err != nil {
+		if d, err = readDraft(ctx, cfg.policyFile, stderr); err != nil {
 			return nil, err
 		}
 		cfg.draftSupplies = d.supplies
@@ -167,7 +171,7 @@ func loadPolicy(ctx context.Context, cfg *config, stderr io.Writer) (*loaded, er
 		c := &resolve.Corpus{KeepPolicy: true}
 		var order []string
 		for _, name := range cfg.dumps {
-			err := readRPSL(name, func(o rpsl.Object, _, _, source string, _ []rpsl.Diagnostic) {
+			err := readRPSL(ctx, name, func(o rpsl.Object, _, _, source string, _ []rpsl.Diagnostic) {
 				if source != "" && !slices.Contains(order, source) {
 					order = append(order, source)
 				}
@@ -293,10 +297,10 @@ var setClasses = map[string]bool{"as-set": true, "route-set": true, "filter-set"
 // a set or a route or route6 (they come from the registry: a draft's would
 // change set expansions and route-object answers) and a class routecheck
 // does not use (mntner, person, …).
-func readDraft(name string, stderr io.Writer) (*draft, error) {
+func readDraft(ctx context.Context, name string, stderr io.Writer) (*draft, error) {
 	d := &draft{corpus: &resolve.Corpus{KeepPolicy: true}}
 	var bad error
-	err := readRPSL(name, func(o rpsl.Object, class, key, source string, diags []rpsl.Diagnostic) {
+	err := readRPSL(ctx, name, func(o rpsl.Object, class, key, source string, diags []rpsl.Diagnostic) {
 		failed := false
 		for _, dg := range diags {
 			fmt.Fprintf(stderr, "routecheck: %s:%s\n", name, dg)
@@ -382,14 +386,21 @@ func (d *draftFirst) InetRtr(ctx context.Context, name, source string) (*object.
 // calls fn with each object, decoded, its class and primary key as written,
 // its source: in upper case ("" when it has none) and its parse and decode
 // diagnostics. A failure to read the file is an error naming it, so that a
-// truncated dump is never taken for a short one.
-func readRPSL(name string, fn func(o rpsl.Object, class, key, source string, diags []rpsl.Diagnostic)) error {
-	f, err := os.Open(name)
+// truncated dump is never taken for a short one. The file is opened through
+// openInput and read under its own context, as readInput reads an input; a
+// cancel of ctx ends the reading of a compressed file with that failure,
+// whose text names the context's error (rpsl reports a read error as a
+// diagnostic's message, not an error to wrap).
+func readRPSL(ctx context.Context, name string, fn func(o rpsl.Object, class, key, source string, diags []rpsl.Diagnostic)) error {
+	f, err := openInput(name)
 	if err != nil {
 		return err
 	}
 	defer f.Close()
-	r, err := mrt.Decompress(f)
+	// Deferred after Close, so it runs first (readInput).
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	r, err := decompress(ctx, f, kindRPSL)
 	if err != nil {
 		return fmt.Errorf("%s: %w", name, err)
 	}

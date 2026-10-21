@@ -375,7 +375,7 @@ func TestJSONMatchesWholeView(t *testing.T) {
 				t.Fatal(err)
 			}
 			if cfg.vrps != "" {
-				if cfg.opts.VRPs, err = readVRPs(cfg.vrps); err != nil {
+				if cfg.opts.VRPs, err = readVRPs(context.Background(), cfg.vrps); err != nil {
 					t.Fatal(err)
 				}
 			}
@@ -1422,15 +1422,16 @@ func TestRejectedHeaderNamesClause(t *testing.T) {
 }
 
 // TestInputsOpenedOneAtATime: the inputs are opened lazily, each closed
-// before the next is opened, so that many files need one descriptor.
+// before the next is opened, so that many files need one descriptor. Only
+// the -session inputs are counted: the -dump is opened through openInput too.
 func TestInputsOpenedOneAtATime(t *testing.T) {
 	open, most := 0, 0
 	orig := openInput
 	t.Cleanup(func() { openInput = orig })
 	openInput = func(name string) (io.ReadCloser, error) {
 		f, err := orig(name)
-		if err != nil {
-			return nil, err
+		if err != nil || name != capture {
+			return f, err
 		}
 		open++
 		most = max(most, open)

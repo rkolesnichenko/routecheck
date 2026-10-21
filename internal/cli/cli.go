@@ -135,7 +135,7 @@ func Run(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 		return fail(err)
 	}
 	if cfg.vrps != "" {
-		if cfg.opts.VRPs, err = readVRPs(cfg.vrps); err != nil {
+		if cfg.opts.VRPs, err = readVRPs(ctx, cfg.vrps); err != nil {
 			return fail(err)
 		}
 	}
