@@ -84,9 +84,10 @@ func readInput(ctx context.Context, name string, yield func(mrt.Record, error) b
 }
 
 // readVRPs reads a VRP JSON file (rpki.ReadJSON), compressed or not
-// (decompress), under its own context, as readInput reads an input.
+// (decompress), opened through openInput and read under its own context, as
+// readInput reads an input.
 func readVRPs(ctx context.Context, name string) (*rpki.VRPs, error) {
-	f, err := os.Open(name)
+	f, err := openInput(name)
 	if err != nil {
 		return nil, err
 	}

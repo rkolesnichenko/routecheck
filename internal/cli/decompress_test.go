@@ -346,21 +346,19 @@ func TestReadRPSLMatchesDecompress(t *testing.T) {
 		force func(*testing.T)
 	}{{"workers=0", noWorkers}, {"workers=4", parallelWorkers}}
 
-	var want []rpslObject
+	// The baselines are the raw file read with no worker, computed here so
+	// that a -run selecting one subtest still compares against them.
+	noWorkers(t)
+	want := readRPSLAll(t, raw)
+	if len(want) == 0 {
+		t.Fatal("no object")
+	}
 	for _, file := range []struct{ name, path string }{{"raw", raw}, {"gzip", gz}} {
 		for _, m := range modes {
 			t.Run(file.name+"/"+m.name, func(t *testing.T) {
 				m.force(t)
-				got := readRPSLAll(t, file.path)
-				if want == nil {
-					want = got
-					if len(want) == 0 {
-						t.Fatal("no object")
-					}
-					return
-				}
-				if !reflect.DeepEqual(got, want) {
-					t.Errorf("%d objects differ from the first read's %d", len(got), len(want))
+				if got := readRPSLAll(t, file.path); !reflect.DeepEqual(got, want) {
+					t.Errorf("%d objects differ from the baseline's %d", len(got), len(want))
 				}
 			})
 		}
@@ -370,29 +368,29 @@ func TestReadRPSLMatchesDecompress(t *testing.T) {
 		objs, sources, supplies []string
 		stderr                  string
 	}
-	var wantDraft *draftRead
+	readDraftAll := func() *draftRead {
+		var stderr bytes.Buffer
+		d, err := readDraft(context.Background(), gz, &stderr)
+		if err != nil {
+			t.Fatal(err)
+		}
+		got := &draftRead{sources: d.sources, supplies: d.supplies, stderr: stderr.String()}
+		for _, o := range d.objs {
+			got.objs = append(got.objs, o.Raw().String())
+		}
+		return got
+	}
+	wantDraft := readDraftAll() // still with no worker (noWorkers above)
 	autNums := len(regexp.MustCompile(`(?m)^aut-num:`).FindAll(text, -1))
+	if len(wantDraft.supplies) != autNums {
+		t.Fatalf("the draft supplies %d objects, want the file's %d aut-nums", len(wantDraft.supplies), autNums)
+	}
 	for _, m := range modes {
 		t.Run("draft/"+m.name, func(t *testing.T) {
 			m.force(t)
-			var stderr bytes.Buffer
-			d, err := readDraft(context.Background(), gz, &stderr)
-			if err != nil {
-				t.Fatal(err)
-			}
-			got := &draftRead{sources: d.sources, supplies: d.supplies, stderr: stderr.String()}
-			for _, o := range d.objs {
-				got.objs = append(got.objs, o.Raw().String())
-			}
-			if wantDraft == nil {
-				wantDraft = got
-				if len(got.supplies) != autNums {
-					t.Errorf("the draft supplies %d objects, want the file's %d aut-nums", len(got.supplies), autNums)
-				}
-				return
-			}
+			got := readDraftAll()
 			if !reflect.DeepEqual(got, wantDraft) {
-				t.Errorf("the draft differs from the first read's: %d objects, %d supplies, %d bytes on stderr; want %d, %d, %d",
+				t.Errorf("the draft differs from the baseline's: %d objects, %d supplies, %d bytes on stderr; want %d, %d, %d",
 					len(got.objs), len(got.supplies), len(got.stderr), len(wantDraft.objs), len(wantDraft.supplies), len(wantDraft.stderr))
 			}
 		})
@@ -416,6 +414,48 @@ func TestRunCancelDuringDump(t *testing.T) {
 		t.Errorf("stdout %q, want nothing", stdout)
 	}
 	wantContains(t, "stderr", stderr, dump+": reading: ", "context canceled")
+}
+
+// bigVRPs is a VRP JSON file of the shape of testdata/rpki/vrps.json with
+// entries of its own, long enough that its gzip is at least twice the gzip
+// readahead's queue.
+func bigVRPs(t *testing.T) []byte {
+	t.Helper()
+	var b bytes.Buffer
+	b.WriteString(`{"metadata":{},"roas":[`)
+	for i := range 120000 {
+		if i > 0 {
+			b.WriteByte(',')
+		}
+		fmt.Fprintf(&b, `{"asn":"AS%d","prefix":"%d.%d.%d.0/24","maxLength":%d,"ta":"test"}`,
+			64512+i%1000, 11+i>>16&0x7f, i>>8&0xff, i&0xff, 24+i%2)
+	}
+	b.WriteString(`]}`)
+	return b.Bytes()
+}
+
+// TestRunCancelDuringVRPs: a run cancelled while its gzipped -vrps is read,
+// half-way through, ends as an interrupted run does: exit 3, nothing on
+// stdout, the cause on stderr.
+func TestRunCancelDuringVRPs(t *testing.T) {
+	parallelWorkers(t)
+	gz := gzipped(t, bigVRPs(t))
+	if len(gz) < 512<<10 {
+		t.Fatalf("the gzipped VRPs are %d bytes, want at least 512 KiB", len(gz))
+	}
+	vrps := write(t, "vrps.json.gz", gz)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	cancelHalfway(t, vrps, cancel)
+	code, stdout, stderr := runCtx(t, ctx, "-local", "AS64496", "-peer", "AS64500", "-session", capture,
+		"-dump", registry, "-vrps", vrps)
+	if code != exitFailed {
+		t.Errorf("exit %d, want %d; stderr %s", code, exitFailed, stderr)
+	}
+	if stdout != "" {
+		t.Errorf("stdout %q, want nothing", stdout)
+	}
+	wantContains(t, "stderr", stderr, vrps, "context canceled")
 }
 
 // TestReadVRPsGzip: readVRPs reads the same VRPs from a gzipped file,
