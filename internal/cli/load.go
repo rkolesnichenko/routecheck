@@ -35,15 +35,20 @@ func checkInputs(names []string) error {
 var openInput = func(name string) (io.ReadCloser, error) { return os.Open(name) }
 
 // records reads the inputs one after another, in the order given, each
-// through gzip or bzip2 when it is compressed (mrt.Decompress). A file is
-// opened when its turn comes and closed before the next one is opened, so
-// any number of inputs needs one descriptor. Every error is wrapped with its
-// file's name; the wrapping keeps *mrt.RecordError and mrt.ErrTruncated
-// visible to errors.As and errors.Is, which observe reads.
-func records(names []string) iter.Seq2[mrt.Record, error] {
+// through gzip or bzip2 when it is compressed (mrt.DecompressWith, with
+// workersFor's workers). A file is opened when its turn comes and closed
+// before the next one is opened, so any number of inputs needs one
+// descriptor. Each file is read under its own context, derived from ctx and
+// cancelled when its reading returns (at its end, on an error or when the
+// caller stops), so that no decompressing goroutine outlives it; a cancel of
+// ctx ends the reading of a compressed file with context.Canceled. Every
+// error is wrapped with its file's name; the wrapping keeps
+// *mrt.RecordError, mrt.ErrTruncated and a context's error visible to
+// errors.As and errors.Is, which observe reads.
+func records(ctx context.Context, names []string) iter.Seq2[mrt.Record, error] {
 	return func(yield func(mrt.Record, error) bool) {
 		for _, name := range names {
-			if !readInput(name, yield) {
+			if !readInput(ctx, name, yield) {
 				return
 			}
 		}
@@ -51,14 +56,18 @@ func records(names []string) iter.Seq2[mrt.Record, error] {
 }
 
 // readInput yields one input's records and reports whether to go on.
-func readInput(name string, yield func(mrt.Record, error) bool) bool {
+func readInput(ctx context.Context, name string, yield func(mrt.Record, error) bool) bool {
 	f, err := openInput(name)
 	if err != nil {
 		yield(nil, err)
 		return false
 	}
 	defer f.Close()
-	r, err := mrt.Decompress(f)
+	// Deferred after Close, so it runs first: a gzip input's goroutine
+	// reads f, and is stopped before f is closed.
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	r, err := decompress(ctx, f, kindMRT)
 	if err != nil {
 		yield(nil, fmt.Errorf("%s: %w", name, err))
 		return false
