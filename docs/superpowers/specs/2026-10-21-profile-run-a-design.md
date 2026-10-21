@@ -1,30 +1,33 @@
 # Where run A's time goes — design
 
-Status: draft, 2026-10-21. This is an investigation. It changes test code only, and names the next
-target without building it.
+Status: draft, 2026-10-21, revised after the builder check. This is an investigation. It changes
+test code only, and names the next target without building it.
 
 ## Intent
 
-Since v0.7.1, the 60-pair real-data run A takes 3m49s wall (`.data/pd-A.log`; every registry,
-`-max-prefixes` 2097152, with OUT; GOMAXPROCS=4, GOMEMLIMIT=6GiB). Its log gives each phase's wall
-time:
+The 60-pair real-data run A took 3m49s wall in `.data/pd-A.log`: every registry, `-max-prefixes`
+2097152, with OUT, GOMAXPROCS=4, GOMEMLIMIT=6GiB. That run was at f0f3767, which still read RPSL
+dumps in parallel. v0.7.1 reads them serially, and run A has not been measured on it. Its log
+gives each phase's wall time:
 
-| phase | wall | what it does |
+| phase | wall (`.data/pd-A.log`) | what it does |
 |---|---|---|
-| registry load | 36.567 s | parses 32 gzip RPSL dumps of 16 registries into a `resolve.Corpus` (serial gzip) |
+| registry load | 36.567 s | parses 32 gzip RPSL dumps of 16 registries into a `resolve.Corpus` |
 | VRPs | 1.713 s | reads NTT's VRP JSON |
 | pass 1 | 17.968 s | counts the ASes on every path of both RIBs |
 | pass 2 | 1m5.449s | filters both RIBs into 55 per-neighbour MRT files |
-| checks | 1m34s | 60 pairs; pair 2 alone takes 31.016 s |
+| checks | 1m34s | `CheckEach` over 60 pairs; pair 2 alone takes 31.016 s |
+| re-counts | 10.868 s | the test's own re-count of each report's observations, logged as "+N counting observations" (49 entries); not part of the checks' time |
+| output | not timed | appending each pair's routes and rejected lines to the OUT spools (gzip, and a 516 MB rejected-missing file) |
 
-The rest of the wall time, about 13 s, is pair selection, logging and the totals. That figure is
-arithmetic on the rows above, not a measurement.
+The phases run one after another (realdata_test.go:208–338). Only pass 1 and pass 2 run work in
+parallel, through mrt's decompression workers.
 
 Which of these deserves work is **not measured**. The phases differ in where their time could go:
 
 - parsing RPSL in rpsl itself;
 - decoding BGP attributes in mrt;
-- writing the filtered files;
+- writing the filtered files and the spools;
 - garbage collection near the 6 GiB limit (run A peaked at 6,311 MB);
 - waiting on I/O;
 - the check's own work: policy expansion, verdicts, the hygiene lookups.
@@ -33,21 +36,26 @@ A profile tells them apart. Without one, any change is a guess.
 
 ## Goals
 
-1. A CPU profile of one run A, split by phase exactly, including the goroutines each phase starts.
-   mrt's decompression workers are among them.
+1. A CPU profile of one run A on the current code, split by phase exactly, including the goroutines
+   each phase starts (mrt's decompression workers in pass 1 and pass 2).
+   - The load reads serially (`Workers` 0) and the checks read uncompressed files, so those two
+     phases start no mrt goroutines. A check's CPU close to its wall time follows from that, and
+     does not by itself mean the phase is healthy.
 2. For each phase:
-   - its CPU seconds against its wall seconds. A phase that uses far less CPU than wall is waiting
-     (I/O, or a single goroutine) rather than computing;
+   - its CPU seconds against its wall seconds. A phase using far less CPU than wall is waiting (I/O,
+     or a single goroutine) rather than computing;
    - the top functions by cumulative CPU;
    - the module each belongs to: routecheck, rpsl, mrt, Go's runtime (GC and allocation), or the
      standard library.
-3. The GC's share of the whole run's CPU.
-4. A short findings section naming the one or two targets the profile supports, each with its
-   expected payoff stated as a bound from the profile. One example: "phase X spends N s CPU in
-   function F; removing it entirely would save at most M s wall". The section also names what the
-   profile cannot tell.
+3. The GC's share of the whole run's CPU, and of each phase's.
+4. A short findings section naming the one or two targets the profile supports.
+   - Each target's expected payoff is stated as a bound from the profile, for example: "phase X
+     spends N s CPU in function F; removing it entirely would save at most M s wall".
+   - The section also names what the profile cannot tell.
 5. The run's output is unchanged: its four output files are byte-identical to `.data/stream/A`,
-   which also shows the labels change nothing.
+   which also shows the labels and the CPU readings change nothing.
+6. As a by-product, this run fills the gap the CHANGELOG records: a real-data run A of the current
+   code (serial RPSL), with the profiler on.
 
 ## Non-goals
 
@@ -56,18 +64,18 @@ A profile tells them apart. Without one, any change is a guess.
   own release process.
 - **Memory.** Memory profiling exists already (`ROUTECHECK_REALDATA_MEMPROF`, R29) and is not
   repeated.
-- **The command's own runs.** Run A runs the same library code the command uses for collector
-  mode. The command's flag handling and output are not profiled.
-- **Wall-clock tracing.** `go test -trace` is out unless the CPU profile leaves a phase's wall time
-  unexplained; see decision 5.
+- **The command's own runs.** Run A runs the library code the command uses for collector mode; the
+  command's flag handling and output are not profiled.
+- **Wall-clock tracing.** `go test -trace` is out unless the profile leaves a phase's wall time
+  unexplained; see decision 6.
 
 ## Anti-goals
 
-- A figure in the findings that does not come from the profile or a log named beside it.
-- Treating a function's CPU share as its wall-clock saving. The phases run concurrently in places,
-  and a parallel phase's CPU is spread over 4 cores. The findings state bounds, not promises.
-- A profile that perturbs the run enough to change the answer. Go's CPU profiler samples at 100 Hz;
-  its cost is expected to be small, and the run's wall times are compared with `.data/pd-A.log`.
+- A figure in the findings that does not come from the profile, the CPU readings or a log named
+  beside it.
+- Treating a function's CPU share as its wall-clock saving. In pass 1 and pass 2, CPU is spread over
+  up to 4 cores, so the findings state bounds, not promises.
+- Absolute CPU seconds taken from the profile's sample count alone; see decision 5.
 - A run that crosses the 8 GB guard.
 
 ## Decisions
@@ -76,58 +84,82 @@ Each decision below is marked either as one the user made or as my call.
 
 1. **Scope** (user): profile run A, design first.
 2. **How to profile** (my call): `go test -cpuprofile FILE` on the existing `TestRealData`, with the
-   same settings as `.data/parallel-decompress-runs.zsh A`. It needs no new flag or profiler code.
-3. **Phase labels** (my call):
-   - The test wraps each phase in `pprof.Do(ctx, pprof.Labels("phase", NAME), …)`. The names are
-     `load`, `vrps`, `pass1`, `pass2`, `check` and `totals`.
-   - Goroutines inherit their creator's labels when they start, so mrt's decompression workers and
-     anything `CheckEach` starts are counted to their phase. A pprof filter of `-tagfocus=phase=X`
-     then gives each phase's profile.
-   - Test code only. Labels cost almost nothing, so they are always on; no environment switch.
-   - The GC's background workers belong to the runtime and carry no label, so they appear as their
-     own unlabelled share. Allocation assists run on the allocating goroutine, so they are counted
-     to its phase.
-4. **Per-phase CPU against wall** (my call):
-   - The per-phase CPU comes from the profile: the samples under each label, at 10 ms each.
-   - The wall time comes from the log lines the test already writes. The `check` phase's wall time
-     is the TOTALS line's "of it checks".
-   - A small offline step (a `go tool pprof -tags` or `-top -tagfocus` run per phase) writes the
-     table. No new Go code is needed for it.
-5. **A trace only if needed** (my call). If a phase's CPU is well under its wall time and the
-   profile cannot say why, one more run with `-trace` on that phase alone is proposed to the user,
-   and not run without their go-ahead. The likely case is pass 2's writing, or a single goroutine.
-6. **Where the findings go** (my call):
+   same settings as `.data/parallel-decompress-runs.zsh A`. No new flag or profiler code is needed.
+3. **Phase labels** (my call). The test wraps each phase in
+   `pprof.Do(ctx, pprof.Labels("phase", NAME), …)`.
+   - **The names:** `load`, `vrps`, `pass1`, `pass2`, `check`, `recount`, `output` and `totals`.
+   - **Inside the pairs loop:** `check` covers only `CheckEach` (what `r.elapsed` times),
+     `recount` covers the observe re-count (what `countDur` times), and `output` covers `addPair` and
+     its spool appends. Each pair also gets a `pair=N` label, so pair 2 can be split out.
+   - **Goroutines** inherit their creator's labels when they start. That covers every goroutine a
+     phase starts: mrt's gzip readahead (started in `DecompressWith`), its bzip2 workers (started
+     from the reading goroutine's `Read`), and nothing else. routecheck's library starts none.
+   - **Runtime goroutines.** The GC's background workers carry no label and appear as their own
+     unlabelled share. Allocation assists run on the allocating goroutine and count to its phase.
+   - **Cost.** Test code only. Labels cost almost nothing, so they are always on.
+4. **The `output` phase's wall time** (my call). It is not timed today. The test sums the time
+   spent in `addPair` over the pairs and logs it in one line beside the TOTALS, so the table has a
+   wall figure for every labelled phase. This is a few lines of test code.
+5. **CPU readings that do not rest on the profiler** (my call).
+   - **Why.** On macOS (Go 1.27.2) the CPU profiler samples with one process-wide timer, not
+     per-thread timers as on Linux. A process-wide timer is known to undercount on Linux above
+     about 2.5 busy cores. Whether macOS undercounts is unknown, and pass 1 and pass 2 run up to 5
+     busy goroutines.
+   - **What.** At each phase boundary the test reads `runtime/metrics`:
+     - `/cpu/classes/user:cpu-seconds`;
+     - `/cpu/classes/gc/total:cpu-seconds`;
+     - `/cpu/classes/total:cpu-seconds`.
+
+     It logs one `CPU: <phase> user Ns gc Ns wall Ns` line per phase. These are the runtime's own
+     accounting, independent of the profiler's timer.
+   - **How they are used.** The phase table takes its CPU seconds from these lines, and its GC share
+     from the gc class. The profile is used for proportions within a phase: which functions take
+     the phase's CPU.
+   - **The cross-check.** The run compares each phase's profile samples (× 10 ms) with its `user`
+     reading. A gap names the undercount.
+6. **A trace only if needed** (my call).
+   - If a phase's CPU is well under its wall time and the profile cannot say why, one more run with
+     `-trace` is proposed to the user. It is not run without their go-ahead.
+   - The likely cases are pass 2's and `output`'s writing.
+7. **Baseline** (my call). There is no extra unprofiled run A. This run is itself the measurement of
+   the current code.
+   - Its wall times are reported as measured with the profiler on, at 100 Hz.
+   - They are set beside `.data/pd-A.log` only with the difference stated: that run read RPSL in
+     parallel and had no profiler.
+   - The profiler's own cost is not measured, and the findings say so.
+8. **Where the findings go** (my call):
    - a `### Measured, where run A's time goes` section in the CHANGELOG's Unreleased part, with the
      table and the targets;
-   - one line in CLAUDE.md's Commands → Real data on how to take the profile;
+   - one line in CLAUDE.md's Commands → Real data on how to take the profile, which also replaces
+     its note that the serial-RPSL run A was not measured;
    - the profile itself stays in `.data/` and is not committed.
 
 ## Tests
 
-- **The labels change nothing.** The run's four output files are byte-identical to `.data/stream/A`,
-  and its summary lines match once timings are stripped. This is the same check as
-  `.data/pd-compare.log`.
-- **The labels are present.** In the profile, every phase name has samples (`go tool pprof -tags`),
-  and the unlabelled share is only the runtime's own goroutines (the GC's workers, the profiler).
-  If a phase's goroutines show up unlabelled, a goroutine was started outside its `pprof.Do`, and
-  that is fixed before the findings are written.
-- **check.sh** passes. The test change is behind `ROUTECHECK_REALDATA`, like the rest of the
+- **The labels and readings change nothing.** The run's four output files are byte-identical to
+  `.data/stream/A`, and its summary lines match once timings are stripped. This is the same check as
+  `.data/pd-compare.log`; the new `CPU:` and output-time lines are left out of the comparison.
+- **The labels are present.**
+  - In the profile, every phase name has samples (`go tool pprof -tags`).
+  - The unlabelled share is only the runtime's own goroutines: the GC's workers and the profiler.
+  - If a phase's goroutines show up unlabelled, a goroutine was started outside its `pprof.Do`, and
+    that is fixed before the findings are written.
+- **check.sh** passes. The test changes are behind `ROUTECHECK_REALDATA`, like the rest of the
   real-data test.
 
 ## Running it
 
 - One run A with `-cpuprofile`, alone, under the 8 GB guard, with the same settings as before. It
   peaked at 6,311 MB last time, over the 6,144 MB threshold, so ask before running it.
-- Then the offline pprof step, which is light.
-- The trace run of decision 5 needs its own go-ahead.
+- Then the offline pprof step (`go tool pprof -tags`, and `-top -cum -tagfocus=phase=X` per phase),
+  which is light.
+- The trace run of decision 6 needs its own go-ahead.
 
 ## Left to the builder
 
 - Where exactly each `pprof.Do` sits.
-  - Around the existing calls `loadRegistry`, the VRP read, `countASes`, `filterRIBs`, the pairs
-    loop, and the totals.
-  - Whether the pairs loop is one `check` label, or `check` plus a `pair=N` label. `pair` would let
-    pair 2 be split out; it is cheap.
-- The script that runs it (git-ignored, under `.data/`), modelled on `.data/parallel-decompress-runs.zsh`.
+- How the `CPU:` lines are formatted, and whether a small helper reads the three metrics.
+- The script that runs it (git-ignored, under `.data/`), modelled on
+  `.data/parallel-decompress-runs.zsh`.
 - The findings' wording, and how deep the per-function tables go: the top 10 to 15 per phase, by
   cumulative CPU.
