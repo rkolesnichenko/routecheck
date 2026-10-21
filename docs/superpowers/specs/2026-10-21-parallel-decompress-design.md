@@ -179,9 +179,8 @@ Each decision below is marked either as one the user made or as my call.
     the MRT path through the same helper.
   - It peaked at 5,959 MB before (`.data/stream-cli-2097152.log`).
   - Run it alone, under the guard, and name the logs. Ask before running, together with run A.
-  - Its stderr or a wrapper must give the load time apart from the check. If the command prints
-    none, time `-dump` loading with a cancelled-after-load run, or say that only wall time was
-    compared.
+  - The command prints no load time of its own. Compare wall time from the guard's log, and say in
+    the CHANGELOG that the figure is the whole run's.
 - If a figure is not measured, the CHANGELOG says so.
 
 ## Left to the builder
