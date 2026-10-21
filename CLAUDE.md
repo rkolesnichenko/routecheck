@@ -295,6 +295,8 @@ Packages, imports strictly downward:
     (`.data/realdata-every-registry.log`), over the 6,144 MB projection threshold of the memory
     gate (`.data/every-registry-gate.log`), so ask before running it; RIPE alone took 3m31s and
     4,741 MB (`.data/realdata-ripe-only.log`).
+    Run A with OUT and the parallel MRT reading (2026-10-21): 3m49s, peak 6,311 MB (`.data/pd-A.log`), against
+    4m41s and 6,139 MB before (`.data/mrt-v032-A.log`); 6,311 MB is over the 6,144 MB threshold, so ask before running it.
   - `ROUTECHECK_REALDATA_REGISTRIES` (comma-separated registry names, case-insensitive; empty means
     every pinned registry) loads only those. `ripe` is 0.2.0's load.
   - `ROUTECHECK_REALDATA_MAX_PREFIXES` (a positive integer; unset means rpsl's default) sets

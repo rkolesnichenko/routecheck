@@ -30,8 +30,12 @@ routecheck -peer AS (-session FILE [-local AS] | -collector FILE -local AS)
 
 `-session`, `-collector` and `-dump` can be repeated, one file per flag. Files
 are read in the order given. Each one may be raw, gzip or bzip2: the format is
-told by the file's first bytes (`mrt.Decompress`), not by its name. Flags come
-before any other argument. A stray argument is refused with exit status 2.
+told by the file's first bytes, not by its name. Inputs are read through
+`mrt.DecompressWith`: MRT and VRP files with min(4, GOMAXPROCS) workers (none
+when GOMAXPROCS is 1), RPSL files (`-dump`, `-policy`) serially, which measured
+no faster in parallel. One file is read at a time; mrt documents about 216.7 MB
+held live at 4 workers for a hostile bzip2 input. Flags come before any other
+argument. A stray argument is refused with exit status 2.
 
 | flag | meaning |
 |---|---|
