@@ -8,6 +8,19 @@ a minor version may change the API.
 
 ## [Unreleased]
 
+### Changed
+
+- routecheck requires rpsl v0.30.1 (was v0.30.0). What reaches routecheck through `peval` and `resolve`:
+  `MaxVisited` is one budget per filter normalization (a policy near the limit can now be over it, R27);
+  an expansion that reaches `AS-ANY` stops after the level that reaches it, in a regexp as in a peering; and
+  indirect members (`mbrs-by-ref`) are fetched only after a discovery that needs them, so a failing lookup no
+  longer fails a set whose answer is every AS. routecheck's own API (`api/`) and go.mod floor are unchanged.
+- Real data: the 60-pair run A (every registry, `-max-prefixes` 2097152) with rpsl v0.30.1 writes
+  `routes.tsv.gz`, `pairs.tsv`, `missing-sets.tsv` and `rejected-missing.tsv` byte-identical to `.data/stream/A`
+  (rpsl v0.30.0), and its log's 22 totals lines differ only in timings: 60 of 60 pairs checked, 0 set too large,
+  0 entry and 0 record errors in both (`.data/rpsl-v0301-A.log`, `.data/rpsl-v0301-compare.log`). Peak RSS
+  6,280 MB, 4m18s.
+
 ### Added (tests only)
 
 - `TestRealData` runs each phase under a pprof `phase` label (load, vrps, pass1, pass2, pairs, check, recount,
