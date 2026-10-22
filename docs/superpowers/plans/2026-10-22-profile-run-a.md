@@ -239,8 +239,8 @@ Run by the controller, never by a subagent, and only after the user's go-ahead f
 - [ ] **Step 2: CLAUDE.md.** Replace the parenthesis "RPSL files were also read in parallel in that run, and the
   final serial-RPSL run A was not measured, see the CHANGELOG" with this run's wall and peak and its log, and add one
   sentence on taking the profile (`-cpuprofile`, `-o`, `GODEBUG=gctrace=1`, the `CPU:`/`GC:` lines, `pprof -tags`).
-- [ ] **Step 3: Check and commit.** Every figure in both files appears in a named log; `grep -n '/Users' CHANGELOG.md
-  CLAUDE.md` is empty.
+- [ ] **Step 3: Check and commit.** Every figure in both files appears in a named log; a search for home-directory paths in both
+  files is empty.
 
 ```bash
 git add CHANGELOG.md CLAUDE.md
