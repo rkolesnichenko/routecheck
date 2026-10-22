@@ -34,7 +34,7 @@ the `pairs` label added in 341c3fb).
   `GOWORK=off GOMAXPROCS=4 GOMEMLIMIT=6GiB`, never beside check.sh. Run A needs the user's go-ahead (last peak
   6,311 MB, over the 6,144 MB threshold).
 - Every figure in docs comes from a command run on this branch, with its log named; otherwise "not measured".
-- No `/Users/...` path in any committed file or commit message.
+- No home-directory path in any committed file or commit message (check.sh checks the files).
 
 ## Review Focus
 
