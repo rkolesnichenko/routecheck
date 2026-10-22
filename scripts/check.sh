@@ -61,9 +61,9 @@ step "go.mod requires rpsl, rpsl/types, rpsl/resolve and mrt, and nothing else o
 # Until a package imports them the four stay "// indirect", so this does not
 # run go mod tidy and does not demand the marker be absent.
 for req in \
-	"github.com/rkolesnichenko/rpsl v0.30.0" \
-	"github.com/rkolesnichenko/rpsl/types v0.30.0" \
-	"github.com/rkolesnichenko/rpsl/resolve v0.30.0" \
+	"github.com/rkolesnichenko/rpsl v0.30.1" \
+	"github.com/rkolesnichenko/rpsl/types v0.30.1" \
+	"github.com/rkolesnichenko/rpsl/resolve v0.30.1" \
 	"github.com/rkolesnichenko/mrt v0.3.2"; do
 	grep -Eq "^[[:space:]]*(require[[:space:]]+)?$req([[:space:]]|\$)" go.mod || bad "go.mod does not require $req"
 done
