@@ -150,15 +150,25 @@ func TestPhaseClockLabels(t *testing.T) {
 	}
 }
 
-// busy spins for d of wall time without sleeping.
+// busy spins until the process has used d more CPU, user and system, by the
+// kernel's count. Spinning for wall time instead does not guarantee the CPU:
+// on a loaded CI runner 0.3 s of spinning got 0.136 s.
 func busy(d time.Duration) {
-	for start := time.Now(); time.Since(start) < d; {
+	u0, s0 := rusage()
+	for {
+		u, s := rusage()
+		if u-u0+s-s0 >= d {
+			return
+		}
 	}
 }
 
 // TestPhaseClockCPU holds that a name's spans add up, and that the CPU it
 // reports is the kernel's.
 func TestPhaseClockCPU(t *testing.T) {
+	if !haveRusage {
+		t.Skip("no getrusage on " + runtime.GOOS)
+	}
 	c := newPhaseClock()
 	ctx := context.Background()
 	for range 2 {
@@ -185,14 +195,11 @@ func TestPhaseClockCPU(t *testing.T) {
 		}
 		return v
 	}
-	if wall := f(m[3]); wall < 0.300 {
-		t.Errorf("wall = %.3f, want >= 0.300", wall)
+	if wall := f(m[3]); wall <= 0 {
+		t.Errorf("wall = %.3f, want > 0", wall)
 	}
-	if !haveRusage {
-		t.Skip("no getrusage on " + runtime.GOOS)
-	}
-	if cpu := f(m[1]) + f(m[2]); cpu < 0.150 {
-		t.Errorf("user+sys = %.3f, want >= 0.150", cpu)
+	if cpu := f(m[1]) + f(m[2]); cpu < 0.300 {
+		t.Errorf("user+sys = %.3f, want >= 0.300", cpu)
 	}
 }
 
