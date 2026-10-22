@@ -151,8 +151,9 @@ func TestPhaseClockLabels(t *testing.T) {
 }
 
 // busy spins until the process has used d more CPU, user and system, by the
-// kernel's count. Spinning for wall time instead does not guarantee the CPU:
-// on a loaded CI runner 0.3 s of spinning got 0.136 s.
+// kernel's count; it needs getrusage (callers check haveRusage), or it never
+// returns. Spinning for wall time instead does not guarantee the CPU: on a
+// loaded CI runner two 0.150 s spans of spinning got 0.136 s in all.
 func busy(d time.Duration) {
 	u0, s0 := rusage()
 	for {
