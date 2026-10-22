@@ -179,7 +179,9 @@ import (
 // top-level phase (GC time and cycles, which advance only when a cycle ends:
 // a reading lags by at most one cycle). To profile, add -cpuprofile FILE -o BIN
 // to the command above, and GODEBUG=gctrace=1 to the environment for a line per
-// GC cycle.
+// GC cycle. On macOS the profile's samples land on threads in system calls or
+// asleep (measured, see the CHANGELOG), so it ranks functions at best; the CPU:
+// lines are the phase figures.
 func TestRealData(t *testing.T) {
 	rd := openRealData(t)
 	timeout := envDuration(t, "ROUTECHECK_CHECK_TIMEOUT", 600*time.Second)

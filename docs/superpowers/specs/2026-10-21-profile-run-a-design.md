@@ -1,6 +1,8 @@
 # Where run A's time goes — design
 
-Status: approved 2026-10-22; decision 5 revised after approval, on a measured probe. This is an
+Status: approved 2026-10-22; decision 5 revised after approval, on a measured probe. Run on
+2026-10-22: on macOS the profile did not give usable proportions within a phase (decision 5's last
+use of it); see the CHANGELOG, "Measured, where run A's time goes". This is an
 investigation. It changes
 test code only, and names the next target without building it.
 
