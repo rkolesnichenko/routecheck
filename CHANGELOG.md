@@ -8,6 +8,8 @@ a minor version may change the API.
 
 ## [Unreleased]
 
+## [0.7.2] - 2026-10-22
+
 ### Changed
 
 - routecheck requires rpsl v0.30.1 (was v0.30.0). What reaches routecheck through `peval` and `resolve`:
@@ -1130,7 +1132,8 @@ route can be higher.
 - **Out of scope:** ASPA, BMP and RIS Live, transparent route servers,
   `import-via:`/`export-via:`/`default:`, L's own export, and clause actions.
 
-[Unreleased]: https://github.com/rkolesnichenko/routecheck/compare/v0.7.1...HEAD
+[Unreleased]: https://github.com/rkolesnichenko/routecheck/compare/v0.7.2...HEAD
+[0.7.2]: https://github.com/rkolesnichenko/routecheck/compare/v0.7.1...v0.7.2
 [0.7.1]: https://github.com/rkolesnichenko/routecheck/compare/v0.7.0...v0.7.1
 [0.7.0]: https://github.com/rkolesnichenko/routecheck/compare/v0.6.0...v0.7.0
 [0.6.0]: https://github.com/rkolesnichenko/routecheck/compare/v0.5.0...v0.6.0
