@@ -2,6 +2,7 @@ package routecheck_test
 
 import (
 	"compress/gzip"
+	"context"
 	"errors"
 	"io"
 	"os"
@@ -135,7 +136,7 @@ func TestCheckPairStreams(t *testing.T) {
 		t.Fatal(err)
 	}
 	p := pair{L: types.ASN(asL), X: types.ASN(asX)}
-	r := checkPair(t, reg, nil, p, file, time.Minute, resolve.Expander{}, nil, nil, sp, nil, 1)
+	r := checkPair(context.Background(), t, nil, reg, nil, p, file, time.Minute, resolve.Expander{}, nil, nil, sp, nil, 1)
 	if r.err != nil {
 		t.Fatal(r.err)
 	}

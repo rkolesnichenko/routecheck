@@ -19,6 +19,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"runtime"
+	"runtime/pprof"
 	"slices"
 	"strconv"
 	"strings"
@@ -170,6 +171,15 @@ import (
 // (default 10: the pairs added whose import term has an AS-path regexp,
 // which the plain sample may not draw at all) and ROUTECHECK_REALDATA_SEED
 // (default 1) choose the sample.
+//
+// Each phase runs under a pprof "phase" label (load, vrps, pass1, pass2, pairs,
+// check, recount, output, totals), and each checked pair under a "pair" label
+// (its 1-based index). After the TOTALS the test logs a CPU: line per phase
+// (the process's CPU, user and system, and the wall time) and a GC: line per
+// top-level phase (GC time and cycles, which advance only when a cycle ends:
+// a reading lags by at most one cycle). To profile, add -cpuprofile FILE -o BIN
+// to the command above, and GODEBUG=gctrace=1 to the environment for a line per
+// GC cycle.
 func TestRealData(t *testing.T) {
 	rd := openRealData(t)
 	timeout := envDuration(t, "ROUTECHECK_CHECK_TIMEOUT", 600*time.Second)
@@ -205,141 +215,179 @@ func TestRealData(t *testing.T) {
 			}
 		}()
 	}
+	ctx := context.Background()
+	clock := newPhaseClock()
 	start := time.Now()
 
-	t0 := time.Now()
-	extra := os.Getenv("ROUTECHECK_REALDATA_EXTRA")
-	routesFrom, err := parseRoutesFrom(os.Getenv("ROUTECHECK_REALDATA_ROUTES_FROM"))
-	if err != nil {
-		t.Fatalf("ROUTECHECK_REALDATA_ROUTES_FROM: %v", err)
-	}
-	reg := loadRegistry(t, rd.dumps, extra, routesFrom)
-	loadTime := since(t0)
-	var per []string
-	for _, s := range reg.sources {
-		per = append(per, fmt.Sprintf("%s=%d", s, reg.perSource[s]))
-	}
-	nDumps := len(rd.dumps)
-	if extra != "" {
-		nDumps++
-	}
-	t.Logf("registry: %d objects from %d dumps of %d registries (%s), sources in precedence order %s, objects per source %s; %d RIPE aut-nums, %d naming a literal import peer (%d with an AS-path regexp toward one), in %s (heap in use %s)",
-		reg.objects, nDumps, len(reg.registries), strings.Join(reg.registries, ","), strings.Join(reg.sources, ","), strings.Join(per, ", "), len(reg.autnums), len(reg.imports), len(reg.reImports), loadTime, heapInUse())
-	markHeap(prof, t.Logf, "load")
-	if routesFrom == nil {
-		t.Logf("routes from: every registry")
-	} else {
-		var names, dropped []string
-		for _, n := range append(slices.Clone(registryOrder), "extra") {
-			if routesFrom[n] {
-				names = append(names, n)
-			}
-			if reg.droppedRoutes[n] > 0 {
-				dropped = append(dropped, fmt.Sprintf("%s=%d", n, reg.droppedRoutes[n]))
-			}
+	var (
+		extra      string
+		routesFrom map[string]bool
+		reg        *irrRegistry
+		loadOnly   bool
+	)
+	clock.top(ctx, "load", func(context.Context) {
+		t0 := time.Now()
+		extra = os.Getenv("ROUTECHECK_REALDATA_EXTRA")
+		var err error
+		routesFrom, err = parseRoutesFrom(os.Getenv("ROUTECHECK_REALDATA_ROUTES_FROM"))
+		if err != nil {
+			t.Fatalf("ROUTECHECK_REALDATA_ROUTES_FROM: %v", err)
 		}
-		t.Logf("routes from: %s; dropped route objects per registry %s; dropped member-of claimants %d",
-			strings.Join(names, ","), strings.Join(dropped, ", "), reg.droppedClaims)
-	}
-	if maxPrefixes == 0 {
-		t.Logf("limits: MaxPrefixes rpsl's default")
-	} else {
-		t.Logf("limits: MaxPrefixes %d", maxPrefixes)
-	}
-	if os.Getenv("ROUTECHECK_REALDATA_LOAD_ONLY") == "1" {
-		runtime.GC()
-		t.Logf("LOAD: registries %s; sources %s; objects per source %s; %d RIPE aut-nums selectable; loaded in %s; heap in use after GC %s",
-			strings.Join(reg.registries, ","), strings.Join(reg.sources, ","), strings.Join(per, ", "), len(reg.autnums), loadTime, heapInUse())
+		reg = loadRegistry(t, rd.dumps, extra, routesFrom)
+		loadTime := since(t0)
+		var per []string
+		for _, s := range reg.sources {
+			per = append(per, fmt.Sprintf("%s=%d", s, reg.perSource[s]))
+		}
+		nDumps := len(rd.dumps)
+		if extra != "" {
+			nDumps++
+		}
+		t.Logf("registry: %d objects from %d dumps of %d registries (%s), sources in precedence order %s, objects per source %s; %d RIPE aut-nums, %d naming a literal import peer (%d with an AS-path regexp toward one), in %s (heap in use %s)",
+			reg.objects, nDumps, len(reg.registries), strings.Join(reg.registries, ","), strings.Join(reg.sources, ","), strings.Join(per, ", "), len(reg.autnums), len(reg.imports), len(reg.reImports), loadTime, heapInUse())
+		markHeap(prof, t.Logf, "load")
+		if routesFrom == nil {
+			t.Logf("routes from: every registry")
+		} else {
+			var names, dropped []string
+			for _, n := range append(slices.Clone(registryOrder), "extra") {
+				if routesFrom[n] {
+					names = append(names, n)
+				}
+				if reg.droppedRoutes[n] > 0 {
+					dropped = append(dropped, fmt.Sprintf("%s=%d", n, reg.droppedRoutes[n]))
+				}
+			}
+			t.Logf("routes from: %s; dropped route objects per registry %s; dropped member-of claimants %d",
+				strings.Join(names, ","), strings.Join(dropped, ", "), reg.droppedClaims)
+		}
+		if maxPrefixes == 0 {
+			t.Logf("limits: MaxPrefixes rpsl's default")
+		} else {
+			t.Logf("limits: MaxPrefixes %d", maxPrefixes)
+		}
+		if os.Getenv("ROUTECHECK_REALDATA_LOAD_ONLY") == "1" {
+			runtime.GC()
+			t.Logf("LOAD: registries %s; sources %s; objects per source %s; %d RIPE aut-nums selectable; loaded in %s; heap in use after GC %s",
+				strings.Join(reg.registries, ","), strings.Join(reg.sources, ","), strings.Join(per, ", "), len(reg.autnums), loadTime, heapInUse())
+			loadOnly = true
+		}
+	})
+	if loadOnly {
 		return
 	}
 	var vrps *rpki.VRPs
-	if rd.vrps == "" {
-		t.Logf("VRPs: none in MANIFEST (fetch-data.sh could not fetch them): RPKI states not checked")
-	} else {
-		t0 = time.Now()
-		vrps = loadVRPs(t, rd.vrps)
-		t.Logf("VRPs: %s read in %s", filepath.Base(rd.vrps), since(t0))
-	}
+	clock.top(ctx, "vrps", func(context.Context) {
+		if rd.vrps == "" {
+			t.Logf("VRPs: none in MANIFEST (fetch-data.sh could not fetch them): RPKI states not checked")
+		} else {
+			t0 := time.Now()
+			vrps = loadVRPs(t, rd.vrps)
+			t.Logf("VRPs: %s read in %s", filepath.Base(rd.vrps), since(t0))
+		}
+	})
 
-	t0 = time.Now()
-	seen := countASes(t, rd.ribs)
-	t.Logf("pass 1 (ASes on paths): %s; %d entries, %d distinct ASes on paths, %d entries with an attribute Warning or worse, %d record errors",
-		since(t0), seen.total(), len(seen.all), seen.unclean, seen.recErrs)
-	for i, f := range rd.ribs {
-		t.Logf("  %s: %d entries", filepath.Base(f), seen.entries[i])
-	}
+	var (
+		seen  *asCounts
+		pairs []pair
+	)
+	clock.top(ctx, "pass1", func(context.Context) {
+		t0 := time.Now()
+		seen = countASes(t, rd.ribs)
+		t.Logf("pass 1 (ASes on paths): %s; %d entries, %d distinct ASes on paths, %d entries with an attribute Warning or worse, %d record errors",
+			since(t0), seen.total(), len(seen.all), seen.unclean, seen.recErrs)
+		for i, f := range rd.ribs {
+			t.Logf("  %s: %d entries", filepath.Base(f), seen.entries[i])
+		}
 
-	pairs, candidates, reCandidates := pickPairs(reg, seen, sample, reSample, uint64(seed))
-	t.Logf("sample: %d pairs: %d of %d candidate aut-nums, then %d of %d more whose import from X has an AS-path regexp (seed %d)",
-		len(pairs), min(sample, candidates), candidates, len(pairs)-min(sample, candidates), reCandidates, seed)
-	ids := make([]string, len(pairs))
-	for i, p := range pairs {
-		ids[i] = fmt.Sprintf("AS%d-AS%d", p.L, p.X)
-	}
-	t.Logf("PAIRS: %s", strings.Join(ids, " "))
-	if len(pairs) == 0 {
-		t.Fatal("no candidate aut-num: nothing to check")
-	}
+		var candidates, reCandidates int
+		pairs, candidates, reCandidates = pickPairs(reg, seen, sample, reSample, uint64(seed))
+		t.Logf("sample: %d pairs: %d of %d candidate aut-nums, then %d of %d more whose import from X has an AS-path regexp (seed %d)",
+			len(pairs), min(sample, candidates), candidates, len(pairs)-min(sample, candidates), reCandidates, seed)
+		ids := make([]string, len(pairs))
+		for i, p := range pairs {
+			ids[i] = fmt.Sprintf("AS%d-AS%d", p.L, p.X)
+		}
+		t.Logf("PAIRS: %s", strings.Join(ids, " "))
+		if len(pairs) == 0 {
+			t.Fatal("no candidate aut-num: nothing to check")
+		}
+	})
 
 	// Pass 2: each X's share of the RIBs, and the lossless check on the
 	// smallest X.
-	t0 = time.Now()
-	xs := map[bgp.ASN]bool{}
-	for _, p := range pairs {
-		xs[bgp.ASN(p.X)] = true
-	}
-	small := slices.MinFunc(slices.Collect(maps.Keys(xs)), func(a, b bgp.ASN) int {
-		return cmp.Or(cmp.Compare(seen.all[a], seen.all[b]), cmp.Compare(a, b))
-	})
-	files, fstats := filterRIBs(t, rd, xs, types.ASN(small))
-	t.Logf("pass 2 (filter to %d files): %s; %d PEER_INDEX_TABLEs copied, %d RIB_GENERIC records dropped, %d entry errors, %d record errors",
-		len(files), since(t0), fstats.peerTables, fstats.generic, fstats.entryErrs, fstats.recErrs)
-	t.Logf("lossless: AS%d's %d observations over the whole RIBs equal those over its file", small, fstats.smallObs)
-	for _, p := range pairs {
-		x := bgp.ASN(p.X)
-		var per []string
-		for i, f := range rd.ribs {
-			per = append(per, fmt.Sprintf("%s %d", filepath.Base(f), seen.perFile[i][x]))
+	var files map[bgp.ASN]string
+	clock.top(ctx, "pass2", func(context.Context) {
+		t0 := time.Now()
+		xs := map[bgp.ASN]bool{}
+		for _, p := range pairs {
+			xs[bgp.ASN(p.X)] = true
 		}
-		t.Logf("  AS%d: %d entries through it (%s); file %s", x, seen.all[x], strings.Join(per, ", "), sizeOf(files[x]))
-	}
+		small := slices.MinFunc(slices.Collect(maps.Keys(xs)), func(a, b bgp.ASN) int {
+			return cmp.Or(cmp.Compare(seen.all[a], seen.all[b]), cmp.Compare(a, b))
+		})
+		var fstats filterStats
+		files, fstats = filterRIBs(t, rd, xs, types.ASN(small))
+		t.Logf("pass 2 (filter to %d files): %s; %d PEER_INDEX_TABLEs copied, %d RIB_GENERIC records dropped, %d entry errors, %d record errors",
+			len(files), since(t0), fstats.peerTables, fstats.generic, fstats.entryErrs, fstats.recErrs)
+		t.Logf("lossless: AS%d's %d observations over the whole RIBs equal those over its file", small, fstats.smallObs)
+		for _, p := range pairs {
+			x := bgp.ASN(p.X)
+			var per []string
+			for i, f := range rd.ribs {
+				per = append(per, fmt.Sprintf("%s %d", filepath.Base(f), seen.perFile[i][x]))
+			}
+			t.Logf("  AS%d: %d entries through it (%s); file %s", x, seen.all[x], strings.Join(per, ", "), sizeOf(files[x]))
+		}
+	})
 
-	selected, err := parsePairSelection(os.Getenv("ROUTECHECK_REALDATA_PAIRS"), len(pairs))
-	if err != nil {
-		t.Fatalf("ROUTECHECK_REALDATA_PAIRS: %v", err)
-	}
 	tot := totals{reasons: [2]tally{{}, {}}, tooExp: tally{}, unevaluable: tally{}, anySets: tally{},
 		missingSets: [2]tally{{}, {}}, routeObj: [2]tally{{}, {}}}
-	for i, p := range pairs {
-		if !selected[i+1] {
-			t.Logf("pair %d/%d: not selected", i+1, len(pairs))
-			out.setStatus(p, "not selected")
-			continue
-		}
-		markHeap(prof, t.Logf, fmt.Sprintf("pair-%d-start", i+1))
-		sp, err := out.spool(i + 1)
+	clock.top(ctx, "pairs", func(ctx context.Context) {
+		selected, err := parsePairSelection(os.Getenv("ROUTECHECK_REALDATA_PAIRS"), len(pairs))
 		if err != nil {
-			t.Fatal(err)
+			t.Fatalf("ROUTECHECK_REALDATA_PAIRS: %v", err)
 		}
-		r := checkPair(t, reg, vrps, p, files[bgp.ASN(p.X)], timeout, resolve.Expander{MaxPrefixes: maxPrefixes}, out.trackSet(), out.internSets(), sp, prof, i+1)
-		markHeap(prof, t.Logf, fmt.Sprintf("pair-%d-end", i+1))
-		r.log(t, i+1, len(pairs))
-		if r.dupKeys > 0 {
-			t.Errorf("AS%d from AS%d: %d routes share a key with another route of their report", p.L, p.X, r.dupKeys)
+		for i, p := range pairs {
+			if !selected[i+1] {
+				t.Logf("pair %d/%d: not selected", i+1, len(pairs))
+				out.setStatus(p, "not selected")
+				continue
+			}
+			pprof.Do(ctx, pprof.Labels("pair", strconv.Itoa(i+1)), func(ctx context.Context) {
+				markHeap(prof, t.Logf, fmt.Sprintf("pair-%d-start", i+1))
+				sp, err := out.spool(i + 1)
+				if err != nil {
+					t.Fatal(err)
+				}
+				r := checkPair(ctx, t, clock, reg, vrps, p, files[bgp.ASN(p.X)], timeout, resolve.Expander{MaxPrefixes: maxPrefixes}, out.trackSet(), out.internSets(), sp, prof, i+1)
+				markHeap(prof, t.Logf, fmt.Sprintf("pair-%d-end", i+1))
+				r.log(t, i+1, len(pairs))
+				if r.dupKeys > 0 {
+					t.Errorf("AS%d from AS%d: %d routes share a key with another route of their report", p.L, p.X, r.dupKeys)
+				}
+				clock.span(ctx, "output", func(context.Context) {
+					if err := out.addPair(&r); err != nil {
+						t.Errorf("AS%d from AS%d: %v", p.L, p.X, err)
+					}
+				})
+				if r.err == nil && seen.unclean == 0 && r.through != seen.all[bgp.ASN(p.X)] {
+					t.Errorf("AS%d from AS%d: Through %d, but pass 1 counted %d entries through AS%d", p.L, p.X, r.through, seen.all[bgp.ASN(p.X)], p.X)
+				}
+				tot.add(&r)
+			})
 		}
-		if err := out.addPair(&r); err != nil {
-			t.Errorf("AS%d from AS%d: %v", p.L, p.X, err)
+	})
+	clock.top(ctx, "totals", func(context.Context) {
+		tot.log(t, since(start))
+		if out != nil {
+			if err := out.finish(&tot, t.Errorf); err != nil {
+				t.Error(err)
+			}
 		}
-		if r.err == nil && seen.unclean == 0 && r.through != seen.all[bgp.ASN(p.X)] {
-			t.Errorf("AS%d from AS%d: Through %d, but pass 1 counted %d entries through AS%d", p.L, p.X, r.through, seen.all[bgp.ASN(p.X)], p.X)
-		}
-		tot.add(&r)
-	}
-	tot.log(t, since(start))
-	if out != nil {
-		if err := out.finish(&tot, t.Errorf); err != nil {
-			t.Error(err)
-		}
+	})
+	for _, l := range clock.lines() {
+		t.Log(l)
 	}
 }
 
@@ -1525,27 +1573,31 @@ type pairResult struct {
 // checkPair runs one collector-mode check and summarizes each report as
 // CheckEach hands it over, keeping none: its lines go to sp (nil: none). The
 // summarizing runs inside the pair's timeout.
-func checkPair(tb testing.TB, reg *irrRegistry, vrps *rpki.VRPs, p pair, file string, timeout time.Duration, exp resolve.Expander, track map[string]bool, intern map[string]string, sp *pairSpool, prof *memprof.Sampler, idx int) pairResult {
+func checkPair(ctx context.Context, tb testing.TB, clock *phaseClock, reg *irrRegistry, vrps *rpki.VRPs, p pair, file string, timeout time.Duration, exp resolve.Expander, track map[string]bool, intern map[string]string, sp *pairSpool, prof *memprof.Sampler, idx int) pairResult {
 	tb.Helper()
 	r := pairResult{p: p, reasons: [2]tally{{}, {}}, tooExp: tally{}, unevaluable: tally{}, anySets: tally{},
 		missingSets: [2]tally{{}, {}}, routeObj: [2]tally{{}, {}}, track: track, intern: intern, spool: sp}
 	counter := &countingSource{Source: reg.src}
 	src := policySourceFor(reg, prof, idx, p, tb.Logf)
 	c := &routecheck.Checker{Eval: peval.Evaluator{Src: src, Expander: exp}, Routes: counter}
-	ctx, cancel := context.WithTimeout(context.Background(), timeout)
-	start := time.Now()
+	tctx, cancel := context.WithTimeout(ctx, timeout)
 	fams := map[types.AddrFamily]*famResult{}
-	res, err := c.CheckEach(ctx, routecheck.ModeCollector, readMRT(file), routecheck.Options{Local: p.L, Peer: p.X, VRPs: vrps},
-		func(res *routecheck.Result, dir routecheck.Direction, rep *routecheck.Report) error {
-			fr := fams[res.AF]
-			if fr == nil {
-				fr = newFamResult(res)
-				fams[res.AF] = fr
-			}
-			r.summarize(fr, res.AF, dir, rep)
-			return nil
-		})
-	r.elapsed = time.Since(start)
+	var res []routecheck.Result
+	var err error
+	clock.span(ctx, "check", func(context.Context) {
+		start := time.Now()
+		res, err = c.CheckEach(tctx, routecheck.ModeCollector, readMRT(file), routecheck.Options{Local: p.L, Peer: p.X, VRPs: vrps},
+			func(res *routecheck.Result, dir routecheck.Direction, rep *routecheck.Report) error {
+				fr := fams[res.AF]
+				if fr == nil {
+					fr = newFamResult(res)
+					fams[res.AF] = fr
+				}
+				r.summarize(fr, res.AF, dir, rep)
+				return nil
+			})
+		r.elapsed = time.Since(start)
+	})
 	cancel()
 	if ms, ok := src.(*markingSource); ok {
 		n, d := ms.spent()
@@ -1584,22 +1636,24 @@ func checkPair(tb testing.TB, reg *irrRegistry, vrps *rpki.VRPs, p pair, file st
 	if unknown {
 		// Without an import policy the family's observations are in no
 		// report: count them with observe itself (not part of the check's time).
-		t0 := time.Now()
-		seq, _ := observe.Collector(readMRT(file), p.X)
-		obs := drain(tb, seq)
-		for i := range r.fams {
-			if r.fams[i].obs >= 0 {
-				continue
-			}
-			n := 0
-			for _, o := range obs {
-				if a, ok := addrFamily(o.Family); ok && a == r.fams[i].af {
-					n++
+		clock.span(ctx, "recount", func(context.Context) {
+			t0 := time.Now()
+			seq, _ := observe.Collector(readMRT(file), p.X)
+			obs := drain(tb, seq)
+			for i := range r.fams {
+				if r.fams[i].obs >= 0 {
+					continue
 				}
+				n := 0
+				for _, o := range obs {
+					if a, ok := addrFamily(o.Family); ok && a == r.fams[i].af {
+						n++
+					}
+				}
+				r.fams[i].obs = n
 			}
-			r.fams[i].obs = n
-		}
-		r.countDur = time.Since(t0)
+			r.countDur = time.Since(t0)
+		})
 	}
 	return r
 }
