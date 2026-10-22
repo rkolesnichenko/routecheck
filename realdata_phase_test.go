@@ -10,7 +10,6 @@ import (
 	"strconv"
 	"strings"
 	"sync"
-	"syscall"
 	"testing"
 	"time"
 )
@@ -107,15 +106,6 @@ func (c *phaseClock) lines() []string {
 	return append(out, fmt.Sprintf("GC: run %.3fs over %d cycles", sec, cycles))
 }
 
-// rusage returns the process's user and system CPU time so far.
-func rusage() (user, sys time.Duration) {
-	var ru syscall.Rusage
-	if err := syscall.Getrusage(syscall.RUSAGE_SELF, &ru); err != nil {
-		panic(err)
-	}
-	return time.Duration(ru.Utime.Nano()), time.Duration(ru.Stime.Nano())
-}
-
 // gcReading returns the process's GC CPU seconds and GC cycles so far.
 func gcReading() (seconds float64, cycles uint64) {
 	s := []metrics.Sample{
@@ -197,6 +187,9 @@ func TestPhaseClockCPU(t *testing.T) {
 	}
 	if wall := f(m[3]); wall < 0.300 {
 		t.Errorf("wall = %.3f, want >= 0.300", wall)
+	}
+	if !haveRusage {
+		t.Skip("no getrusage on " + runtime.GOOS)
 	}
 	if cpu := f(m[1]) + f(m[2]); cpu < 0.150 {
 		t.Errorf("user+sys = %.3f, want >= 0.150", cpu)

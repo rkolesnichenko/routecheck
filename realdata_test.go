@@ -1582,11 +1582,11 @@ func checkPair(ctx context.Context, tb testing.TB, clock *phaseClock, reg *irrRe
 	counter := &countingSource{Source: reg.src}
 	src := policySourceFor(reg, prof, idx, p, tb.Logf)
 	c := &routecheck.Checker{Eval: peval.Evaluator{Src: src, Expander: exp}, Routes: counter}
-	tctx, cancel := context.WithTimeout(ctx, timeout)
 	fams := map[types.AddrFamily]*famResult{}
 	var res []routecheck.Result
 	var err error
-	clock.span(ctx, "check", func(context.Context) {
+	clock.span(ctx, "check", func(sctx context.Context) {
+		tctx, cancel := context.WithTimeout(sctx, timeout)
 		start := time.Now()
 		res, err = c.CheckEach(tctx, routecheck.ModeCollector, readMRT(file), routecheck.Options{Local: p.L, Peer: p.X, VRPs: vrps},
 			func(res *routecheck.Result, dir routecheck.Direction, rep *routecheck.Report) error {
@@ -1599,8 +1599,8 @@ func checkPair(ctx context.Context, tb testing.TB, clock *phaseClock, reg *irrRe
 				return nil
 			})
 		r.elapsed = time.Since(start)
+		cancel()
 	})
-	cancel()
 	if ms, ok := src.(*markingSource); ok {
 		n, d := ms.spent()
 		tb.Logf("MEMPROF: pair-%d marks %d in %s", idx, n, d)
