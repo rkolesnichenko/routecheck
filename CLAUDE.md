@@ -295,9 +295,15 @@ Packages, imports strictly downward:
     (`.data/realdata-every-registry.log`), over the 6,144 MB projection threshold of the memory
     gate (`.data/every-registry-gate.log`), so ask before running it; RIPE alone took 3m31s and
     4,741 MB (`.data/realdata-ripe-only.log`).
-    Run A with OUT and the parallel MRT reading (2026-10-21; RPSL files were also read in parallel in that run, and
-    the final serial-RPSL run A was not measured, see the CHANGELOG): 3m49s, peak 6,311 MB (`.data/pd-A.log`), against
-    4m41s and 6,139 MB before (`.data/mrt-v032-A.log`); 6,311 MB is over the 6,144 MB threshold, so ask before running it.
+    Run A with OUT and the parallel MRT reading (2026-10-21; RPSL files were also read in parallel in that run):
+    3m49s, peak 6,311 MB (`.data/pd-A.log`), against 4m41s and 6,139 MB before (`.data/mrt-v032-A.log`); as released
+    in v0.7.1 (RPSL serial, CPU-profiled, 2026-10-22) 3m49s and 6,102 MB (`.data/prof-A.log`). Both are near the
+    6,144 MB threshold, so ask before running it.
+    The test logs a `CPU:` line per phase (getrusage) and a `GC:` line per top-level phase after the TOTALS, and runs
+    each phase under a pprof `phase` label: add `-cpuprofile FILE -o BIN` (and `GODEBUG=gctrace=1`), then
+    `go tool pprof -tags BIN FILE`. On macOS the profile cannot attribute CPU among functions: 36.4% of run A's
+    samples ended in a system call or a wait against 7.49 s of system CPU (CHANGELOG, "where run A's time goes");
+    take phase CPU from the `CPU:` lines, and treat the profile as a ranking at most.
   - `ROUTECHECK_REALDATA_REGISTRIES` (comma-separated registry names, case-insensitive; empty means
     every pinned registry) loads only those. `ripe` is 0.2.0's load.
   - `ROUTECHECK_REALDATA_MAX_PREFIXES` (a positive integer; unset means rpsl's default) sets

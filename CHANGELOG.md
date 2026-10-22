@@ -8,6 +8,85 @@ a minor version may change the API.
 
 ## [Unreleased]
 
+### Added (tests only)
+
+- `TestRealData` runs each phase under a pprof `phase` label (load, vrps, pass1, pass2, pairs, check, recount,
+  output, totals) and each pair under a `pair` label, and logs after the TOTALS a `CPU:` line per phase (user and
+  system CPU from getrusage, and wall time) and a `GC:` line per top-level phase (from runtime/metrics, lagging by at
+  most one GC cycle). The output is unchanged. Design: docs/superpowers/specs/2026-10-21-profile-run-a-design.md.
+
+### Measured, where run A's time goes
+
+- Setting: 2026-10-22, Apple M3 Max, GOMAXPROCS=4, GOMEMLIMIT=6GiB, 8 GB memory guard, at ecc6889, one run A (60
+  pairs, every registry, `-max-prefixes` 2097152, with OUT) under `go test -cpuprofile` (100 Hz) and
+  `GODEBUG=gctrace=1`. The profiler's own cost was not measured. Log `.data/prof-A.log`, profile and tables
+  `.data/prof/`.
+- This is also the first run A of the code as released in v0.7.1 (RPSL read serially): wall 3m49s, peak 6,102 MB;
+  `.data/pd-A.log` (RPSL read in parallel, no profiler) had 3m49s and 6,311 MB. Registry load 36.42 s against
+  36.567 s; pass 1 17.783 s against 17.968 s; pass 2 1m5.615s against 1m5.449s; checks 1m33s against 1m34s, pair 2
+  30.849 s against 31.016 s. The four output files are byte-identical to `.data/stream/A`, and the summary lines are
+  identical once timings are stripped (`.data/prof-compare.log`).
+- Per phase, from the `CPU:` and `GC:` lines (CPU is the whole process's, so it includes the GC's background
+  workers; cores = CPU / wall). The GC column is `/cpu/classes/gc/total:cpu-seconds`, which Go's documentation
+  (runtime/metrics, go1.27.2) calls "an overestimate, and not directly comparable to system CPU time
+  measurements", so it is the runtime's estimate set beside the kernel's CPU, not a measured share of it:
+
+  | phase | wall | CPU user+sys | cores | GC CPU (cycles) |
+  |---|---|---|---|---|
+  | load (32 RPSL dumps) | 36.421 s | 52.136 s | 1.43 | 13.454 s (226) |
+  | vrps | 1.755 s | 2.057 s | 1.17 | 0.273 s (1) |
+  | pass1 (test only) | 17.794 s | 45.833 s | 2.58 | 2.837 s (10) |
+  | pass2 (test only) | 65.615 s | 102.300 s | 1.56 | 7.285 s (25) |
+  | pairs loop | 107.066 s | 145.106 s | 1.36 | 34.251 s (89) |
+  | of it: check (`CheckEach`) | 93.214 s | 126.111 s | 1.35 | not split |
+  | of it: recount (test only) | 10.930 s | 15.480 s | 1.42 | not split |
+  | of it: output (test only) | 2.909 s | 3.421 s | 1.18 | not split |
+  | totals | 0.001 s | 0.002 s | | 0.000 s (0) |
+  | the run | 228.652 s | 347.434 s | 1.52 | 58.100 s (351) |
+
+- What the figures show:
+  - **The test's own scaffolding is 97.2 s of the 228.7 s wall:** pass 1, pass 2, the re-count and the spool
+    appends, which the command never runs. The command's work in run A is the load (36.4 s), the VRPs (1.8 s) and the
+    checks (93.2 s, which include the test's own per-report summarizing and spool writes: `(*pairResult).summarize`
+    and its callback took 6.99 s of the check phase's 82.26 s of samples, 8.5%, with the profiler's bias described
+    below; `.data/prof/all-check.txt`).
+  - **GC is 58.1 s of 347.4 s of CPU (16.7%) by the runtime's estimate,** which overestimates and is not directly
+    comparable to the kernel's CPU: 25.8% of the load's CPU, 23.6% of the pairs loop's, 6 to 7% of pass 1's and
+    pass 2's. gctrace, on in this run, splits it (the test process's `gc N @` lines in `.data/prof-A.log`, from its
+    last `gc 1 @` line to the end; the four earlier `gc 1 @` series are the go command's own processes; in each
+    line `a+b/c/d+e ms cpu` are stop-the-world (a, e), assist (b), background (c) and idle (d) mark CPU). It has 352
+    cycles (the metric's 351 lags by one) and 57.908 s of GC CPU in all: assists 0.143 s, stop-the-world 0.086 s,
+    dedicated and fractional background workers 19.924 s, idle mark workers 37.755 s (65%). The parts of GC that
+    run on the goroutines doing the work, assists and pauses, cost about 0.23 s of CPU over the whole run; most of
+    the GC's CPU ran in idle mark workers, on Ps that had nothing else to run, and the rest in the background
+    workers, which take one of the 4 Ps while marking. So GC's CPU is not wall time saved if removed. A check runs
+    on one goroutine (rpsl's expander fetches serially at `Concurrency` 0, and routecheck's library starts no
+    goroutine), and it loses at most what the background workers' P and the pauses take from it, which the counters
+    do not measure.
+  - **Pass 2 uses 1.56 cores, pass 1 2.58,** over the same two RIBs with the same decompression; pass 2's per-entry
+    filtering and writing run on its one consuming goroutine. Both are test only.
+- **The profile cannot attribute CPU among functions on macOS.** 109.45 s of its 300.35 s of samples (36.4%) end in a
+  system call or a wait (`pthread_cond_signal` 49.66 s, file reads and writes through `syscall.rawsyscalln`
+  27.73 s, `madvise` 13.14 s, `pthread_cond_wait` 12.69 s), while the kernel counted 7.49 s of system CPU for all
+  phases together; in pass 2 36.54 s of samples against 1.049 s, in the load 16.41 s against 0.814 s.
+  `pthread_cond_wait` is a thread asleep. Samples land on threads that are in the kernel or asleep, so the functions
+  that did use the CPU are undersampled by an unknown share. The profile also holds 300.35 s of samples against
+  347.43 s of CPU (86.4%) (`.data/prof/kernel-leaves.txt`). Design decision 5's "the profile gives proportions
+  within a phase" does not hold here.
+- What remains usable is a ranking, from the samples with no system-call or wait frame (`.data/prof/user-*.txt`,
+  `usercum-*.txt`), with an unknown bias:
+  - checks: rpsl's filter normalization (`peval` → `Expander.NormalizeFilter` → `filterEval.routesOf`,
+    `RangeSet.List` and its sort) first, routecheck's `verdict.Compile` (the prefix trie) second, `observe.Collector`
+    third; pair 2 has 30.12 s of the 94.63 s of pair-labelled samples;
+  - load: rpsl's parse (`streamer.run`), its largest part `object.Decode`, then the lexer and `Corpus.Put`;
+  - pass 1 and pass 2: mrt's bzip2 decoding (`readFromBlock`) first.
+- Targets. No function-level target is named and no saving is bounded by function: the profile cannot support one.
+  By phase, the counters bound the checks at 93.2 s of wall and the load at 36.4 s, and GC is at most 58.1 s of CPU by the
+  runtime's estimate, of which assists and pauses, the part on the working goroutines, were about 0.23 s.
+- Not measured: the profiler's cost; a CPU profile on Linux, whose per-thread timers would attribute samples to the
+  thread using the CPU; where the GC's work comes from (an allocation profile, sampled by bytes, would not depend on
+  the timer); GOMAXPROCS other than 4; other machines.
+
 ## [0.7.1] - 2026-10-21
 
 ### Changed
