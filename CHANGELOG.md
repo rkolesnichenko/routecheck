@@ -18,10 +18,12 @@ a minor version may change the API.
   R10) do not change. routecheck's own API (`api/`) and go.mod floor are unchanged; a module that requires
   routecheck now gets mrt v0.4.0 as well.
 - Real data: the 60-pair run A (every registry, `-max-prefixes` 2097152) with mrt v0.4.0 writes `routes.tsv.gz`,
-  `pairs.tsv`, `missing-sets.tsv` and `rejected-missing.tsv` byte-identical to `.data/stream/A`, and its log
-  differs from `.data/rpsl-v0301-A.log` (mrt v0.3.2) only in two timings: 60 of 60 pairs checked, 0 set too
-  large, 0 entry and 0 record errors in both (`.data/mrt-v040-A.log`, `.data/mrt-v040-compare.log`,
-  `.data/mrt-v040-logdiff.txt`). Peak RSS 5,906 MB, 3m54s.
+  `pairs.tsv`, `missing-sets.tsv` and `rejected-missing.tsv` byte-identical to `.data/stream/A`. Against
+  `.data/rpsl-v0301-A.log` (mrt v0.3.2), its counts are the same (60 of 60 pairs checked, 0 set too large, 0 entry
+  and 0 record errors in both), and of the summary lines the compare script keeps only the pass-2 and wall times
+  differ (`.data/mrt-v040-A.log`, `.data/mrt-v040-compare.log`, `.data/mrt-v040-logdiff.txt`). Elsewhere in the log
+  the per-phase and per-pair times and the heap-in-use readings differ too; some early pairs read higher (pair 1:
+  3,535 MB against 2,923 MB), not analysed. Peak RSS 5,906 MB (6,280 MB before), 3m54s.
 
 ## [0.7.2] - 2026-10-22
 
