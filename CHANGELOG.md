@@ -8,6 +8,8 @@ a minor version may change the API.
 
 ## [Unreleased]
 
+## [0.7.3] - 2026-10-23
+
 ### Changed
 
 - routecheck requires mrt v0.4.0 (was v0.3.2). v0.4.0 adds a BMP reader (packages `bmp` and `bmp/openbmp`),
@@ -1149,7 +1151,8 @@ route can be higher.
 - **Out of scope:** ASPA, BMP and RIS Live, transparent route servers,
   `import-via:`/`export-via:`/`default:`, L's own export, and clause actions.
 
-[Unreleased]: https://github.com/rkolesnichenko/routecheck/compare/v0.7.2...HEAD
+[Unreleased]: https://github.com/rkolesnichenko/routecheck/compare/v0.7.3...HEAD
+[0.7.3]: https://github.com/rkolesnichenko/routecheck/compare/v0.7.2...v0.7.3
 [0.7.2]: https://github.com/rkolesnichenko/routecheck/compare/v0.7.1...v0.7.2
 [0.7.1]: https://github.com/rkolesnichenko/routecheck/compare/v0.7.0...v0.7.1
 [0.7.0]: https://github.com/rkolesnichenko/routecheck/compare/v0.6.0...v0.7.0
