@@ -8,6 +8,21 @@ a minor version may change the API.
 
 ## [Unreleased]
 
+### Changed
+
+- routecheck requires mrt v0.4.0 (was v0.3.2). v0.4.0 adds a BMP reader (packages `bmp` and `bmp/openbmp`),
+  which routecheck does not use. What reaches routecheck: `mrt.Route` gains `Router` and `View` and `mrt.Peer`
+  gains `Type` and `Distinguisher`, all zero for MRT input, so `mrt.Routes` yields the same routes; `mrt.Route`
+  grows from 200 to 240 bytes and `mrt.Peer` from 56 to 64 (mrt's CHANGELOG). `bgp.Context` gains
+  `AddPathFamilies`, and Decode's diagnostic codes and severities are unchanged, so the RFC 7606 dispositions (R9,
+  R10) do not change. routecheck's own API (`api/`) and go.mod floor are unchanged; a module that requires
+  routecheck now gets mrt v0.4.0 as well.
+- Real data: the 60-pair run A (every registry, `-max-prefixes` 2097152) with mrt v0.4.0 writes `routes.tsv.gz`,
+  `pairs.tsv`, `missing-sets.tsv` and `rejected-missing.tsv` byte-identical to `.data/stream/A`, and its log
+  differs from `.data/rpsl-v0301-A.log` (mrt v0.3.2) only in two timings: 60 of 60 pairs checked, 0 set too
+  large, 0 entry and 0 record errors in both (`.data/mrt-v040-A.log`, `.data/mrt-v040-compare.log`,
+  `.data/mrt-v040-logdiff.txt`). Peak RSS 5,906 MB, 3m54s.
+
 ## [0.7.2] - 2026-10-22
 
 ### Changed
