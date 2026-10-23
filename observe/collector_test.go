@@ -467,7 +467,7 @@ func TestCollectorStopsEarly(t *testing.T) {
 	}
 }
 
-// leftOf skips empty segments, which mrt v0.3.2 reports as a malformed
+// leftOf skips empty segments, which mrt v0.4.0 reports as a malformed
 // AS_PATH and so never reach it from Collector.
 func TestCollectorLeftOfEmptySegments(t *testing.T) {
 	empty := bgp.Segment{Type: bgp.ASSet}
