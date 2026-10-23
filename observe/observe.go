@@ -145,7 +145,7 @@ type facts struct {
 //     MP_REACH_NLRI or MP_UNREACH_NLRI (undecodable or cut, so its NLRI
 //     cannot be located, §3.j; a next hop of the wrong length, §7.11; a
 //     duplicate, §3.g); any other Error from Decode that is not
-//     bgp/attr-truncated (none exists in mrt v0.3.2; an unknown one is taken
+//     bgp/attr-truncated (none exists in mrt v0.4.0; an unknown one is taken
 //     at its worst); and §5.2: an UPDATE that would be treat-as-withdraw but
 //     announces no NLRI while carrying an attribute other than
 //     MP_UNREACH_NLRI.
