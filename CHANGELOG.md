@@ -8,6 +8,8 @@ a minor version may change the API.
 
 ## [Unreleased]
 
+## [0.7.4] - 2026-11-10
+
 ### Changed
 
 - routecheck requires mrt v0.6.1 (was v0.4.0). What reaches routecheck, from mrt's CHANGELOG: `Records` and `Routes`
@@ -1173,7 +1175,8 @@ route can be higher.
 - **Out of scope:** ASPA, BMP and RIS Live, transparent route servers,
   `import-via:`/`export-via:`/`default:`, L's own export, and clause actions.
 
-[Unreleased]: https://github.com/rkolesnichenko/routecheck/compare/v0.7.3...HEAD
+[Unreleased]: https://github.com/rkolesnichenko/routecheck/compare/v0.7.4...HEAD
+[0.7.4]: https://github.com/rkolesnichenko/routecheck/compare/v0.7.3...v0.7.4
 [0.7.3]: https://github.com/rkolesnichenko/routecheck/compare/v0.7.2...v0.7.3
 [0.7.2]: https://github.com/rkolesnichenko/routecheck/compare/v0.7.1...v0.7.2
 [0.7.1]: https://github.com/rkolesnichenko/routecheck/compare/v0.7.0...v0.7.1
