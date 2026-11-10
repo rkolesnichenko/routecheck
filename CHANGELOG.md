@@ -10,20 +10,25 @@ a minor version may change the API.
 
 ### Changed
 
-- routecheck requires mrt v0.6.1 (was v0.4.0). What reaches routecheck, from mrt's CHANGELOG: `Records` and
-  `Routes` allocate less (v0.4.1, v0.4.2); `Records` no longer loses a reader error that comes with the bytes
-  completing a read, so the record is yielded and the error follows (v0.4.5); `DecompressWith` returns an error for
-  `Workers` over the new `mrt.MaxWorkers` (256; v0.6.0), which routecheck's `min(4, GOMAXPROCS)` never reaches; and
-  `Records` no longer doubles its buffer when a body ends exactly where it is full (v0.6.1). mrt's API gained only
-  `bmp.Session.Each` and `MaxWorkers`, and no diagnostic code or severity changed between the two versions (`git
-  diff v0.4.0..v0.6.1` of mrt's `bgp` package), so the RFC 7606 dispositions (R9, R10) do not change. routecheck's
-  own API (`api/`) and go.mod floor are unchanged; a module that requires routecheck now gets mrt v0.6.1 as well.
+- routecheck requires mrt v0.6.1 (was v0.4.0). What reaches routecheck, from mrt's CHANGELOG: `Records` and `Routes`
+  allocate less (v0.4.1, v0.4.2); `Records` no longer loses a reader error that comes with the bytes completing a
+  read, so the record is yielded and the error follows (v0.4.5); `DecompressWith` returns an error for `Workers`
+  over the new `mrt.MaxWorkers` (256; v0.6.0), which routecheck's `min(4, GOMAXPROCS)` never reaches; and `Records`
+  no longer doubles its buffer when a record stated longer than the bytes left ends exactly where the buffer is full
+  (v0.6.1). Two `Records` changes need a reader that breaks the `io.Reader` contract and none of routecheck's does
+  (a `bytes.Reader`, a file or mrt's decompressors): 100 reads in a row with no bytes and no error now end the
+  stream with `io.ErrNoProgress` while skipping an oversized record (v0.4.5) or at a full buffer (v0.6.1), and a
+  reader that returns `io.EOF` with bytes and then more bytes now ends at the `io.EOF` (v0.4.5). mrt's API gained
+  only `bmp.Session.Each` and `MaxWorkers`, and no diagnostic code or severity changed between the two versions
+  (`git diff v0.4.0..v0.6.1` of mrt's `bgp` package), so the RFC 7606 dispositions (R9, R10) do not change.
+  routecheck's own API (`api/`) and go.mod floor are unchanged; a module that requires routecheck now gets mrt
+  v0.6.1 as well.
 - Real data: the 60-pair run A (every registry, `-max-prefixes` 2097152) with mrt v0.6.1 writes `routes.tsv.gz`,
   `pairs.tsv`, `missing-sets.tsv` and `rejected-missing.tsv` byte-identical to `.data/stream/A`. Against
-  `.data/mrt-v040-A.log` (mrt v0.4.0), its counts are the same (60 of 60 pairs checked, 0 set too large, 0 entry
-  and 0 record errors in both), and of the summary lines the compare script keeps only the pass-2, check and wall
-  times differ (`.data/mrt-v061-A.log`, `.data/mrt-v061-compare.log`, `.data/mrt-v061-logdiff.txt`). Peak RSS
-  5,932 MB (5,906 MB before), 3m56s (3m54s).
+  `.data/mrt-v040-A.log` (mrt v0.4.0), its counts are the same (60 of 60 pairs checked, 0 set too large, 0 entry and
+  0 record errors in both), and of the summary lines the compare script keeps only the pass-2, check, slowest-pair
+  and wall times differ (`.data/mrt-v061-A.log`, `.data/mrt-v061-compare.log`, `.data/mrt-v061-logdiff.txt`). Peak
+  RSS 5,932 MB (5,906 MB before), 3m56s (3m54s).
 
 ## [0.7.3] - 2026-10-23
 
