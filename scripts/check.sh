@@ -64,7 +64,7 @@ for req in \
 	"github.com/rkolesnichenko/rpsl v0.30.1" \
 	"github.com/rkolesnichenko/rpsl/types v0.30.1" \
 	"github.com/rkolesnichenko/rpsl/resolve v0.30.1" \
-	"github.com/rkolesnichenko/mrt v0.4.0"; do
+	"github.com/rkolesnichenko/mrt v0.6.1"; do
 	grep -Eq "^[[:space:]]*(require[[:space:]]+)?$req([[:space:]]|\$)" go.mod || bad "go.mod does not require $req"
 done
 if grep -Eq '^[[:space:]]*(replace\b|[^[:space:]]+[[:space:]]+[^[:space:]]+[[:space:]]*=>)' go.mod; then
